@@ -45,12 +45,6 @@ const NAV_SECTIONS = [
       { href: "/templates",  label: "Templates",  icon: Layers },
     ],
   },
-  {
-    label: null, // Settings sits alone, no label needed
-    items: [
-      { href: "/settings", label: "Settings", icon: Settings2 },
-    ],
-  },
 ];
 
 export function Sidebar() {
@@ -155,8 +149,23 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* Log out */}
+      {/* Settings + Log out */}
       <div className="px-1.5 py-2 border-t border-border shrink-0">
+        <Link
+          href="/settings"
+          title={sidebarCollapsed ? "Settings" : undefined}
+          className={cn(
+            "flex items-center px-2 py-1.5 rounded-md text-[13px] font-medium transition-colors duration-100 mb-px",
+            pathname === "/settings" || pathname.startsWith("/settings/")
+              ? "bg-primary text-primary-foreground"
+              : "text-foreground/70 hover:text-foreground hover:bg-border/50"
+          )}
+        >
+          <Settings2 className="w-3.5 h-3.5 shrink-0" />
+          <span className={cn("whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out", sidebarCollapsed ? "max-w-0 opacity-0 ml-0" : "max-w-[160px] opacity-100 ml-2.5")}>
+            Settings
+          </span>
+        </Link>
         <button
           onClick={handleLogout}
           title={sidebarCollapsed ? "Log out" : undefined}
