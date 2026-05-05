@@ -338,7 +338,7 @@ export function ContactsClient() {
               <th className="px-4 py-3 text-left min-w-[140px]">
                 <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Stage</span>
               </th>
-              <th className="px-4 py-3 text-left w-24">
+              <th className="px-4 py-3 text-left w-32">
                 <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Demo</span>
               </th>
               <th className="px-4 py-3 text-left w-24">
@@ -475,7 +475,7 @@ function ContactRow({ contact: c, selected, onSelect, onClick }: {
       {/* Demo */}
       <td className="px-4 py-3">
         {c.hasDemo ? (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 whitespace-nowrap">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
             Demo sent
           </span>
