@@ -673,10 +673,10 @@ function EmptyState({ icon: Icon, message }: { icon: React.ElementType; message:
 
 // ─── Modal ─────────────────────────────────────────────────────────────────────
 
-export function ContactModal({ contact, onClose }: { contact: UnifiedContact; onClose: () => void }) {
+export function ContactModal({ contact, onClose, initialTab }: { contact: UnifiedContact; onClose: () => void; initialTab?: RightTab }) {
   const isGHL = contact.source === "ghl";
   const tabs = RIGHT_TABS.filter((t) => !t.ghlOnly || isGHL);
-  const [activeTab, setActiveTab] = useState<RightTab>(tabs[0].id);
+  const [activeTab, setActiveTab] = useState<RightTab>(initialTab && tabs.find((t) => t.id === initialTab) ? initialTab : tabs[0].id);
 
   useEffect(() => {
     const fn = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };

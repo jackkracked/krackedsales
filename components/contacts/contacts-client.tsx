@@ -27,7 +27,7 @@ interface SavedPreset {
   search: string;
 }
 
-type SortKey = "createdAt" | "lastActivityAt" | "name" | "daysSinceLastTouch";
+type SortKey = "createdAt" | "lastActivityAt" | "name" | "daysSinceLastTouch" | "source" | "stage";
 
 // ─── Design constants ─────────────────────────────────────────────────────────
 
@@ -126,6 +126,7 @@ export function ContactsClient() {
   const [showFilters, setShowFilters] = useState(false);
   const [selected, setSelected]     = useState<Set<string>>(new Set());
   const [openContact, setOpenContact] = useState<UnifiedContact | null>(null);
+  const [openContactTab, setOpenContactTab] = useState<"messages" | undefined>(undefined);
   const [presets, setPresets]       = useState<SavedPreset[]>([]);
   const [savingPreset, setSavingPreset] = useState(false);
   const [presetName, setPresetName] = useState("");
@@ -326,25 +327,25 @@ export function ContactsClient() {
         <table className="w-full border-collapse text-sm">
           <thead className="sticky top-0 z-10 bg-card border-b border-border">
             <tr>
-              <th className="w-10 px-4 py-3">
+              <th className="w-10 px-4 py-3 align-middle">
                 <input type="checkbox" checked={contacts.length > 0 && selected.size === contacts.length} onChange={toggleAll} className="rounded border-border" />
               </th>
-              <th className="px-4 py-3 text-left min-w-[180px]">
+              <th className="px-4 py-3 text-left min-w-[180px] align-middle">
                 <SortHeader label="Name" sortKey="name" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
               </th>
-              <th className="px-4 py-3 text-left w-24">
-                <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Source</span>
+              <th className="px-4 py-3 text-left w-24 align-middle">
+                <SortHeader label="Source" sortKey="source" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
               </th>
-              <th className="px-4 py-3 text-left min-w-[140px]">
-                <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Stage</span>
+              <th className="px-4 py-3 text-left min-w-[140px] align-middle">
+                <SortHeader label="Stage" sortKey="stage" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
               </th>
-              <th className="px-4 py-3 text-left w-32">
+              <th className="px-4 py-3 text-left w-32 align-middle">
                 <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Demo</span>
               </th>
-              <th className="px-4 py-3 text-left w-24">
+              <th className="px-4 py-3 text-left w-24 align-middle">
                 <SortHeader label="Touch" sortKey="daysSinceLastTouch" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
               </th>
-              <th className="px-4 py-3 text-left w-32">
+              <th className="px-4 py-3 text-left w-32 align-middle">
                 <SortHeader label="Added" sortKey="createdAt" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
               </th>
             </tr>
@@ -368,7 +369,8 @@ export function ContactsClient() {
                   contact={c}
                   selected={selected.has(c.uid)}
                   onSelect={() => setSelected((prev) => { const n = new Set(prev); n.has(c.uid) ? n.delete(c.uid) : n.add(c.uid); return n; })}
-                  onClick={() => setOpenContact(c)}
+                  onClick={() => { setOpenContactTab(undefined); setOpenContact(c); }}
+                  onOpenMessages={() => { setOpenContactTab("messages"); setOpenContact(c); }}
                 />
               ))
             }
@@ -394,15 +396,15 @@ export function ContactsClient() {
         </div>
       )}
 
-      {openContact && <ContactModal contact={openContact} onClose={() => setOpenContact(null)} />}
+      {openContact && <ContactModal contact={openContact} onClose={() => { setOpenContact(null); setOpenContactTab(undefined); }} initialTab={openContactTab} />}
     </div>
   );
 }
 
 // ─── Row ──────────────────────────────────────────────────────────────────────
 
-function ContactRow({ contact: c, selected, onSelect, onClick }: {
-  contact: UnifiedContact; selected: boolean; onSelect: () => void; onClick: () => void;
+function ContactRow({ contact: c, selected, onSelect, onClick, onOpenMessages }: {
+  contact: UnifiedContact; selected: boolean; onSelect: () => void; onClick: () => void; onOpenMessages: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const platform = c.platform ?? "lead_form";
@@ -435,21 +437,27 @@ function ContactRow({ contact: c, selected, onSelect, onClick }: {
             </div>
             {c.email && <p className="text-xs text-muted-foreground truncate max-w-[200px]">{c.email}</p>}
           </div>
-          {/* Hover actions */}
-          {hovered && (
-            <div className="flex items-center gap-0.5 ml-1 shrink-0">
-              {c.ghlContactId && (
-                <button onClick={(e) => e.stopPropagation()} title="Open conversation" className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
-                  <MessageCircle className="w-3.5 h-3.5" />
-                </button>
-              )}
-              {c.website && (
-                <a href={c.website.startsWith("http") ? c.website : `https://${c.website}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} title={c.website} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              )}
-            </div>
-          )}
+          {/* Hover actions — always in DOM to prevent layout shift */}
+          <div className={cn("flex items-center gap-0.5 ml-1 shrink-0 transition-opacity duration-100", hovered ? "opacity-100" : "opacity-0 pointer-events-none")}>
+            {c.ghlContactId ? (
+              <button
+                onClick={(e) => { e.stopPropagation(); onOpenMessages(); }}
+                title="Open conversation"
+                className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+              </button>
+            ) : (
+              <span className="w-[22px]" />
+            )}
+            {c.website ? (
+              <a href={c.website.startsWith("http") ? c.website : `https://${c.website}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} title={c.website} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            ) : (
+              <span className="w-[22px]" />
+            )}
+          </div>
         </div>
       </td>
 
