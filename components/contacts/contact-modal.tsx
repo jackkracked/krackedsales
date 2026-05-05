@@ -362,10 +362,25 @@ function EmailCard({ message }: { message: GHLMessage }) {
   const inbound = message.direction === "inbound";
   const subject = message.meta?.email?.subject ?? "(no subject)";
 
-  // emailMessageId is the email-layer ID (separate from conversation message id).
-  // GHL returns it as a top-level field; fall back to meta.email.messageIds[0].
-  const emailMsgId = message.emailMessageId ?? message.meta?.email?.messageIds?.[0];
+  // Step 1: if emailMessageId isn't on the message directly, fetch the single
+  // message record — GHL includes emailMessageId there even when the list doesn't.
+  const directEmailMsgId = message.emailMessageId ?? message.meta?.email?.messageIds?.[0];
 
+  const { data: singleMsg } = useQuery<Record<string, unknown>>({
+    queryKey: ["msg-single", message.id],
+    queryFn: () => fetch(`/api/ghl/conversations/messages/${message.id}`).then((r) => r.json()),
+    enabled: open && !directEmailMsgId,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const emailMsgId: string | undefined =
+    directEmailMsgId ??
+    (singleMsg?.emailMessageId as string | undefined) ??
+    (singleMsg?.meta as Record<string, unknown> | undefined)?.email
+      ? ((singleMsg?.meta as Record<string, Record<string, unknown>>)?.email?.messageIds as string[])?.[0]
+      : undefined;
+
+  // Step 2: fetch full email HTML using the email-layer ID
   const { data: emailDetail, isLoading: detailLoading } = useQuery<Record<string, unknown>>({
     queryKey: ["email-detail", emailMsgId],
     queryFn: () => fetch(`/api/ghl/conversations/messages/email/${emailMsgId}`).then((r) => r.json()),
@@ -373,8 +388,7 @@ function EmailCard({ message }: { message: GHLMessage }) {
     staleTime: 10 * 60 * 1000,
   });
 
-  // GHL email detail response has the HTML in `body` (confirmed via API docs).
-  // Also try html / htmlBody as fallbacks.
+  // GHL email detail: HTML is in `body`. Also try html / htmlBody as fallbacks.
   const detailHtml: string | null =
     (emailDetail && !emailDetail.error)
       ? ((emailDetail.body as string) ??
@@ -383,7 +397,7 @@ function EmailCard({ message }: { message: GHLMessage }) {
          null)
       : null;
 
-  // Only use detailHtml if it actually contains HTML tags — it could be plain text too
+  // Only use detailHtml if it actually contains HTML tags
   const detailHtmlIsHtml = detailHtml ? /<[a-z][\s\S]*>/i.test(detailHtml) : false;
 
   // Fall back to parsing the bracket-format body
