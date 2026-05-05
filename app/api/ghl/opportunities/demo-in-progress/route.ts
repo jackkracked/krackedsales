@@ -6,15 +6,29 @@ export const dynamic = "force-dynamic";
 
 // "Demo In Progress" stage ID keyed by pipelineId
 const DEMO_IN_PROGRESS_STAGE: Record<string, string> = {
-  JRvrpfcwAlAOM38mPAUJ:    "ffd18e7a-a59e-4a13-894d-d5371d0bfc90", // Email Design Demo Pipeline (AD FUNNEL)
-  uEefctNze07YOCaGOSNE:    "4e3b0980-9eb9-4d7d-9f4d-cf0dbac04ff8", // Email Design Demo Pipeline (ORGANIC FUNNEL)
-  "9pk3LOPFgZucx0Q13Spj":  "dc8cda15-0d9c-44d1-bf16-e8d9a82d921d", // Kracked Retention General Pipeline (MAIN WEBSITE)
-  tZ2jrSx9nurGp08CWxWU:    "013d35a0-c062-423f-884a-9afa96716f36", // Taylor's TikTok Pipeline
+  JRvrpfcwAlAOM38mPAUJ:   "ffd18e7a-a59e-4a13-894d-d5371d0bfc90", // Email Design Demo Pipeline (AD FUNNEL)
+  uEefctNze07YOCaGOSNE:   "4e3b0980-9eb9-4d7d-9f4d-cf0dbac04ff8", // Email Design Demo Pipeline (ORGANIC FUNNEL)
+  "9pk3LOPFgZucx0Q13Spj": "dc8cda15-0d9c-44d1-bf16-e8d9a82d921d", // Kracked Retention General Pipeline (MAIN WEBSITE)
+  tZ2jrSx9nurGp08CWxWU:   "013d35a0-c062-423f-884a-9afa96716f36", // Taylor's TikTok Pipeline
 };
 
-// Strip protocol and trailing slash so "https://brand.com/" matches "brand.com"
 function normaliseDomain(url: string): string {
   return url.toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "").trim();
+}
+
+// Fetch all opportunities across all pages — same pattern as contacts route
+async function fetchAllOpportunities(): Promise<GHLOpportunity[]> {
+  const locId = locationId();
+  const all: GHLOpportunity[] = [];
+  for (let page = 1; page <= 20; page++) {
+    const data = await ghl.get<{ opportunities: GHLOpportunity[] }>(
+      `/opportunities/search?location_id=${locId}&limit=100&page=${page}`
+    );
+    const batch = data.opportunities ?? [];
+    all.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return all;
 }
 
 export async function POST(req: NextRequest) {
@@ -34,19 +48,11 @@ export async function POST(req: NextRequest) {
   const searchDomain = normaliseDomain(website);
 
   try {
-    const locId = locationId();
+    // Fetch all opportunities from our pipeline data and find the match by domain
+    const allOpps = await fetchAllOpportunities();
 
-    // Search GHL opportunities — try the raw website string as the query
-    const data = await ghl.get<{ opportunities: GHLOpportunity[] }>(
-      `/opportunities/search?location_id=${locId}&q=${encodeURIComponent(searchDomain)}&limit=20`
-    );
-
-    const opps = data.opportunities ?? [];
-
-    // Find the best match: opportunity whose contact companyName domain matches
-    const match = opps.find((o) => {
-      const company = (o.contact?.companyName ?? "").toLowerCase()
-        .replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "").trim();
+    const match = allOpps.find((o) => {
+      const company = normaliseDomain(o.contact?.companyName ?? "");
       return company === searchDomain || company.includes(searchDomain) || searchDomain.includes(company);
     });
 
