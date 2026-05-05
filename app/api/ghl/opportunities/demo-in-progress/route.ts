@@ -7,7 +7,6 @@ import type { GHLOpportunity } from "@/lib/ghl/types";
 
 export const dynamic = "force-dynamic";
 
-// "Demo In Progress" stage ID keyed by pipelineId
 const DEMO_IN_PROGRESS_STAGE: Record<string, string> = {
   JRvrpfcwAlAOM38mPAUJ:   "ffd18e7a-a59e-4a13-894d-d5371d0bfc90", // Email Design Demo Pipeline (AD FUNNEL)
   uEefctNze07YOCaGOSNE:   "4e3b0980-9eb9-4d7d-9f4d-cf0dbac04ff8", // Email Design Demo Pipeline (ORGANIC FUNNEL)
@@ -19,29 +18,7 @@ function normaliseDomain(url: string): string {
   return (url ?? "").toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "").trim();
 }
 
-function domainsMatch(a: string, b: string): boolean {
-  const na = normaliseDomain(a);
-  const nb = normaliseDomain(b);
-  return na === nb || na.includes(nb) || nb.includes(na);
-}
-
-// Paginate all GHL opportunities — same pattern as contacts route
-async function fetchAllOpportunities(): Promise<GHLOpportunity[]> {
-  const locId = locationId();
-  const all: GHLOpportunity[] = [];
-  for (let page = 1; page <= 20; page++) {
-    const data = await ghl.get<{ opportunities: GHLOpportunity[] }>(
-      `/opportunities/search?location_id=${locId}&limit=100&page=${page}`
-    );
-    const batch = data.opportunities ?? [];
-    all.push(...batch);
-    if (batch.length < 100) break;
-  }
-  return all;
-}
-
 export async function POST(req: NextRequest) {
-  // Optional webhook secret
   const secret = process.env.WEBHOOK_SECRET;
   if (secret && req.headers.get("x-webhook-secret") !== secret) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -49,17 +26,68 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const website: string = body.website ?? "";
+  const opportunityId: string = body.opportunityId ?? "";
+  const contactId: string = body.contactId ?? "";
 
-  if (!website) {
-    return NextResponse.json({ error: "website is required" }, { status: 400 });
+  if (!website && !opportunityId && !contactId) {
+    return NextResponse.json({ error: "website, opportunityId, or contactId is required" }, { status: 400 });
   }
 
   try {
     const database = db();
+    const locId = locationId();
 
-    // ── 1. Check comment leads in Postgres first ─────────────────────────────
+    // ── Path A: opportunityId provided directly — fastest, most reliable ──────
+    if (opportunityId) {
+      const oppData = await ghl.get<{ opportunity: GHLOpportunity }>(
+        `/opportunities/${opportunityId}`
+      );
+      const opp = oppData.opportunity;
+      if (!opp) {
+        return NextResponse.json({ error: `Opportunity ${opportunityId} not found` }, { status: 404 });
+      }
+      const stageId = DEMO_IN_PROGRESS_STAGE[opp.pipelineId];
+      if (!stageId) {
+        return NextResponse.json(
+          { error: `No Demo In Progress stage configured for pipeline ${opp.pipelineId}` },
+          { status: 422 }
+        );
+      }
+      if (opp.pipelineStageId === stageId) {
+        return NextResponse.json({ success: true, alreadyInStage: true, source: "ghl_direct", opportunityId });
+      }
+      await ghl.put(`/opportunities/${opportunityId}`, { pipelineStageId: stageId });
+      return NextResponse.json({ success: true, source: "ghl_direct", opportunityId, pipelineId: opp.pipelineId, stageId });
+    }
+
+    // ── Path B: contactId provided — skip contact search, find their opp ──────
+    if (contactId) {
+      const oppSearch = await ghl.get<{ opportunities: GHLOpportunity[] }>(
+        `/opportunities/search?location_id=${locId}&contact_id=${contactId}&limit=10`
+      );
+      const opp = (oppSearch.opportunities ?? []).find((o) => DEMO_IN_PROGRESS_STAGE[o.pipelineId]);
+      if (!opp) {
+        return NextResponse.json(
+          { error: `No pipeline opportunity found for contact ${contactId}` },
+          { status: 404 }
+        );
+      }
+      const stageId = DEMO_IN_PROGRESS_STAGE[opp.pipelineId];
+      if (opp.pipelineStageId === stageId) {
+        return NextResponse.json({ success: true, alreadyInStage: true, source: "ghl_contact", opportunityId: opp.id });
+      }
+      await ghl.put(`/opportunities/${opp.id}`, { pipelineStageId: stageId });
+      return NextResponse.json({ success: true, source: "ghl_contact", opportunityId: opp.id, contactId, pipelineId: opp.pipelineId, stageId });
+    }
+
+    // ── Path C: website lookup ────────────────────────────────────────────────
+    const searchDomain = normaliseDomain(website);
+
+    // C1. Comment leads (Postgres) — match on stored website field exactly
     const clRows = await database.select().from(commentLeads);
-    const clMatch = clRows.find((cl) => cl.website && domainsMatch(cl.website, website));
+    const clMatch = clRows.find(
+      (cl) => cl.website && normaliseDomain(cl.website) === searchDomain
+    );
 
     if (clMatch) {
       await database
@@ -76,46 +104,91 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // ── 2. Check GHL pipeline opportunities ──────────────────────────────────
-    const allOpps = await fetchAllOpportunities();
+    // C2. GHL contacts — three strategies, most reliable first:
+    //   a) POST /contacts/search with website field filter
+    //   b) GET query by @domain (email domain match) — email IS indexed
+    //   c) GET query by bare domain — catches contacts whose name/company contains the domain
+    type GHLContactRow = { id: string; website?: string; email?: string; firstName?: string; lastName?: string };
 
-    const oppMatch = allOpps.find((o) =>
-      o.contact?.companyName && domainsMatch(o.contact.companyName, website)
-    );
+    let matchedContact: GHLContactRow | undefined;
 
-    if (!oppMatch) {
+    // Strategy a: POST search with website filter
+    try {
+      const postSearch = await ghl.post<{ contacts: GHLContactRow[] }>(
+        `/contacts/search?locationId=${locId}`,
+        { filters: [{ field: "website", operator: "eq", value: website }], limit: 5 }
+      );
+      matchedContact = (postSearch.contacts ?? []).find(
+        (c) => c.website && normaliseDomain(c.website) === searchDomain
+      );
+    } catch {
+      // POST search not available or failed — fall through to strategy b
+    }
+
+    // Strategy b: email domain search — search "@example.com", GHL indexes email
+    if (!matchedContact) {
+      const emailQuery = `@${searchDomain}`;
+      const emailSearch = await ghl.get<{ contacts: GHLContactRow[] }>(
+        `/contacts/?locationId=${locId}&query=${encodeURIComponent(emailQuery)}&limit=50`
+      );
+      matchedContact = (emailSearch.contacts ?? []).find(
+        (c) => c.website && normaliseDomain(c.website) === searchDomain
+      );
+      // If no website field set, fall back to any contact whose email domain matches
+      if (!matchedContact) {
+        matchedContact = (emailSearch.contacts ?? []).find(
+          (c) => c.email && normaliseDomain(c.email.replace(/^[^@]+@/, "")) === searchDomain
+        );
+      }
+    }
+
+    // Strategy c: bare domain query (may hit company name / contact name)
+    if (!matchedContact) {
+      const domainSearch = await ghl.get<{ contacts: GHLContactRow[] }>(
+        `/contacts/?locationId=${locId}&query=${encodeURIComponent(searchDomain)}&limit=50`
+      );
+      matchedContact = (domainSearch.contacts ?? []).find(
+        (c) => c.website && normaliseDomain(c.website) === searchDomain
+      );
+    }
+
+    if (!matchedContact) {
       return NextResponse.json(
-        { error: `No contact found matching website: ${website}` },
+        { error: `No contact found with website: ${website}` },
         { status: 404 }
       );
     }
 
-    const stageId = DEMO_IN_PROGRESS_STAGE[oppMatch.pipelineId];
-    if (!stageId) {
+    // C3. Find the opportunity for that contact
+    const oppSearch = await ghl.get<{ opportunities: GHLOpportunity[] }>(
+      `/opportunities/search?location_id=${locId}&contact_id=${matchedContact.id}&limit=10`
+    );
+
+    const opp = (oppSearch.opportunities ?? []).find(
+      (o) => DEMO_IN_PROGRESS_STAGE[o.pipelineId]
+    );
+
+    if (!opp) {
       return NextResponse.json(
-        { error: `Pipeline ${oppMatch.pipelineId} has no Demo In Progress stage configured` },
-        { status: 422 }
+        { error: `No pipeline opportunity found for contact ${matchedContact.id}` },
+        { status: 404 }
       );
     }
 
-    // Already in Demo In Progress — no-op
-    if (oppMatch.pipelineStageId === stageId) {
-      return NextResponse.json({
-        success: true,
-        alreadyInStage: true,
-        source: "ghl",
-        opportunityId: oppMatch.id,
-      });
+    const stageId = DEMO_IN_PROGRESS_STAGE[opp.pipelineId];
+
+    if (opp.pipelineStageId === stageId) {
+      return NextResponse.json({ success: true, alreadyInStage: true, source: "ghl", opportunityId: opp.id });
     }
 
-    await ghl.put(`/opportunities/${oppMatch.id}`, { pipelineStageId: stageId });
+    await ghl.put(`/opportunities/${opp.id}`, { pipelineStageId: stageId });
 
     return NextResponse.json({
       success: true,
       source: "ghl",
-      opportunityId: oppMatch.id,
-      contactName: oppMatch.contact?.name,
-      pipelineId: oppMatch.pipelineId,
+      opportunityId: opp.id,
+      contactId: matchedContact.id,
+      pipelineId: opp.pipelineId,
       stageId,
     });
   } catch (err) {
