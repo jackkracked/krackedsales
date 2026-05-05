@@ -393,10 +393,24 @@ function EmailCard({ message }: { message: GHLMessage }) {
   function handleIframeLoad() {
     const iframe = iframeRef.current;
     if (!iframe) return;
-    try {
-      const h = iframe.contentDocument?.documentElement?.scrollHeight ?? 0;
-      iframe.style.height = `${Math.min(h + 8, 520)}px`;
-    } catch { /* cross-origin guard */ }
+
+    // Resize to fit content — retry after images load (they inflate scrollHeight)
+    const fit = () => {
+      try {
+        const doc = iframe.contentDocument;
+        if (!doc) return;
+        // Ensure all images have loaded before measuring
+        const imgs = Array.from(doc.images);
+        const pending = imgs.filter((img) => !img.complete);
+        if (pending.length > 0) {
+          Promise.all(pending.map((img) => new Promise((res) => { img.onload = res; img.onerror = res; }))).then(fit);
+          return;
+        }
+        const h = doc.documentElement.scrollHeight;
+        if (h > 0) iframe.style.height = `${Math.min(h + 16, 600)}px`;
+      } catch { /* cross-origin guard */ }
+    };
+    fit();
   }
 
   return (
@@ -430,7 +444,7 @@ function EmailCard({ message }: { message: GHLMessage }) {
               sandbox="allow-same-origin allow-popups"
               onLoad={handleIframeLoad}
               className="w-full border-none block"
-              style={{ minHeight: 120, height: 280 }}
+              style={{ minHeight: 160, height: 400 }}
               title="Email preview"
             />
           )}
