@@ -17,7 +17,7 @@ import type { UnifiedContact, TimelineEvent } from "@/lib/contacts/types";
 
 interface CustomField { id: string; contactUid: string; fieldName: string; fieldValue: string; createdAt: string; }
 interface GHLNote { id: string; body: string; dateAdded?: string; createdAt?: string; }
-interface GHLMessage { id: string; body?: string; direction?: "inbound" | "outbound"; messageType?: string; dateAdded: string; meta?: { email?: { subject?: string } }; }
+interface GHLMessage { id: string; body?: string; direction?: "inbound" | "outbound"; messageType?: string; dateAdded: string; meta?: { email?: { subject?: string; messageIds?: string[] } }; }
 
 type RightTab = "timeline" | "messages" | "notes" | "qualification";
 
@@ -335,17 +335,15 @@ function ghlBodyToHtml(body: string): string {
     const line = raw.trim();
     if (!line) { parts.push("<br/>"); continue; }
 
-    // Replace all [url] patterns in this line
     const processed = line.replace(/\[([^\]]+)\]/g, (_, url) => {
       const trimmed = url.trim();
-      if (!/^https?:\/\//i.test(trimmed)) return `[${trimmed}]`; // not a URL
+      if (!/^https?:\/\//i.test(trimmed)) return `[${trimmed}]`;
       if (IMAGE_EXT.test(trimmed) || trimmed.includes("/media/")) {
         return `<img src="${trimmed}" alt="" style="max-width:100%;height:auto;display:block;margin:8px 0;" />`;
       }
       return `<a href="${trimmed}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;">${trimmed}</a>`;
     });
 
-    // If after replacement the line is purely an <img> tag, skip wrapping in <p>
     if (/^<img\s/i.test(processed.trim())) {
       parts.push(processed);
     } else {
@@ -364,10 +362,33 @@ function EmailCard({ message }: { message: GHLMessage }) {
   const inbound = message.direction === "inbound";
   const subject = message.meta?.email?.subject ?? "(no subject)";
 
-  // Build renderable HTML from body (handles both raw HTML and GHL bracket format)
+  // GHL uses a separate email message ID stored in meta.email.messageIds
+  // This is different from the conversation message id
+  const emailMsgId = message.meta?.email?.messageIds?.[0];
+
+  const { data: emailDetail, isLoading: detailLoading } = useQuery<Record<string, unknown>>({
+    queryKey: ["email-detail", emailMsgId],
+    queryFn: () => fetch(`/api/ghl/conversations/messages/email/${emailMsgId}`).then((r) => r.json()),
+    enabled: open && !!emailMsgId,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // Extract HTML from the detail response (try common GHL field names)
+  const detailHtml: string | null =
+    (emailDetail && !emailDetail.error)
+      ? ((emailDetail.htmlBody as string) ??
+         (emailDetail.html as string) ??
+         (emailDetail.html_body as string) ??
+         ((emailDetail.message as Record<string, unknown>)?.htmlBody as string) ??
+         ((emailDetail.message as Record<string, unknown>)?.html as string) ??
+         null)
+      : null;
+
+  // Fall back to parsing the bracket-format body
   const rawBody = message.body ?? "";
   const isRawHtml = /<[a-z][\s\S]*>/i.test(rawBody);
-  const renderedHtml = isRawHtml ? rawBody : ghlBodyToHtml(rawBody);
+  const fallbackHtml = isRawHtml ? rawBody : ghlBodyToHtml(rawBody);
+  const renderedHtml = detailHtml ?? fallbackHtml;
 
   function handleIframeLoad() {
     const iframe = iframeRef.current;
@@ -398,15 +419,21 @@ function EmailCard({ message }: { message: GHLMessage }) {
 
       {open && (
         <div className="border-t border-border/50">
-          <iframe
-            ref={iframeRef}
-            srcDoc={renderedHtml}
-            sandbox="allow-same-origin allow-popups"
-            onLoad={handleIframeLoad}
-            className="w-full border-none block"
-            style={{ minHeight: 120, height: 280 }}
-            title="Email preview"
-          />
+          {detailLoading ? (
+            <div className="flex items-center justify-center h-20 text-muted-foreground">
+              <RefreshCw className="w-4 h-4 animate-spin" />
+            </div>
+          ) : (
+            <iframe
+              ref={iframeRef}
+              srcDoc={renderedHtml}
+              sandbox="allow-same-origin allow-popups"
+              onLoad={handleIframeLoad}
+              className="w-full border-none block"
+              style={{ minHeight: 120, height: 280 }}
+              title="Email preview"
+            />
+          )}
         </div>
       )}
     </div>
