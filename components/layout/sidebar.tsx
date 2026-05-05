@@ -73,12 +73,21 @@ export function Sidebar() {
       style={{ backgroundColor: "var(--sidebar)" }}
     >
       {/* Logo + collapse toggle */}
-      <div className="flex items-center h-12 px-3 border-b border-border shrink-0">
-        {/* Logo: same animation pattern as nav labels — no wrapping during transition */}
+      <div className="flex items-center h-12 px-3 border-b border-border shrink-0 gap-2">
+        {/* K mark — always visible */}
+        <Link href="/dashboard" className="shrink-0" aria-label="Kracked Sales">
+          <span
+            className="flex items-center justify-center rounded-[7px] bg-primary text-primary-foreground font-black tracking-tighter select-none"
+            style={{ width: 26, height: 26, fontFamily: "var(--font-heading)", fontSize: 15, letterSpacing: "-0.04em" }}
+          >
+            K
+          </span>
+        </Link>
+        {/* Wordmark */}
         <span
           className={cn(
             "text-sm font-bold text-primary tracking-tight whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out",
-            sidebarCollapsed ? "max-w-0 opacity-0" : "max-w-[140px] opacity-100 mr-auto"
+            sidebarCollapsed ? "max-w-0 opacity-0" : "max-w-[140px] opacity-100"
           )}
           style={{ fontFamily: "var(--font-heading)" }}
         >
@@ -86,7 +95,7 @@ export function Sidebar() {
         </span>
         <button
           onClick={toggleSidebarCollapsed}
-          className="p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors ml-auto"
+          className={cn("p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors", sidebarCollapsed ? "mx-auto" : "ml-auto")}
           aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {sidebarCollapsed ? (
