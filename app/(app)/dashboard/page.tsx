@@ -15,13 +15,26 @@ import type { ClickUpTasksResponse } from "@/lib/clickup/types";
 
 export const metadata = { title: "Dashboard — Kracked Sales" };
 
+// Paginate all GHL opportunities so leads metrics count every lead, not just first 100
+async function getAllOpportunities(): Promise<GHLOpportunity[]> {
+  const all: GHLOpportunity[] = [];
+  const locId = locationId();
+  for (let page = 1; page <= 20; page++) {
+    const data = await ghl.get<{ opportunities: GHLOpportunity[] }>(
+      `/opportunities/search?location_id=${locId}&limit=100&page=${page}`
+    );
+    const batch = data.opportunities ?? [];
+    all.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return all;
+}
+
 // Fetch dashboard data server-side with graceful fallbacks
 async function getDashboardData() {
   const results = await Promise.allSettled([
-    // GHL: opportunities count
-    ghl.get<{ opportunities: GHLOpportunity[] }>(
-      `/opportunities/search?location_id=${locationId()}&limit=100`
-    ),
+    // GHL: ALL opportunities, paginated
+    getAllOpportunities(),
     // GHL: today's calendar — filtered to Gage Flesher's events
     ghl.get<{ events: GHLCalendarEvent[] }>(
       `/calendars/events?locationId=${locationId()}&userId=yi2pnZ49sp6z8OIAezdA&startTime=${new Date().setHours(0,0,0,0)}&endTime=${new Date().setHours(23,59,59,999)}`
@@ -33,7 +46,7 @@ async function getDashboardData() {
   ]);
 
   const opportunities = results[0].status === "fulfilled"
-    ? results[0].value.opportunities ?? []
+    ? results[0].value
     : [];
 
   const calendarEvents = results[1].status === "fulfilled"
@@ -44,9 +57,9 @@ async function getDashboardData() {
     ? results[2].value.tasks ?? []
     : [];
 
-  // Compute metrics
+  // Compute metrics — week always starts Monday
   const newLeadsToday = opportunities.filter((o) => isToday(new Date(o.createdAt))).length;
-  const newLeadsThisWeek = opportunities.filter((o) => isThisWeek(new Date(o.createdAt))).length;
+  const newLeadsThisWeek = opportunities.filter((o) => isThisWeek(new Date(o.createdAt), { weekStartsOn: 1 })).length;
 
   // Only count top-level "Email Demo" parent tasks — one per demo, status reflects current stage
   const emailDemos = demoTasks.filter(
