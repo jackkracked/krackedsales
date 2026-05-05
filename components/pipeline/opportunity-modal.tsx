@@ -383,11 +383,21 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft }: {
     }
   }, [messages.length, isLoading]);
 
+  // Skeleton loading state — shown while finding conversation or loading messages
   if (convLoading) {
     return (
-      <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-        <RefreshCw className="w-4 h-4 animate-spin mr-2" />
-        Loading conversation…
+      <div className="flex flex-col gap-3 h-full">
+        <div className="flex flex-col gap-2.5 flex-1">
+          {[55, 75, 40, 68, 50].map((w, i) => (
+            <div key={i} className={cn("flex", i % 2 === 0 ? "justify-end" : "justify-start")}>
+              <div
+                className="h-9 rounded-[10px] bg-muted/60 animate-pulse"
+                style={{ width: `${w}%`, animationDelay: `${i * 80}ms` }}
+              />
+            </div>
+          ))}
+        </div>
+        <div className="h-[72px] rounded-[10px] bg-muted/40 animate-pulse shrink-0" />
       </div>
     );
   }
@@ -404,10 +414,17 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft }: {
   return (
     <div className="flex flex-col gap-3 h-full">
       {/* Message thread */}
-      <div ref={scrollRef} className="flex flex-col gap-2 flex-1 overflow-y-auto min-h-[200px] max-h-[340px]">
-        {isLoading && (
-          <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
-            <RefreshCw className="w-4 h-4 animate-spin mr-2" />Loading…
+      <div ref={scrollRef} className="flex flex-col gap-1.5 flex-1 overflow-y-auto min-h-[200px] max-h-[340px]">
+        {msgsLoading && (
+          <div className="flex flex-col gap-2.5">
+            {[55, 75, 40, 68].map((w, i) => (
+              <div key={i} className={cn("flex", i % 2 === 0 ? "justify-end" : "justify-start")}>
+                <div
+                  className="h-9 rounded-[10px] bg-muted/60 animate-pulse"
+                  style={{ width: `${w}%`, animationDelay: `${i * 80}ms` }}
+                />
+              </div>
+            ))}
           </div>
         )}
         {messages.map((msg) => {
@@ -418,7 +435,6 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft }: {
           // ── Activity messages: centered system event ──────────────────
           if (isActivity) {
             const isCreated = msg.body === "Opportunity created";
-            // Look up from/to stage from our local store (recorded when user drags in this app)
             const stored = !isCreated && msg.dateAdded
               ? findStageChange(stageChanges, msg.dateAdded, opportunityId)
               : null;
@@ -434,9 +450,9 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft }: {
               ? `🔄 Moved to ${stageName}`
               : "🔄 Stage changed";
             return (
-              <div key={msg.id} className="flex justify-center my-1">
-                <span className="text-xs text-muted-foreground bg-muted/60 px-3 py-1 rounded-full">
-                  {label} · {msg.dateAdded ? relativeTime(msg.dateAdded) : ""}
+              <div key={msg.id} className="flex justify-center my-0.5">
+                <span className="text-[11px] text-muted-foreground/70 bg-muted/50 px-2.5 py-0.5 rounded-full leading-5">
+                  {label}{msg.dateAdded ? ` · ${relativeTime(msg.dateAdded)}` : ""}
                 </span>
               </div>
             );
@@ -448,21 +464,21 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft }: {
             const emailDir = msg.meta?.email?.direction ?? (isOut ? "outbound" : "inbound");
             const sentByUs = emailDir === "outbound";
             return (
-              <div key={msg.id} className={cn("flex", sentByUs ? "justify-end" : "justify-start")}>
+              <div key={msg.id} className={cn("flex my-0.5", sentByUs ? "justify-end" : "justify-start")}>
                 <div className={cn(
-                  "max-w-[80%] flex items-start gap-2 px-3 py-2 rounded-[8px] border",
+                  "max-w-[78%] flex items-start gap-2 px-3 py-2 rounded-[10px] border",
                   sentByUs
-                    ? "bg-primary/10 border-primary/20 text-primary"
-                    : "bg-muted/40 border-border text-foreground"
+                    ? "bg-primary/8 border-primary/15 text-primary"
+                    : "bg-muted/50 border-border/60 text-foreground"
                 )}>
-                  <Mail className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <Mail className="w-3.5 h-3.5 mt-0.5 shrink-0 opacity-60" />
                   <div className="min-w-0">
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-0.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-0.5">
                       {sentByUs ? "Email sent" : "Email received"}
                     </p>
-                    <p className="text-sm leading-tight">{subject}</p>
+                    <p className="text-sm leading-snug">{subject}</p>
                     {msg.dateAdded && (
-                      <p className="text-[10px] text-muted-foreground mt-1">
+                      <p className="text-[10px] text-muted-foreground/60 mt-1">
                         {relativeTime(msg.dateAdded)}
                       </p>
                     )}
@@ -476,17 +492,17 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft }: {
           return (
             <div key={msg.id} className={cn("flex", isOut ? "justify-end" : "justify-start")}>
               <div className={cn(
-                "max-w-[80%] px-3 py-2 rounded-[8px] text-sm leading-relaxed",
+                "max-w-[78%] px-3 py-2 rounded-[10px] text-sm leading-relaxed",
                 isOut ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
               )}>
                 <MessageBody
                   body={msg.body}
-                  linkClassName={isOut ? "text-primary-foreground" : "text-primary"}
+                  linkClassName={isOut ? "text-primary-foreground/80 underline" : "text-primary"}
                 />
                 {msg.dateAdded && (
                   <p className={cn(
                     "text-[10px] mt-1",
-                    isOut ? "text-primary-foreground/60 text-right" : "text-muted-foreground"
+                    isOut ? "text-primary-foreground/50 text-right" : "text-muted-foreground/60"
                   )}>
                     {relativeTime(msg.dateAdded)}
                   </p>
@@ -495,33 +511,39 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft }: {
             </div>
           );
         })}
-        {messages.length === 0 && !isLoading && (
-          <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
-            No messages yet
+        {messages.length === 0 && !msgsLoading && (
+          <div className="flex flex-col items-center justify-center py-10 gap-1.5 text-muted-foreground">
+            <MessageCircle className="w-6 h-6 opacity-20" />
+            <p className="text-xs">No messages yet</p>
           </div>
         )}
       </div>
 
       {/* Reply composer */}
-      <div className="border border-border rounded-[8px] overflow-hidden shrink-0 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-colors">
+      <div className="border border-border rounded-[10px] overflow-hidden shrink-0 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/40 transition-all">
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendMutation.mutate(draft.trim()); }}
-          placeholder="Reply via SMS… (⌘↵ to send)"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              if (draft.trim() && !sendMutation.isPending) sendMutation.mutate(draft.trim());
+            }
+          }}
+          placeholder="Reply via SMS…"
           rows={2}
-          className="w-full px-3 py-2 text-sm bg-transparent text-foreground placeholder:text-muted-foreground resize-none focus:outline-none"
+          className="w-full px-3.5 py-2.5 text-sm bg-transparent text-foreground placeholder:text-muted-foreground/50 resize-none focus:outline-none"
         />
-        <div className="flex items-center justify-between px-3 pb-2">
-          <span className="text-xs text-muted-foreground">⌘↵ to send</span>
+        <div className="flex items-center justify-between px-3.5 pb-2.5 pt-0">
+          <span className="text-[11px] text-muted-foreground/50">⌘↵ to send</span>
           <button
-            onClick={() => sendMutation.mutate(draft.trim())}
+            onClick={() => { if (draft.trim() && !sendMutation.isPending) sendMutation.mutate(draft.trim()); }}
             disabled={!draft.trim() || sendMutation.isPending}
             className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors",
+              "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[7px] transition-colors",
               draft.trim() && !sendMutation.isPending
                 ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                : "bg-muted text-muted-foreground cursor-not-allowed"
+                : "bg-muted text-muted-foreground/50 cursor-not-allowed"
             )}
           >
             {sendMutation.isPending ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
@@ -530,7 +552,7 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft }: {
         </div>
       </div>
       {sendMutation.isError && (
-        <p className="text-xs text-destructive">Failed to send. Check your GHL connection.</p>
+        <p className="text-xs text-destructive mt-1">Failed to send. Check your GHL connection.</p>
       )}
     </div>
   );
@@ -710,34 +732,36 @@ export function OpportunityModal({
               {label}
             </button>
           ))}
-
-          {/* Stage picker — only visible on Messages tab, uses empty right-side space */}
-          {activeTab === "messages" && (
-            <div className="ml-auto flex items-center gap-2 pb-px">
-              {savingStage ? (
-                <div className="flex items-center gap-1.5 text-xs text-primary">
-                  <RefreshCw className="w-3 h-3 animate-spin" />
-                  <span>Saving…</span>
-                </div>
-              ) : (
-                <div className="relative flex items-center">
-                  <select
-                    value={localStageId}
-                    onChange={(e) => handleStageChange(e.target.value)}
-                    disabled={pipelineStages.length === 0}
-                    className="text-xs font-medium text-muted-foreground hover:text-foreground bg-transparent border-none pl-0 pr-5 py-2.5 appearance-none cursor-pointer focus:outline-none disabled:opacity-50 max-w-[140px] truncate"
-                  >
-                    {pipelineStages.length === 0 && <option value={localStageId}>{localStageName}</option>}
-                    {pipelineStages.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-0 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-                </div>
-              )}
-            </div>
-          )}
         </div>
+
+        {/* Stage context strip — Messages tab only, 30px tall, no vertical cost on thread */}
+        {activeTab === "messages" && (
+          <div className="flex items-center gap-1.5 px-5 border-b border-border/40 bg-muted/20 shrink-0">
+            <span className="text-[11px] text-muted-foreground/60 select-none shrink-0">Stage</span>
+            <span className="text-[11px] text-border/80 select-none">/</span>
+            {savingStage ? (
+              <div className="flex items-center gap-1.5 text-[11px] text-primary py-1.5">
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                Saving…
+              </div>
+            ) : (
+              <div className="relative flex items-center min-w-0">
+                <select
+                  value={localStageId}
+                  onChange={(e) => handleStageChange(e.target.value)}
+                  disabled={pipelineStages.length === 0}
+                  className="text-[11px] font-medium text-foreground bg-transparent border-none py-1.5 pl-0 pr-4 appearance-none cursor-pointer focus:outline-none disabled:opacity-40 min-w-0"
+                >
+                  {pipelineStages.length === 0 && <option value={localStageId}>{localStageName}</option>}
+                  {pipelineStages.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-0 w-3 h-3 text-muted-foreground/60 pointer-events-none" />
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-5 py-5 min-h-0">
