@@ -17,7 +17,7 @@ import type { UnifiedContact, TimelineEvent } from "@/lib/contacts/types";
 
 interface CustomField { id: string; contactUid: string; fieldName: string; fieldValue: string; createdAt: string; }
 interface GHLNote { id: string; body: string; dateAdded?: string; createdAt?: string; }
-interface GHLMessage { id: string; body?: string; direction?: "inbound" | "outbound"; messageType?: string; dateAdded: string; meta?: { email?: { subject?: string; messageIds?: string[] } }; }
+interface GHLMessage { id: string; emailMessageId?: string; body?: string; direction?: "inbound" | "outbound"; messageType?: string; dateAdded: string; meta?: { email?: { subject?: string; messageIds?: string[] } }; }
 
 type RightTab = "timeline" | "messages" | "notes" | "qualification";
 
@@ -362,9 +362,9 @@ function EmailCard({ message }: { message: GHLMessage }) {
   const inbound = message.direction === "inbound";
   const subject = message.meta?.email?.subject ?? "(no subject)";
 
-  // GHL uses a separate email message ID stored in meta.email.messageIds
-  // This is different from the conversation message id
-  const emailMsgId = message.meta?.email?.messageIds?.[0];
+  // emailMessageId is the email-layer ID (separate from conversation message id).
+  // GHL returns it as a top-level field; fall back to meta.email.messageIds[0].
+  const emailMsgId = message.emailMessageId ?? message.meta?.email?.messageIds?.[0];
 
   const { data: emailDetail, isLoading: detailLoading } = useQuery<Record<string, unknown>>({
     queryKey: ["email-detail", emailMsgId],
@@ -373,22 +373,24 @@ function EmailCard({ message }: { message: GHLMessage }) {
     staleTime: 10 * 60 * 1000,
   });
 
-  // Extract HTML from the detail response (try common GHL field names)
+  // GHL email detail response has the HTML in `body` (confirmed via API docs).
+  // Also try html / htmlBody as fallbacks.
   const detailHtml: string | null =
     (emailDetail && !emailDetail.error)
-      ? ((emailDetail.htmlBody as string) ??
+      ? ((emailDetail.body as string) ??
          (emailDetail.html as string) ??
-         (emailDetail.html_body as string) ??
-         ((emailDetail.message as Record<string, unknown>)?.htmlBody as string) ??
-         ((emailDetail.message as Record<string, unknown>)?.html as string) ??
+         (emailDetail.htmlBody as string) ??
          null)
       : null;
+
+  // Only use detailHtml if it actually contains HTML tags — it could be plain text too
+  const detailHtmlIsHtml = detailHtml ? /<[a-z][\s\S]*>/i.test(detailHtml) : false;
 
   // Fall back to parsing the bracket-format body
   const rawBody = message.body ?? "";
   const isRawHtml = /<[a-z][\s\S]*>/i.test(rawBody);
   const fallbackHtml = isRawHtml ? rawBody : ghlBodyToHtml(rawBody);
-  const renderedHtml = detailHtml ?? fallbackHtml;
+  const renderedHtml = detailHtmlIsHtml ? detailHtml! : fallbackHtml;
 
   function handleIframeLoad() {
     const iframe = iframeRef.current;

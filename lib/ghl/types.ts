@@ -33,6 +33,7 @@ export interface GHLConversation {
 export interface GHLMessage {
   id: string;
   conversationId?: string;
+  emailMessageId?: string; // email-layer ID for GET /conversations/messages/email/{id}
   body: string;
   // Email metadata — present when messageType === TYPE_EMAIL
   meta?: {

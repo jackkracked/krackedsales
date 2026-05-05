@@ -11,7 +11,8 @@ export async function GET(
   const { conversationId } = await params;
 
   try {
-    const data = await ghl.get<{ messages: { messages: GHLMessage[] } }>(
+    // Cast to any so all GHL fields (including emailMessageId) pass through
+    const data = await ghl.get<{ messages: { messages: Array<GHLMessage & Record<string, unknown>> } }>(
       `/conversations/${conversationId}/messages`
     );
     // v2 returns { messages: { messages: [...] } }
