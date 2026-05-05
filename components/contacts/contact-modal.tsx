@@ -322,7 +322,41 @@ function TimelineTab({ contact }: { contact: UnifiedContact }) {
   );
 }
 
-// ─── Email card (collapsible HTML email renderer) ──────────────────────────────
+// ─── Email body parser ─────────────────────────────────────────────────────────
+// GHL stores outbound automation emails as plain text with [url] bracket patterns.
+// Convert to renderable HTML: image URLs → <img>, other URLs → <a>, text → <p>.
+
+function ghlBodyToHtml(body: string): string {
+  const IMAGE_EXT = /\.(jpe?g|png|gif|webp|svg)(\?|$)/i;
+  const lines = body.split(/\n/);
+  const parts: string[] = [];
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { parts.push("<br/>"); continue; }
+
+    // Replace all [url] patterns in this line
+    const processed = line.replace(/\[([^\]]+)\]/g, (_, url) => {
+      const trimmed = url.trim();
+      if (!/^https?:\/\//i.test(trimmed)) return `[${trimmed}]`; // not a URL
+      if (IMAGE_EXT.test(trimmed) || trimmed.includes("/media/")) {
+        return `<img src="${trimmed}" alt="" style="max-width:100%;height:auto;display:block;margin:8px 0;" />`;
+      }
+      return `<a href="${trimmed}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;">${trimmed}</a>`;
+    });
+
+    // If after replacement the line is purely an <img> tag, skip wrapping in <p>
+    if (/^<img\s/i.test(processed.trim())) {
+      parts.push(processed);
+    } else {
+      parts.push(`<p style="margin:0 0 6px;font-size:14px;line-height:1.55;">${processed}</p>`);
+    }
+  }
+
+  return `<html><body style="font-family:sans-serif;padding:12px 16px;margin:0;color:#111;">${parts.join("")}</body></html>`;
+}
+
+// ─── Email card (collapsible email renderer) ───────────────────────────────────
 
 function EmailCard({ message }: { message: GHLMessage }) {
   const [open, setOpen] = useState(false);
@@ -330,36 +364,17 @@ function EmailCard({ message }: { message: GHLMessage }) {
   const inbound = message.direction === "inbound";
   const subject = message.meta?.email?.subject ?? "(no subject)";
 
-  // Fetch full HTML from GHL only when the card is first expanded
-  const { data: emailData, isLoading: emailLoading } = useQuery<Record<string, unknown>>({
-    queryKey: ["email-full", message.id],
-    queryFn: () => fetch(`/api/ghl/conversations/messages/email/${message.id}`).then((r) => r.json()),
-    enabled: open,
-    staleTime: 10 * 60 * 1000,
-  });
-
-  // Log the raw response so we can identify the correct field name
-  if (emailData) console.log("[EmailCard] GHL email response:", JSON.stringify(emailData).slice(0, 1000));
-
-  // GHL returns HTML under various field names — check common locations including nested objects
-  const d = emailData as Record<string, unknown> | undefined;
-  const nested = (d?.emailMessage ?? d?.message ?? d?.email ?? d) as Record<string, unknown> | undefined;
-  const htmlBody: string =
-    (nested?.htmlBody as string) ??
-    (nested?.html as string) ??
-    (nested?.html_body as string) ??
-    (nested?.body as string) ??
-    message.body ??
-    "";
-
-  const isHtml = /<[a-z][\s\S]*>/i.test(htmlBody);
+  // Build renderable HTML from body (handles both raw HTML and GHL bracket format)
+  const rawBody = message.body ?? "";
+  const isRawHtml = /<[a-z][\s\S]*>/i.test(rawBody);
+  const renderedHtml = isRawHtml ? rawBody : ghlBodyToHtml(rawBody);
 
   function handleIframeLoad() {
     const iframe = iframeRef.current;
     if (!iframe) return;
     try {
       const h = iframe.contentDocument?.documentElement?.scrollHeight ?? 0;
-      iframe.style.height = `${Math.min(h + 4, 520)}px`;
+      iframe.style.height = `${Math.min(h + 8, 520)}px`;
     } catch { /* cross-origin guard */ }
   }
 
@@ -383,25 +398,15 @@ function EmailCard({ message }: { message: GHLMessage }) {
 
       {open && (
         <div className="border-t border-border/50">
-          {emailLoading ? (
-            <div className="flex items-center justify-center h-24 text-muted-foreground">
-              <RefreshCw className="w-4 h-4 animate-spin" />
-            </div>
-          ) : isHtml ? (
-            <iframe
-              ref={iframeRef}
-              srcDoc={htmlBody}
-              sandbox="allow-same-origin allow-popups"
-              onLoad={handleIframeLoad}
-              className="w-full border-none block"
-              style={{ minHeight: 160, height: 320 }}
-              title="Email preview"
-            />
-          ) : (
-            <div className="px-3 py-3">
-              <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{htmlBody}</p>
-            </div>
-          )}
+          <iframe
+            ref={iframeRef}
+            srcDoc={renderedHtml}
+            sandbox="allow-same-origin allow-popups"
+            onLoad={handleIframeLoad}
+            className="w-full border-none block"
+            style={{ minHeight: 120, height: 280 }}
+            title="Email preview"
+          />
         </div>
       )}
     </div>
