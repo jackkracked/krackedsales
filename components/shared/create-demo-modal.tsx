@@ -128,6 +128,7 @@ interface CreateDemoModalProps {
   contactEmail?: string;
   contactPhone?: string;
   opportunityId?: string;
+  commentLeadId?: string;
   opportunitySource?: string;
   onClose: () => void;
 }
@@ -148,6 +149,7 @@ export function CreateDemoModal({
   contactEmail,
   contactPhone,
   opportunityId,
+  commentLeadId,
   opportunitySource,
   onClose,
 }: CreateDemoModalProps) {
@@ -216,6 +218,7 @@ export function CreateDemoModal({
         "Social Media Handle": socialHandle.trim(),
         "Contact Name": contactName ?? "",
         "Opportunity ID": opportunityId ?? "",
+        "Comment Lead ID": commentLeadId ?? "",
       };
 
       const res = await fetch(WEBHOOK_URL, {

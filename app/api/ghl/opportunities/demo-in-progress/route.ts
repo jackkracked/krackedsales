@@ -25,12 +25,13 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}));
-  const website: string = body.website ?? "";
-  const opportunityId: string = body.opportunityId ?? "";
+  const website: string = body.website ?? body["Website"] ?? "";
+  const opportunityId: string = body.opportunityId ?? body["Opportunity ID"] ?? "";
+  const commentLeadId: string = body.commentLeadId ?? body["Comment Lead ID"] ?? "";
   const contactId: string = body.contactId ?? "";
 
-  if (!website && !opportunityId && !contactId) {
-    return NextResponse.json({ error: "website, opportunityId, or contactId is required" }, { status: 400 });
+  if (!website && !opportunityId && !commentLeadId && !contactId) {
+    return NextResponse.json({ error: "website, opportunityId, commentLeadId, or contactId is required" }, { status: 400 });
   }
 
   try {
@@ -60,7 +61,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, source: "ghl_direct", opportunityId, pipelineId: opp.pipelineId, stageId });
     }
 
-    // ── Path B: contactId provided — skip contact search, find their opp ──────
+    // ── Path B: commentLeadId provided — direct Postgres update, no GHL needed ─
+    if (commentLeadId) {
+      const clRow = await database.select().from(commentLeads).where(eq(commentLeads.id, commentLeadId));
+      if (!clRow.length) {
+        return NextResponse.json({ error: `Comment lead ${commentLeadId} not found` }, { status: 404 });
+      }
+      await database
+        .update(commentLeads)
+        .set({ demoStartedAt: new Date() })
+        .where(eq(commentLeads.id, commentLeadId));
+      return NextResponse.json({ success: true, source: "comment_lead_direct", commentLeadId, contactName: clRow[0].name });
+    }
+
+    // ── Path D: contactId provided — skip contact search, find their opp ──────
     if (contactId) {
       const oppSearch = await ghl.get<{ opportunities: GHLOpportunity[] }>(
         `/opportunities/search?location_id=${locId}&contact_id=${contactId}&limit=10`

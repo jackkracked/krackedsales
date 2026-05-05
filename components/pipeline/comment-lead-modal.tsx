@@ -630,6 +630,7 @@ export function CommentLeadModal({ lead, onClose, onUpdate, initialTab }: Commen
           contactName={lead.name}
           contactEmail={lead.email ?? undefined}
           contactPhone={lead.phone ?? undefined}
+          commentLeadId={lead.id}
           opportunitySource={isFacebook ? "facebook" : "instagram"}
           onClose={() => setShowCreateDemo(false)}
         />
