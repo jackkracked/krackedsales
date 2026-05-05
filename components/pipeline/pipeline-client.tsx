@@ -87,7 +87,7 @@ export function PipelineClient() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Filter opportunities by search query
+  // Filter opportunities and comment leads by search query
   const q = searchQuery.trim().toLowerCase();
   const opportunities = q
     ? allOpportunities.filter((o) => {
@@ -99,6 +99,14 @@ export function PipelineClient() {
         return name.includes(q) || email.includes(q) || phone.includes(q) || source.includes(q) || website.includes(q);
       })
     : allOpportunities;
+  const filteredCommentLeads = q
+    ? commentLeads.filter((cl) => {
+        const name = (cl.name ?? "").toLowerCase();
+        const website = (cl.website ?? "").toLowerCase();
+        const comment = (cl.commentText ?? "").toLowerCase();
+        return name.includes(q) || website.includes(q) || comment.includes(q);
+      })
+    : commentLeads;
 
   if (pipelinesLoading) {
     return (
@@ -233,7 +241,7 @@ export function PipelineClient() {
             Loading opportunities…
           </div>
         ) : viewMode === "kanban" ? (
-          <KanbanBoard pipeline={pipeline} opportunities={opportunities} commentLeads={commentLeads} unreadContactIds={unreadContactIds} />
+          <KanbanBoard pipeline={pipeline} opportunities={opportunities} commentLeads={filteredCommentLeads} unreadContactIds={unreadContactIds} />
         ) : (
           <PipelineListView pipeline={pipeline} opportunities={opportunities} />
         )}
