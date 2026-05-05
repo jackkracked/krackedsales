@@ -341,6 +341,15 @@ export const demoTargets = pgTable("demo_targets", {
   updatedAt:       timestamp("updated_at").defaultNow().notNull(),
 });
 
+/** Per-contact key-value custom fields — keyed by contactUid (ghl_{id} | cl_{uuid}) */
+export const contactCustomFields = pgTable("contact_custom_fields", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  contactUid: text("contact_uid").notNull(),
+  fieldName: text("field_name").notNull(),
+  fieldValue: text("field_value").default(""),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 /** Leads captured from Meta comment trigger words — stored in our system only */
 export const commentLeads = pgTable("comment_leads", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -357,5 +366,6 @@ export const commentLeads = pgTable("comment_leads", {
   website: text("website"),
   notes: text("notes"),
   contactedAt: timestamp("contacted_at"),
+  demoStartedAt: timestamp("demo_started_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
+import { db } from "@/lib/db";
+import { commentLeads } from "@/lib/db/schema";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 
 export const dynamic = "force-dynamic";
@@ -13,10 +16,16 @@ const DEMO_IN_PROGRESS_STAGE: Record<string, string> = {
 };
 
 function normaliseDomain(url: string): string {
-  return url.toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "").trim();
+  return (url ?? "").toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "").trim();
 }
 
-// Fetch all opportunities across all pages — same pattern as contacts route
+function domainsMatch(a: string, b: string): boolean {
+  const na = normaliseDomain(a);
+  const nb = normaliseDomain(b);
+  return na === nb || na.includes(nb) || nb.includes(na);
+}
+
+// Paginate all GHL opportunities — same pattern as contacts route
 async function fetchAllOpportunities(): Promise<GHLOpportunity[]> {
   const locId = locationId();
   const all: GHLOpportunity[] = [];
@@ -45,44 +54,68 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "website is required" }, { status: 400 });
   }
 
-  const searchDomain = normaliseDomain(website);
-
   try {
-    // Fetch all opportunities from our pipeline data and find the match by domain
+    const database = db();
+
+    // ── 1. Check comment leads in Postgres first ─────────────────────────────
+    const clRows = await database.select().from(commentLeads);
+    const clMatch = clRows.find((cl) => cl.website && domainsMatch(cl.website, website));
+
+    if (clMatch) {
+      await database
+        .update(commentLeads)
+        .set({ demoStartedAt: new Date() })
+        .where(eq(commentLeads.id, clMatch.id));
+
+      return NextResponse.json({
+        success: true,
+        source: "comment_lead",
+        commentLeadId: clMatch.id,
+        contactName: clMatch.name,
+        website: clMatch.website,
+      });
+    }
+
+    // ── 2. Check GHL pipeline opportunities ──────────────────────────────────
     const allOpps = await fetchAllOpportunities();
 
-    const match = allOpps.find((o) => {
-      const company = normaliseDomain(o.contact?.companyName ?? "");
-      return company === searchDomain || company.includes(searchDomain) || searchDomain.includes(company);
-    });
+    const oppMatch = allOpps.find((o) =>
+      o.contact?.companyName && domainsMatch(o.contact.companyName, website)
+    );
 
-    if (!match) {
+    if (!oppMatch) {
       return NextResponse.json(
-        { error: `No opportunity found matching website: ${website}` },
+        { error: `No contact found matching website: ${website}` },
         { status: 404 }
       );
     }
 
-    const stageId = DEMO_IN_PROGRESS_STAGE[match.pipelineId];
+    const stageId = DEMO_IN_PROGRESS_STAGE[oppMatch.pipelineId];
     if (!stageId) {
       return NextResponse.json(
-        { error: `Pipeline ${match.pipelineId} has no Demo In Progress stage configured` },
+        { error: `Pipeline ${oppMatch.pipelineId} has no Demo In Progress stage configured` },
         { status: 422 }
       );
     }
 
     // Already in Demo In Progress — no-op
-    if (match.pipelineStageId === stageId) {
-      return NextResponse.json({ success: true, alreadyInStage: true, opportunityId: match.id });
+    if (oppMatch.pipelineStageId === stageId) {
+      return NextResponse.json({
+        success: true,
+        alreadyInStage: true,
+        source: "ghl",
+        opportunityId: oppMatch.id,
+      });
     }
 
-    await ghl.put(`/opportunities/${match.id}`, { pipelineStageId: stageId });
+    await ghl.put(`/opportunities/${oppMatch.id}`, { pipelineStageId: stageId });
 
     return NextResponse.json({
       success: true,
-      opportunityId: match.id,
-      contactName: match.contact?.name,
-      pipelineId: match.pipelineId,
+      source: "ghl",
+      opportunityId: oppMatch.id,
+      contactName: oppMatch.contact?.name,
+      pipelineId: oppMatch.pipelineId,
       stageId,
     });
   } catch (err) {
