@@ -1,0 +1,134 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { cn } from "@/lib/utils/cn";
+import { useUIStore } from "@/store/ui-store";
+import {
+  LayoutDashboard,
+  GitMerge,
+  MessageSquare,
+  BarChart3,
+  Send,
+  TrendingUp,
+  PanelLeftClose,
+  PanelLeftOpen,
+  LogOut,
+  Layers,
+  Settings2,
+  Target,
+} from "lucide-react";
+
+const NAV_ITEMS = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/pipeline", label: "Pipeline", icon: GitMerge },
+  { href: "/inbox", label: "Inbox", icon: MessageSquare },
+  { href: "/kpis", label: "KPIs", icon: Target },
+  { href: "/demo-tracker", label: "Demo Tracker", icon: BarChart3 },
+  { href: "/analytics", label: "Analytics", icon: TrendingUp },
+  { href: "/follow-ups", label: "Follow-ups", icon: Send },
+  { href: "/templates", label: "Templates", icon: Layers },
+  { href: "/settings", label: "Settings", icon: Settings2 },
+];
+
+export function Sidebar() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { sidebarCollapsed, toggleSidebarCollapsed } = useUIStore();
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+    router.refresh();
+  }
+
+  return (
+    <aside
+      className={cn(
+        "hidden lg:flex flex-col h-full shrink-0 transition-all duration-200 ease-in-out border-r border-border",
+        sidebarCollapsed ? "w-12" : "w-52"
+      )}
+      style={{ backgroundColor: "var(--sidebar)" }}
+    >
+      {/* Logo + collapse toggle */}
+      <div className="flex items-center h-12 px-3 border-b border-border shrink-0">
+        {/* Logo: same animation pattern as nav labels — no wrapping during transition */}
+        <span
+          className={cn(
+            "text-sm font-bold text-primary tracking-tight whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out",
+            sidebarCollapsed ? "max-w-0 opacity-0" : "max-w-[140px] opacity-100 mr-auto"
+          )}
+          style={{ fontFamily: "var(--font-heading)" }}
+        >
+          Kracked Sales
+        </span>
+        <button
+          onClick={toggleSidebarCollapsed}
+          className="p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors ml-auto"
+          aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {sidebarCollapsed ? (
+            <PanelLeftOpen className="w-3.5 h-3.5" />
+          ) : (
+            <PanelLeftClose className="w-3.5 h-3.5" />
+          )}
+        </button>
+      </div>
+
+      {/* Navigation — ChatGPT-style compact items */}
+      <nav className="flex-1 px-1.5 py-2 space-y-px overflow-y-auto">
+        {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+          const isActive = pathname === href || pathname.startsWith(href + "/");
+          return (
+            <Link
+              key={href}
+              href={href}
+              title={sidebarCollapsed ? label : undefined}
+              className={cn(
+                "flex items-center px-2 py-1.5 rounded-md text-[13px] font-medium transition-colors duration-100",
+                isActive
+                  ? "bg-primary text-primary-foreground"
+                  : "text-foreground/70 hover:text-foreground hover:bg-border/50",
+              )}
+            >
+              {/* Icon always at same position */}
+              <Icon className="w-3.5 h-3.5 shrink-0" />
+              {/* Label: always rendered, animated width+opacity so it never wraps during transition */}
+              <span
+                className={cn(
+                  "whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out",
+                  sidebarCollapsed
+                    ? "max-w-0 opacity-0 ml-0"
+                    : "max-w-[160px] opacity-100 ml-2.5"
+                )}
+              >
+                {label}
+              </span>
+            </Link>
+          );
+        })}
+      </nav>
+
+      {/* Log out */}
+      <div className="px-1.5 py-2 border-t border-border shrink-0">
+        <button
+          onClick={handleLogout}
+          title={sidebarCollapsed ? "Log out" : undefined}
+          className="flex items-center px-2 py-1.5 w-full rounded-md text-[13px] text-muted-foreground hover:text-foreground hover:bg-border/50 transition-colors"
+        >
+          <LogOut className="w-3.5 h-3.5 shrink-0" />
+          <span
+            className={cn(
+              "whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out",
+              sidebarCollapsed
+                ? "max-w-0 opacity-0 ml-0"
+                : "max-w-[160px] opacity-100 ml-2.5"
+            )}
+          >
+            Log out
+          </span>
+        </button>
+      </div>
+    </aside>
+  );
+}

@@ -1,26 +1,95 @@
 @import "tailwindcss";
 
+/* ─── Design System Tokens ─── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #FAFAF7;
+  --foreground: #1C2333;
+  --primary: #0F3A5C;
+  --primary-foreground: #FFFFFF;
+  --muted: #EDE9E4;
+  --muted-foreground: #6E6A64;
+  --sidebar: #F3F0ED;
+  --border: #D9D4CD;
+  --card: #FFFFFF;
+  --card-foreground: #1C2333;
+  --gold: #D4A574;
+  --gold-foreground: #7A4A1A;
+  --accent-green: #2D5E3F;
+  --accent-green-foreground: #FFFFFF;
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+  --input: #FFFFFF;
+  --ring: #0F3A5C;
+
+  --radius: 8px;
+  --radius-card: 10px;
+  --radius-sm: 5px;
+  --radius-full: 9999px;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-border: var(--border);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-gold: var(--gold);
+  --color-gold-foreground: var(--gold-foreground);
+  --color-accent-green: var(--accent-green);
+  --color-accent-green-foreground: var(--accent-green-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --font-sans: var(--font-inter);
+  --font-heading: var(--font-plus-jakarta-sans);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ─── Base ─── */
+* {
+  box-sizing: border-box;
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading), var(--font-sans), sans-serif;
+}
+
+/* ─── Scrollbar — hidden by default, appears on hover ─── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+/* Thumb is invisible until the scrollable container is hovered */
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+*:hover::-webkit-scrollbar-thumb { background: var(--border); }
+::-webkit-scrollbar-thumb:hover { background: #B8B3AC; }
+/* Firefox */
+* { scrollbar-width: none; }
+*:hover { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
+/* ─── Focus Ring ─── */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ─── Task countdown bar ─── */
+@keyframes task-countdown {
+  from { width: 100%; }
+  to   { width: 0%; }
 }
