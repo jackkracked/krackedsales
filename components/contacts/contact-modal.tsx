@@ -338,11 +338,17 @@ function EmailCard({ message }: { message: GHLMessage }) {
     staleTime: 10 * 60 * 1000,
   });
 
-  // GHL returns the HTML under various field names depending on version
+  // Log the raw response so we can identify the correct field name
+  if (emailData) console.log("[EmailCard] GHL email response:", JSON.stringify(emailData).slice(0, 1000));
+
+  // GHL returns HTML under various field names — check common locations including nested objects
+  const d = emailData as Record<string, unknown> | undefined;
+  const nested = (d?.emailMessage ?? d?.message ?? d?.email ?? d) as Record<string, unknown> | undefined;
   const htmlBody: string =
-    (emailData?.htmlBody as string) ??
-    (emailData?.html as string) ??
-    (emailData?.body as string) ??
+    (nested?.htmlBody as string) ??
+    (nested?.html as string) ??
+    (nested?.html_body as string) ??
+    (nested?.body as string) ??
     message.body ??
     "";
 
