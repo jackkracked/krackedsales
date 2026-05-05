@@ -17,18 +17,40 @@ import {
   Layers,
   Settings2,
   Target,
+  Users,
 } from "lucide-react";
 
-const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/pipeline", label: "Pipeline", icon: GitMerge },
-  { href: "/inbox", label: "Inbox", icon: MessageSquare },
-  { href: "/kpis", label: "KPIs", icon: Target },
-  { href: "/demo-tracker", label: "Demo Tracker", icon: BarChart3 },
-  { href: "/analytics", label: "Analytics", icon: TrendingUp },
-  { href: "/follow-ups", label: "Follow-ups", icon: Send },
-  { href: "/templates", label: "Templates", icon: Layers },
-  { href: "/settings", label: "Settings", icon: Settings2 },
+const NAV_SECTIONS = [
+  {
+    label: "Work",
+    items: [
+      { href: "/dashboard",  label: "Dashboard", icon: LayoutDashboard },
+      { href: "/pipeline",   label: "Pipeline",  icon: GitMerge },
+      { href: "/contacts",   label: "Contacts",  icon: Users },
+      { href: "/inbox",      label: "Inbox",     icon: MessageSquare },
+    ],
+  },
+  {
+    label: "Measure",
+    items: [
+      { href: "/kpis",         label: "KPIs",         icon: Target },
+      { href: "/demo-tracker", label: "Demo Tracker",  icon: BarChart3 },
+      { href: "/analytics",    label: "Analytics",     icon: TrendingUp },
+    ],
+  },
+  {
+    label: "Automate",
+    items: [
+      { href: "/follow-ups", label: "Follow-ups", icon: Send },
+      { href: "/templates",  label: "Templates",  icon: Layers },
+    ],
+  },
+  {
+    label: null, // Settings sits alone, no label needed
+    items: [
+      { href: "/settings", label: "Settings", icon: Settings2 },
+    ],
+  },
 ];
 
 export function Sidebar() {
@@ -75,38 +97,53 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* Navigation — ChatGPT-style compact items */}
-      <nav className="flex-1 px-1.5 py-2 space-y-px overflow-y-auto">
-        {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-          const isActive = pathname === href || pathname.startsWith(href + "/");
-          return (
-            <Link
-              key={href}
-              href={href}
-              title={sidebarCollapsed ? label : undefined}
-              className={cn(
-                "flex items-center px-2 py-1.5 rounded-md text-[13px] font-medium transition-colors duration-100",
-                isActive
-                  ? "bg-primary text-primary-foreground"
-                  : "text-foreground/70 hover:text-foreground hover:bg-border/50",
-              )}
-            >
-              {/* Icon always at same position */}
-              <Icon className="w-3.5 h-3.5 shrink-0" />
-              {/* Label: always rendered, animated width+opacity so it never wraps during transition */}
+      {/* Navigation */}
+      <nav className="flex-1 px-1.5 py-2 overflow-y-auto">
+        {NAV_SECTIONS.map((section, si) => (
+          <div key={si} className={si > 0 ? "mt-4" : ""}>
+            {/* Section label — hidden when collapsed */}
+            {section.label && (
               <span
                 className={cn(
-                  "whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out",
-                  sidebarCollapsed
-                    ? "max-w-0 opacity-0 ml-0"
-                    : "max-w-[160px] opacity-100 ml-2.5"
+                  "block px-2 mb-1 text-[9px] font-bold uppercase tracking-[0.12em] text-muted-foreground/50 whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out",
+                  sidebarCollapsed ? "max-w-0 opacity-0" : "max-w-[160px] opacity-100"
                 )}
               >
-                {label}
+                {section.label}
               </span>
-            </Link>
-          );
-        })}
+            )}
+            <div className="space-y-px">
+              {section.items.map(({ href, label, icon: Icon }) => {
+                const isActive = pathname === href || pathname.startsWith(href + "/");
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    title={sidebarCollapsed ? label : undefined}
+                    className={cn(
+                      "flex items-center px-2 py-1.5 rounded-md text-[13px] font-medium transition-colors duration-100",
+                      isActive
+                        ? "bg-primary text-primary-foreground"
+                        : "text-foreground/70 hover:text-foreground hover:bg-border/50",
+                    )}
+                  >
+                    <Icon className="w-3.5 h-3.5 shrink-0" />
+                    <span
+                      className={cn(
+                        "whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out",
+                        sidebarCollapsed
+                          ? "max-w-0 opacity-0 ml-0"
+                          : "max-w-[160px] opacity-100 ml-2.5"
+                      )}
+                    >
+                      {label}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       {/* Log out */}
