@@ -28,6 +28,7 @@ const PUBLIC_PATHS = [
   "/api/ghl/opportunities/booked-calls",
   "/api/ghl/opportunities/no-show-calls",
   "/api/ghl/opportunities/no-show-backfill",
+  "/api/ghl/opportunities/demo-in-progress",
   "/_next/",       // CSS, JS, fonts — must load before auth check
   "/favicon.ico",
   "/tiktok",       // TikTok domain verification files
