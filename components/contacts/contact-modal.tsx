@@ -329,22 +329,36 @@ function EmailCard({ message }: { message: GHLMessage }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const inbound = message.direction === "inbound";
   const subject = message.meta?.email?.subject ?? "(no subject)";
-  const body = message.body ?? "";
-  const isHtml = /<[a-z][\s\S]*>/i.test(body);
 
-  // Resize iframe to fit content after it loads
+  // Fetch full HTML from GHL only when the card is first expanded
+  const { data: emailData, isLoading: emailLoading } = useQuery<Record<string, unknown>>({
+    queryKey: ["email-full", message.id],
+    queryFn: () => fetch(`/api/ghl/conversations/messages/email/${message.id}`).then((r) => r.json()),
+    enabled: open,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // GHL returns the HTML under various field names depending on version
+  const htmlBody: string =
+    (emailData?.htmlBody as string) ??
+    (emailData?.html as string) ??
+    (emailData?.body as string) ??
+    message.body ??
+    "";
+
+  const isHtml = /<[a-z][\s\S]*>/i.test(htmlBody);
+
   function handleIframeLoad() {
     const iframe = iframeRef.current;
     if (!iframe) return;
     try {
       const h = iframe.contentDocument?.documentElement?.scrollHeight ?? 0;
-      iframe.style.height = `${Math.min(h + 4, 480)}px`;
+      iframe.style.height = `${Math.min(h + 4, 520)}px`;
     } catch { /* cross-origin guard */ }
   }
 
   return (
     <div className="rounded-[10px] border border-border/60 bg-card overflow-hidden">
-      {/* Header row — always visible, click to toggle */}
       <button
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-muted/40 transition-colors text-left"
@@ -361,22 +375,25 @@ function EmailCard({ message }: { message: GHLMessage }) {
         />
       </button>
 
-      {/* Expanded body */}
       {open && (
         <div className="border-t border-border/50">
-          {isHtml ? (
+          {emailLoading ? (
+            <div className="flex items-center justify-center h-24 text-muted-foreground">
+              <RefreshCw className="w-4 h-4 animate-spin" />
+            </div>
+          ) : isHtml ? (
             <iframe
               ref={iframeRef}
-              srcDoc={body}
+              srcDoc={htmlBody}
               sandbox="allow-same-origin allow-popups"
               onLoad={handleIframeLoad}
               className="w-full border-none block"
-              style={{ minHeight: 120, height: 240 }}
+              style={{ minHeight: 160, height: 320 }}
               title="Email preview"
             />
           ) : (
             <div className="px-3 py-3">
-              <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{body}</p>
+              <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{htmlBody}</p>
             </div>
           )}
         </div>
