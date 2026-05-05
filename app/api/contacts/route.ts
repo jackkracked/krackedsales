@@ -151,7 +151,7 @@ export async function GET(req: NextRequest) {
         platform: cl.platform as UnifiedContact["platform"],
         ghlContactId: null,
         opportunityId: null,
-        stage: null,
+        stage: cl.demoStartedAt ? "Demo In Progress" : cl.contactedAt ? "Initial Contact Made" : "New Lead",
         stageId: null,
         pipelineId: null,
         opportunityStatus: null,
