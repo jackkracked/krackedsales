@@ -172,11 +172,13 @@ function FilterRow({
   onChange,
   onRemove,
   pipelines,
+  selectedPipelineIds,
 }: {
   rule: FilterRule;
   onChange: (r: FilterRule) => void;
   onRemove: () => void;
   pipelines: Array<{ id: string; name: string; stages: Array<{ id: string; name: string }> }>;
+  selectedPipelineIds: string[];
 }) {
   const def = FIELD_DEFS[rule.field];
 
@@ -233,15 +235,19 @@ function FilterRow({
     }
 
     if (def.type === "stage") {
+      const scopedPipelines = selectedPipelineIds.length > 0
+        ? pipelines.filter((p) => selectedPipelineIds.includes(p.id))
+        : pipelines;
+      const showPipelineName = scopedPipelines.length > 1;
       const seen = new Set<string>();
       const options: { value: string; label: string }[] = [];
-      for (const p of pipelines) {
+      for (const p of scopedPipelines) {
         for (const s of p.stages) {
           if (!seen.has(s.id)) {
             seen.add(s.id);
             options.push({
               value: s.id,
-              label: pipelines.length > 1 ? `${s.name} (${p.name})` : s.name,
+              label: showPipelineName ? `${s.name} (${p.name})` : s.name,
             });
           }
         }
@@ -334,6 +340,10 @@ export function AdvancedFiltersPanel({ rules: initialRules, onApply, onClose, pi
     initialRules.length ? initialRules : [makeRule()]
   );
 
+  const selectedPipelineIds = rules
+    .filter((r) => r.field === "pipelineId")
+    .flatMap((r) => r.values);
+
   function updateRule(id: string, updated: FilterRule) {
     setRules((r) => r.map((x) => (x.id === id ? updated : x)));
   }
@@ -416,6 +426,7 @@ export function AdvancedFiltersPanel({ rules: initialRules, onApply, onClose, pi
                 onChange={(updated) => updateRule(rule.id, updated)}
                 onRemove={() => removeRule(rule.id)}
                 pipelines={pipelines}
+                selectedPipelineIds={selectedPipelineIds}
               />
             </div>
           ))}
