@@ -67,37 +67,49 @@ export function Sidebar() {
       style={{ backgroundColor: "var(--sidebar)" }}
     >
       {/* Logo + collapse toggle */}
-      <div className="flex items-center h-12 px-3 border-b border-border shrink-0 gap-2">
-        {/* K mark — always visible */}
-        <Link href="/dashboard" className="shrink-0" aria-label="Kracked Sales">
-          <span
-            className="flex items-center justify-center rounded-[7px] bg-primary text-primary-foreground font-black tracking-tighter select-none"
-            style={{ width: 26, height: 26, fontFamily: "var(--font-heading)", fontSize: 15, letterSpacing: "-0.04em" }}
+      <div className={cn("flex items-center h-12 border-b border-border shrink-0", sidebarCollapsed ? "justify-center px-0" : "px-3 gap-2")}>
+        {sidebarCollapsed ? (
+          /* Collapsed: K mark doubles as expand button */
+          <button
+            onClick={toggleSidebarCollapsed}
+            aria-label="Expand sidebar"
+            className="group flex items-center justify-center rounded-[7px] bg-primary text-primary-foreground select-none transition-colors hover:bg-primary/80"
+            style={{ width: 26, height: 26 }}
           >
-            K
-          </span>
-        </Link>
-        {/* Wordmark */}
-        <span
-          className={cn(
-            "text-sm font-bold text-primary tracking-tight whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out",
-            sidebarCollapsed ? "max-w-0 opacity-0" : "max-w-[140px] opacity-100"
-          )}
-          style={{ fontFamily: "var(--font-heading)" }}
-        >
-          Kracked Sales
-        </span>
-        <button
-          onClick={toggleSidebarCollapsed}
-          className={cn("p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors", sidebarCollapsed ? "mx-auto" : "ml-auto")}
-          aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {sidebarCollapsed ? (
-            <PanelLeftOpen className="w-3.5 h-3.5" />
-          ) : (
-            <PanelLeftClose className="w-3.5 h-3.5" />
-          )}
-        </button>
+            <span
+              className="group-hover:hidden font-black"
+              style={{ fontFamily: "var(--font-heading)", fontSize: 15, letterSpacing: "-0.04em" }}
+            >
+              K
+            </span>
+            <PanelLeftOpen className="hidden group-hover:block w-3.5 h-3.5" />
+          </button>
+        ) : (
+          <>
+            {/* Expanded: K is a dashboard link */}
+            <Link href="/dashboard" className="shrink-0" aria-label="Kracked Sales">
+              <span
+                className="flex items-center justify-center rounded-[7px] bg-primary text-primary-foreground font-black tracking-tighter select-none"
+                style={{ width: 26, height: 26, fontFamily: "var(--font-heading)", fontSize: 15, letterSpacing: "-0.04em" }}
+              >
+                K
+              </span>
+            </Link>
+            <span
+              className="text-sm font-bold text-primary tracking-tight whitespace-nowrap overflow-hidden max-w-[140px] opacity-100 transition-all duration-200 ease-in-out"
+              style={{ fontFamily: "var(--font-heading)" }}
+            >
+              Kracked Sales
+            </span>
+            <button
+              onClick={toggleSidebarCollapsed}
+              className="p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors ml-auto"
+              aria-label="Collapse sidebar"
+            >
+              <PanelLeftClose className="w-3.5 h-3.5" />
+            </button>
+          </>
+        )}
       </div>
 
       {/* Navigation */}
