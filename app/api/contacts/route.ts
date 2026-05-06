@@ -94,6 +94,57 @@ function applyRules(all: UnifiedContact[], rules: FilterRule[]): UnifiedContact[
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
+// ─── Channel label helper ─────────────────────────────────────────────────────
+
+function channelLabel(type: string): string {
+  const t = type.toUpperCase();
+  if (t.includes("SMS"))       return "SMS";
+  if (t.includes("EMAIL"))     return "Email";
+  if (t.includes("INSTAGRAM")) return "Instagram";
+  if (t.includes("FB") || t.includes("FACEBOOK")) return "Facebook";
+  if (t.includes("WHATSAPP"))  return "WhatsApp";
+  if (t.includes("CALL"))      return "Call";
+  if (t.includes("TIKTOK"))    return "TikTok";
+  return "Unknown";
+}
+
+// ─── Conversations cache (3-min TTL) — contactId → last channel ───────────────
+
+let _convMap: Map<string, string> | null = null;
+let _convAt = 0;
+const CONV_TTL = 3 * 60 * 1000;
+
+async function getConversationChannelMap(): Promise<Map<string, string>> {
+  const now = Date.now();
+  if (_convMap && now - _convAt < CONV_TTL) return _convMap;
+
+  const map = new Map<string, string>();
+  try {
+    const locId = locationId();
+    const MAX_PAGES = 20;
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const data = await ghl.get<{ conversations: Array<{ contactId: string; type: string }> }>(
+        `/conversations/search?locationId=${locId}&limit=100&page=${page}&sortBy=last_message_date&sortOrder=desc`
+      );
+      const batch = data.conversations ?? [];
+      for (const conv of batch) {
+        // First entry per contactId wins (sorted by most recent)
+        if (conv.contactId && !map.has(conv.contactId)) {
+          map.set(conv.contactId, channelLabel(conv.type ?? ""));
+        }
+      }
+      if (batch.length < 100) break;
+    }
+    _convMap = map;
+    _convAt = Date.now();
+  } catch (err) {
+    console.error("[contacts] getConversationChannelMap error:", err);
+    _convMap = _convMap ?? map;
+  }
+
+  return _convMap!;
+}
+
 // ─── All-pipelines opportunity cache (3-min TTL) ──────────────────────────────
 interface EnrichedOpp extends GHLOpportunity {
   pipelineStageId_name: string;
@@ -171,11 +222,12 @@ export async function GET(req: NextRequest) {
   try {
     const database = db();
 
-    const [allOpps, clRows, catRows, demoRows] = await Promise.all([
+    const [allOpps, clRows, catRows, demoRows, convMap] = await Promise.all([
       getAllOpportunities(),
       database.select().from(commentLeads).orderBy(desc(commentLeads.createdAt)),
       database.select().from(brandCategories),
       database.select({ ghlContactId: demoGhlLinks.ghlContactId }).from(demoGhlLinks),
+      getConversationChannelMap(),
     ]);
 
     const catMap = new Map(catRows.map((r) => [r.domain, r.category]));
@@ -216,6 +268,7 @@ export async function GET(req: NextRequest) {
         brandCategory: category,
         hasDemo: demoContactIds.has(c.id),
         awaitingReply: false,
+        lastChannel: convMap.get(c.id) ?? null,
         daysSinceLastTouch: daysAgo(lastActivityAt),
         lastActivityAt,
         createdAt,
@@ -250,6 +303,7 @@ export async function GET(req: NextRequest) {
         brandCategory: category,
         hasDemo: false,
         awaitingReply: false,
+        lastChannel: null,
         daysSinceLastTouch: daysAgo(lastActivityAt),
         lastActivityAt,
         createdAt,

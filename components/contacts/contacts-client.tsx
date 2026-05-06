@@ -435,6 +435,9 @@ export function ContactsClient() {
               <th className="px-4 py-3 text-left min-w-[140px] align-middle">
                 <SortHeader label="Stage" sortKey="stage" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
               </th>
+              <th className="px-4 py-3 text-left w-28 align-middle">
+                <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Channel</span>
+              </th>
               <th className="px-4 py-3 text-left w-32 align-middle">
                 <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Demo</span>
               </th>
@@ -452,7 +455,7 @@ export function ContactsClient() {
               : contacts.length === 0
               ? (
                 <tr>
-                  <td colSpan={7} className="py-20 text-center">
+                  <td colSpan={8} className="py-20 text-center">
                     <Users className="w-9 h-9 text-border mx-auto mb-3" />
                     <p className="text-sm font-medium text-foreground mb-0.5">No contacts found</p>
                     {(search || activeRuleCount > 0) && <p className="text-xs text-muted-foreground">Try adjusting your search or filters</p>}
@@ -591,6 +594,15 @@ function ContactRow({ contact: c, selected, onSelect, onClick, onOpenMessages }:
         )}
       </td>
 
+      {/* Channel */}
+      <td className="px-4 py-3">
+        {c.lastChannel ? (
+          <ChannelBadge channel={c.lastChannel} />
+        ) : (
+          <span className="text-muted-foreground/30 text-sm">—</span>
+        )}
+      </td>
+
       {/* Demo */}
       <td className="px-4 py-3">
         {c.hasDemo ? (
@@ -626,6 +638,25 @@ function ContactRow({ contact: c, selected, onSelect, onClick, onOpenMessages }:
 }
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
+
+const CHANNEL_STYLE: Record<string, string> = {
+  SMS:       "bg-emerald-50 text-emerald-700",
+  Email:     "bg-sky-50 text-sky-700",
+  Instagram: "bg-pink-50 text-pink-700",
+  Facebook:  "bg-blue-50 text-blue-700",
+  WhatsApp:  "bg-green-50 text-green-700",
+  Call:      "bg-violet-50 text-violet-700",
+  TikTok:    "bg-slate-100 text-slate-700",
+};
+
+function ChannelBadge({ channel }: { channel: string }) {
+  const cls = CHANNEL_STYLE[channel] ?? "bg-muted text-muted-foreground";
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${cls}`}>
+      {channel}
+    </span>
+  );
+}
 
 function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
