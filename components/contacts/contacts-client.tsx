@@ -268,7 +268,7 @@ export function ContactsClient() {
             {filters.hasDemo === "true"  && <Chip label="Has demo"  onRemove={() => setFilters((f) => ({ ...f, hasDemo: "" }))} />}
             {filters.hasDemo === "false" && <Chip label="No demo"   onRemove={() => setFilters((f) => ({ ...f, hasDemo: "" }))} />}
             {filters.pipelineId && <Chip label={selectedPipeline?.name ?? "Pipeline"} onRemove={() => setFilters((f) => ({ ...f, pipelineId: "", stageId: "" }))} />}
-            {filters.stageId && <Chip label={selectedPipeline?.stages.find((s) => s.id === filters.stageId)?.name ?? "Stage"} onRemove={() => setFilters((f) => ({ ...f, stageId: "" }))} />
+            {filters.stageId && <Chip label={selectedPipeline?.stages.find((s) => s.id === filters.stageId)?.name ?? "Stage"} onRemove={() => setFilters((f) => ({ ...f, stageId: "" }))} />}
             <button onClick={clearAll} className="text-xs text-muted-foreground hover:text-foreground transition-colors px-1">Clear</button>
           </div>
         )}
