@@ -77,6 +77,8 @@ export async function GET(req: NextRequest) {
   const stageFilter = searchParams.get("stage");
   const categoryFilter = searchParams.get("category");
   const hasDemoFilter = searchParams.get("hasDemo");
+  const pipelineFilter = searchParams.get("pipelineId");
+  const stageFilter2 = searchParams.get("stageId");
   const sortBy = searchParams.get("sortBy") ?? "createdAt";
   const sortOrder = (searchParams.get("sortOrder") ?? "desc") as "asc" | "desc";
 
@@ -180,11 +182,13 @@ export async function GET(req: NextRequest) {
         (c.stage ?? "").toLowerCase().includes(search)
       );
     }
-    if (sourceFilter) all = all.filter((c) => c.source === sourceFilter);
-    if (stageFilter)  all = all.filter((c) => c.stage === stageFilter);
+    if (sourceFilter)   all = all.filter((c) => c.source === sourceFilter);
+    if (stageFilter)    all = all.filter((c) => c.stage === stageFilter);
     if (categoryFilter) all = all.filter((c) => c.brandCategory === categoryFilter);
     if (hasDemoFilter === "true")  all = all.filter((c) => c.hasDemo);
     if (hasDemoFilter === "false") all = all.filter((c) => !c.hasDemo);
+    if (pipelineFilter) all = all.filter((c) => c.pipelineId === pipelineFilter);
+    if (stageFilter2)   all = all.filter((c) => c.stageId === stageFilter2);
 
     // ─── Sort ─────────────────────────────────────────────────────────────────
     all.sort((a, b) => {

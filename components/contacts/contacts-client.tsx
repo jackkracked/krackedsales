@@ -18,6 +18,8 @@ interface FilterState {
   source: string;
   category: string;
   hasDemo: string;
+  pipelineId: string;
+  stageId: string;
 }
 
 interface SavedPreset {
@@ -119,7 +121,7 @@ function SkeletonRow({ i }: { i: number }) {
 export function ContactsClient() {
   const [search, setSearch]         = useState("");
   const [debounced, setDebounced]   = useState("");
-  const [filters, setFilters]       = useState<FilterState>({ source: "", category: "", hasDemo: "" });
+  const [filters, setFilters]       = useState<FilterState>({ source: "", category: "", hasDemo: "", pipelineId: "", stageId: "" });
   const [sortBy, setSortBy]         = useState<SortKey>("createdAt");
   const [sortOrder, setSortOrder]   = useState<"asc" | "desc">("desc");
   const [page, setPage]             = useState(1);
@@ -145,12 +147,22 @@ export function ContactsClient() {
 
   useEffect(() => { setPage(1); }, [filters, sortBy, sortOrder]);
 
+  const { data: pipelinesData } = useQuery<{ pipelines: Array<{ id: string; name: string; stages: Array<{ id: string; name: string }> }> }>({
+    queryKey: ["pipelines"],
+    queryFn: () => fetch("/api/ghl/pipelines").then((r) => r.json()),
+    staleTime: 5 * 60_000,
+  });
+  const pipelines = pipelinesData?.pipelines ?? [];
+  const selectedPipeline = pipelines.find((p) => p.id === filters.pipelineId);
+
   const params = new URLSearchParams({
     page: String(page), pageSize: String(PAGE_SIZE), sortBy, sortOrder,
-    ...(debounced    && { search:   debounced }),
-    ...(filters.source   && { source:   filters.source }),
-    ...(filters.category && { category: filters.category }),
-    ...(filters.hasDemo  && { hasDemo:  filters.hasDemo }),
+    ...(debounced          && { search:     debounced }),
+    ...(filters.source     && { source:     filters.source }),
+    ...(filters.category   && { category:   filters.category }),
+    ...(filters.hasDemo    && { hasDemo:    filters.hasDemo }),
+    ...(filters.pipelineId && { pipelineId: filters.pipelineId }),
+    ...(filters.stageId    && { stageId:    filters.stageId }),
   });
 
   const { data, isLoading, isFetching } = useQuery<{ contacts: UnifiedContact[]; total: number }>({
@@ -205,7 +217,7 @@ export function ContactsClient() {
     localStorage.setItem("contacts_presets", JSON.stringify(next));
   }
 
-  const clearAll = useCallback(() => { setFilters({ source: "", category: "", hasDemo: "" }); setSearch(""); }, []);
+  const clearAll = useCallback(() => { setFilters({ source: "", category: "", hasDemo: "", pipelineId: "", stageId: "" }); setSearch(""); }, []);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3">
@@ -255,6 +267,8 @@ export function ContactsClient() {
             )}
             {filters.hasDemo === "true"  && <Chip label="Has demo"  onRemove={() => setFilters((f) => ({ ...f, hasDemo: "" }))} />}
             {filters.hasDemo === "false" && <Chip label="No demo"   onRemove={() => setFilters((f) => ({ ...f, hasDemo: "" }))} />}
+            {filters.pipelineId && <Chip label={selectedPipeline?.name ?? "Pipeline"} onRemove={() => setFilters((f) => ({ ...f, pipelineId: "", stageId: "" }))} />}
+            {filters.stageId && <Chip label={selectedPipeline?.stages.find((s) => s.id === filters.stageId)?.name ?? "Stage"} onRemove={() => setFilters((f) => ({ ...f, stageId: "" }))} />
             <button onClick={clearAll} className="text-xs text-muted-foreground hover:text-foreground transition-colors px-1">Clear</button>
           </div>
         )}
@@ -296,6 +310,24 @@ export function ContactsClient() {
             <FilterSelect label="Source" value={filters.source} onChange={(v) => setFilters((f) => ({ ...f, source: v }))} options={[["", "All sources"], ["ghl", "GHL (Meta lead form)"], ["comment_lead", "Comment lead"]]} />
             <FilterSelect label="Category" value={filters.category} onChange={(v) => setFilters((f) => ({ ...f, category: v }))} options={[["", "All categories"], ...Object.entries(CATEGORY_BADGE).map(([k, v]) => [k, v.label] as [string, string])]} />
             <FilterSelect label="Demo" value={filters.hasDemo} onChange={(v) => setFilters((f) => ({ ...f, hasDemo: v }))} options={[["", "All"], ["true", "Has demo"], ["false", "No demo"]]} />
+          </div>
+          {/* Pipeline + Stage */}
+          <div className="grid grid-cols-2 gap-3 pt-3 border-t border-border/60">
+            <FilterSelect
+              label="Pipeline"
+              value={filters.pipelineId}
+              onChange={(v) => setFilters((f) => ({ ...f, pipelineId: v, stageId: "" }))}
+              options={[["", "All pipelines"], ...pipelines.map((p) => [p.id, p.name] as [string, string])]}
+            />
+            <FilterSelect
+              label="Stage"
+              value={filters.stageId}
+              onChange={(v) => setFilters((f) => ({ ...f, stageId: v }))}
+              options={[
+                ["", filters.pipelineId ? "All stages" : "Select pipeline first"],
+                ...(selectedPipeline?.stages ?? []).map((s) => [s.id, s.name] as [string, string]),
+              ]}
+            />
           </div>
 
           {/* Saved presets */}
