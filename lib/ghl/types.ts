@@ -71,6 +71,7 @@ export interface GHLOpportunity {
     email?: string;
     phone?: string;
     tags?: string[];
+    dateAdded?: string; // contact creation date — more accurate than opp.createdAt
   };
   // Computed — stage name looked up from pipeline
   pipelineStageId_name?: string;

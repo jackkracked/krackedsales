@@ -242,7 +242,7 @@ export async function GET(req: NextRequest) {
       if (!c?.id || seenContactIds.has(c.id)) continue;
       seenContactIds.add(c.id);
 
-      const createdAt = opp.createdAt;
+      const createdAt = c.dateAdded ?? opp.createdAt;
       const lastActivityAt = opp.updatedAt ?? createdAt;
       const domain = (c.companyName ?? "").replace(/^https?:\/\/(www\.)?/, "").split("/")[0];
       const category = domain ? (catMap.get(domain) as UnifiedContact["brandCategory"] ?? null) : null;
