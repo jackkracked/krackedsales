@@ -7,6 +7,90 @@ import { daysAgo } from "@/lib/utils/date";
 import type { UnifiedContact } from "@/lib/contacts/types";
 import type { GHLOpportunity, GHLPipeline } from "@/lib/ghl/types";
 
+interface FilterRule {
+  id: string;
+  field: string;
+  operator: string;
+  values: string[];
+  connector?: "and" | "or";
+}
+
+function applyRule(c: UnifiedContact, rule: FilterRule): boolean {
+  const { field, operator, values } = rule;
+  switch (field) {
+    case "name": {
+      const name = c.name.toLowerCase();
+      const val = (values[0] ?? "").toLowerCase();
+      if (operator === "contains")     return name.includes(val);
+      if (operator === "not_contains") return !name.includes(val);
+      if (operator === "is")           return name === val;
+      return true;
+    }
+    case "email": {
+      const email = (c.email ?? "").toLowerCase();
+      const val = (values[0] ?? "").toLowerCase();
+      if (operator === "contains")     return email.includes(val);
+      if (operator === "not_contains") return !email.includes(val);
+      return true;
+    }
+    case "source":
+      if (operator === "is_any_of")  return values.includes(c.source);
+      if (operator === "is_none_of") return !values.includes(c.source);
+      return true;
+    case "pipelineId":
+      if (operator === "is_any_of")  return c.pipelineId != null && values.includes(c.pipelineId);
+      if (operator === "is_none_of") return c.pipelineId == null || !values.includes(c.pipelineId);
+      return true;
+    case "stageId":
+      if (operator === "is_any_of")  return c.stageId != null && values.includes(c.stageId);
+      if (operator === "is_none_of") return c.stageId == null || !values.includes(c.stageId);
+      return true;
+    case "brandCategory":
+      if (operator === "is_any_of")  return c.brandCategory != null && values.includes(c.brandCategory);
+      if (operator === "is_none_of") return c.brandCategory == null || !values.includes(c.brandCategory);
+      return true;
+    case "hasDemo":
+      if (operator === "is_any_of")  return values.map((v) => v === "true").includes(c.hasDemo);
+      if (operator === "is_none_of") return !values.map((v) => v === "true").includes(c.hasDemo);
+      return true;
+    case "daysSinceLastTouch": {
+      const n = Number(values[0] ?? 0);
+      if (operator === "gt") return c.daysSinceLastTouch > n;
+      if (operator === "lt") return c.daysSinceLastTouch < n;
+      if (operator === "is") return c.daysSinceLastTouch === n;
+      return true;
+    }
+    default:
+      return true;
+  }
+}
+
+// AND before OR: split rules at OR boundaries into AND-groups, then union the results.
+function applyRules(all: UnifiedContact[], rules: FilterRule[]): UnifiedContact[] {
+  if (!rules.length) return all;
+
+  // Build AND-groups: a new group starts whenever a rule has connector="or"
+  const groups: FilterRule[][] = [[rules[0]]];
+  for (let i = 1; i < rules.length; i++) {
+    if (rules[i].connector === "or") groups.push([rules[i]]);
+    else groups[groups.length - 1].push(rules[i]);
+  }
+
+  // Each group: contacts must pass ALL rules in the group (AND)
+  // Final result: union across groups (OR between groups)
+  const seen = new Set<string>();
+  const result: UnifiedContact[] = [];
+  for (const group of groups) {
+    for (const c of all) {
+      if (!seen.has(c.uid) && group.every((r) => applyRule(c, r))) {
+        seen.add(c.uid);
+        result.push(c);
+      }
+    }
+  }
+  return result;
+}
+
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
@@ -81,6 +165,8 @@ export async function GET(req: NextRequest) {
   const stageFilter2 = searchParams.get("stageId");
   const sortBy = searchParams.get("sortBy") ?? "createdAt";
   const sortOrder = (searchParams.get("sortOrder") ?? "desc") as "asc" | "desc";
+  const rulesParam = searchParams.get("rules");
+  const rules: FilterRule[] = rulesParam ? (() => { try { return JSON.parse(rulesParam); } catch { return []; } })() : [];
 
   try {
     const database = db();
@@ -189,6 +275,7 @@ export async function GET(req: NextRequest) {
     if (hasDemoFilter === "false") all = all.filter((c) => !c.hasDemo);
     if (pipelineFilter) all = all.filter((c) => c.pipelineId === pipelineFilter);
     if (stageFilter2)   all = all.filter((c) => c.stageId === stageFilter2);
+    all = applyRules(all, rules);
 
     // ─── Sort ─────────────────────────────────────────────────────────────────
     all.sort((a, b) => {

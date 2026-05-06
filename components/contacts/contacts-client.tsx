@@ -5,28 +5,20 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils/cn";
 import {
   Search, X, ChevronUp, ChevronDown, Download, Tag, RefreshCw,
-  MessageCircle, ExternalLink, Users, SlidersHorizontal,
-  BookmarkPlus, Trash2, ChevronLeft, ChevronRight, Check,
+  MessageCircle, ExternalLink, Users, SlidersHorizontal, Plus,
+  ChevronLeft, ChevronRight, Check,
 } from "lucide-react";
 import { relativeTime, formatDate } from "@/lib/utils/date";
 import { ContactModal } from "./contact-modal";
+import { AdvancedFiltersPanel, type FilterRule } from "./advanced-filters-panel";
 import type { UnifiedContact } from "@/lib/contacts/types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface FilterState {
-  source: string;
-  category: string;
-  hasDemo: string;
-  pipelineId: string;
-  stageId: string;
-}
-
-interface SavedPreset {
+interface SmartList {
   id: string;
   name: string;
-  filters: FilterState;
-  search: string;
+  rules: FilterRule[];
 }
 
 type SortKey = "createdAt" | "lastActivityAt" | "name" | "daysSinceLastTouch" | "source" | "stage";
@@ -54,6 +46,30 @@ const OPP_STATUS: Record<string, { label: string; className: string }> = {
   lost:      { label: "Lost",      className: "text-rose-600" },
   abandoned: { label: "Abandoned", className: "text-muted-foreground" },
 };
+
+// ─── Rule chip label ──────────────────────────────────────────────────────────
+
+function ruleLabel(rule: FilterRule): string {
+  const fieldLabels: Record<string, string> = {
+    name: "Name", email: "Email", source: "Source", pipelineId: "Pipeline",
+    stageId: "Stage", brandCategory: "Category", hasDemo: "Has Demo",
+    daysSinceLastTouch: "Days Since Touch",
+  };
+  const opLabels: Record<string, string> = {
+    is_any_of: "is", is_none_of: "is not",
+    is: "is", contains: "contains", not_contains: "doesn't contain",
+    gt: ">", lt: "<",
+  };
+  const valueLabels: Record<string, Record<string, string>> = {
+    source:        { ghl: "GHL", comment_lead: "Comment" },
+    brandCategory: { ecommerce: "DTC", service: "Service", local: "Local", b2b: "B2B", other: "Other" },
+    hasDemo:       { true: "Yes", false: "No" },
+  };
+  const fLabel = fieldLabels[rule.field] ?? rule.field;
+  const oLabel = opLabels[rule.operator] ?? rule.operator;
+  const vLabel = rule.values.map((v) => valueLabels[rule.field]?.[v] ?? v).join(", ") || "…";
+  return `${fLabel} ${oLabel} ${vLabel}`;
+}
 
 // ─── Avatar ───────────────────────────────────────────────────────────────────
 
@@ -119,25 +135,26 @@ function SkeletonRow({ i }: { i: number }) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export function ContactsClient() {
-  const [search, setSearch]         = useState("");
-  const [debounced, setDebounced]   = useState("");
-  const [filters, setFilters]       = useState<FilterState>({ source: "", category: "", hasDemo: "", pipelineId: "", stageId: "" });
-  const [sortBy, setSortBy]         = useState<SortKey>("createdAt");
-  const [sortOrder, setSortOrder]   = useState<"asc" | "desc">("desc");
-  const [page, setPage]             = useState(1);
-  const [showFilters, setShowFilters] = useState(false);
-  const [selected, setSelected]     = useState<Set<string>>(new Set());
-  const [openContact, setOpenContact] = useState<UnifiedContact | null>(null);
-  const [openContactTab, setOpenContactTab] = useState<"messages" | undefined>(undefined);
-  const [presets, setPresets]       = useState<SavedPreset[]>([]);
-  const [savingPreset, setSavingPreset] = useState(false);
-  const [presetName, setPresetName] = useState("");
+  const [search, setSearch]                   = useState("");
+  const [debounced, setDebounced]             = useState("");
+  const [advancedRules, setAdvancedRules]     = useState<FilterRule[]>([]);
+  const [sortBy, setSortBy]                   = useState<SortKey>("createdAt");
+  const [sortOrder, setSortOrder]             = useState<"asc" | "desc">("desc");
+  const [page, setPage]                       = useState(1);
+  const [showAdvancedPanel, setShowAdvancedPanel] = useState(false);
+  const [selected, setSelected]               = useState<Set<string>>(new Set());
+  const [openContact, setOpenContact]         = useState<UnifiedContact | null>(null);
+  const [openContactTab, setOpenContactTab]   = useState<"messages" | undefined>(undefined);
+  const [smartLists, setSmartLists]           = useState<SmartList[]>([]);
+  const [activeListId, setActiveListId]       = useState<string | null>(null);
+  const [savingList, setSavingList]           = useState(false);
+  const [listName, setListName]               = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
 
   const PAGE_SIZE = 50;
 
   useEffect(() => {
-    try { const r = localStorage.getItem("contacts_presets"); if (r) setPresets(JSON.parse(r)); } catch {}
+    try { const r = localStorage.getItem("contacts_smart_lists"); if (r) setSmartLists(JSON.parse(r)); } catch {}
   }, []);
 
   useEffect(() => {
@@ -145,7 +162,7 @@ export function ContactsClient() {
     return () => clearTimeout(t);
   }, [search]);
 
-  useEffect(() => { setPage(1); }, [filters, sortBy, sortOrder]);
+  useEffect(() => { setPage(1); }, [advancedRules, sortBy, sortOrder]);
 
   const { data: pipelinesData } = useQuery<{ pipelines: Array<{ id: string; name: string; stages: Array<{ id: string; name: string }> }> }>({
     queryKey: ["pipelines"],
@@ -153,16 +170,11 @@ export function ContactsClient() {
     staleTime: 5 * 60_000,
   });
   const pipelines = pipelinesData?.pipelines ?? [];
-  const selectedPipeline = pipelines.find((p) => p.id === filters.pipelineId);
 
   const params = new URLSearchParams({
     page: String(page), pageSize: String(PAGE_SIZE), sortBy, sortOrder,
-    ...(debounced          && { search:     debounced }),
-    ...(filters.source     && { source:     filters.source }),
-    ...(filters.category   && { category:   filters.category }),
-    ...(filters.hasDemo    && { hasDemo:    filters.hasDemo }),
-    ...(filters.pipelineId && { pipelineId: filters.pipelineId }),
-    ...(filters.stageId    && { stageId:    filters.stageId }),
+    ...(debounced            && { search: debounced }),
+    ...(advancedRules.length && { rules: JSON.stringify(advancedRules) }),
   });
 
   const { data, isLoading, isFetching } = useQuery<{ contacts: UnifiedContact[]; total: number }>({
@@ -172,10 +184,10 @@ export function ContactsClient() {
     placeholderData: (prev) => prev,
   });
 
-  const contacts    = data?.contacts ?? [];
-  const total       = data?.total    ?? 0;
-  const totalPages  = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const activeChips = Object.values(filters).filter(Boolean).length;
+  const contacts   = data?.contacts ?? [];
+  const total      = data?.total    ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const activeRuleCount = advancedRules.length;
 
   // Cmd+K
   useEffect(() => {
@@ -203,21 +215,29 @@ export function ContactsClient() {
     a.click();
   }
 
-  function savePreset() {
-    if (!presetName.trim()) return;
-    const next = [...presets, { id: crypto.randomUUID(), name: presetName.trim(), filters, search }];
-    setPresets(next);
-    localStorage.setItem("contacts_presets", JSON.stringify(next));
-    setPresetName(""); setSavingPreset(false);
+  function saveList() {
+    if (!listName.trim()) return;
+    const newList: SmartList = { id: crypto.randomUUID(), name: listName.trim(), rules: advancedRules };
+    const next = [...smartLists, newList];
+    setSmartLists(next);
+    setActiveListId(newList.id);
+    localStorage.setItem("contacts_smart_lists", JSON.stringify(next));
+    setListName("");
+    setSavingList(false);
   }
 
-  function deletePreset(id: string) {
-    const next = presets.filter((p) => p.id !== id);
-    setPresets(next);
-    localStorage.setItem("contacts_presets", JSON.stringify(next));
+  function deleteList(id: string) {
+    const next = smartLists.filter((l) => l.id !== id);
+    setSmartLists(next);
+    if (activeListId === id) setActiveListId(null);
+    localStorage.setItem("contacts_smart_lists", JSON.stringify(next));
   }
 
-  const clearAll = useCallback(() => { setFilters({ source: "", category: "", hasDemo: "", pipelineId: "", stageId: "" }); setSearch(""); }, []);
+  const clearAll = useCallback(() => {
+    setAdvancedRules([]);
+    setSearch("");
+    setActiveListId(null);
+  }, []);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3">
@@ -241,34 +261,39 @@ export function ContactsClient() {
           }
         </div>
 
-        {/* Filters */}
+        {/* Advanced Filters */}
         <button
-          onClick={() => setShowFilters((v) => !v)}
+          onClick={() => setShowAdvancedPanel(true)}
           className={cn(
             "flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-[8px] border transition-colors",
-            showFilters || activeChips > 0
+            showAdvancedPanel || activeRuleCount > 0
               ? "border-primary/30 bg-primary/5 text-primary"
               : "border-border text-muted-foreground hover:text-foreground hover:border-border/80"
           )}
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />
-          Filters
-          {activeChips > 0 && <span className="ml-0.5 px-1.5 py-px text-[9px] font-bold bg-primary text-white rounded-full leading-tight">{activeChips}</span>}
+          Advanced Filters
+          {activeRuleCount > 0 && (
+            <span className="ml-0.5 px-1.5 py-px text-[9px] font-bold bg-primary text-white rounded-full leading-tight">
+              {activeRuleCount}
+            </span>
+          )}
         </button>
 
-        {/* Active filter chips */}
-        {activeChips > 0 && (
+        {/* Active rule chips */}
+        {activeRuleCount > 0 && (
           <div className="flex items-center gap-1.5 flex-wrap">
-            {filters.source && (
-              <Chip label={{ ghl: "GHL", comment_lead: "Comment" }[filters.source] ?? filters.source} onRemove={() => setFilters((f) => ({ ...f, source: "" }))} />
-            )}
-            {filters.category && (
-              <Chip label={CATEGORY_BADGE[filters.category]?.label ?? filters.category} onRemove={() => setFilters((f) => ({ ...f, category: "" }))} />
-            )}
-            {filters.hasDemo === "true"  && <Chip label="Has demo"  onRemove={() => setFilters((f) => ({ ...f, hasDemo: "" }))} />}
-            {filters.hasDemo === "false" && <Chip label="No demo"   onRemove={() => setFilters((f) => ({ ...f, hasDemo: "" }))} />}
-            {filters.pipelineId && <Chip label={selectedPipeline?.name ?? "Pipeline"} onRemove={() => setFilters((f) => ({ ...f, pipelineId: "", stageId: "" }))} />}
-            {filters.stageId && <Chip label={selectedPipeline?.stages.find((s) => s.id === filters.stageId)?.name ?? "Stage"} onRemove={() => setFilters((f) => ({ ...f, stageId: "" }))} />}
+            {advancedRules.map((rule) => (
+              <Chip
+                key={rule.id}
+                label={ruleLabel(rule)}
+                onRemove={() => {
+                  const next = advancedRules.filter((r) => r.id !== rule.id);
+                  setAdvancedRules(next);
+                  setActiveListId(null);
+                }}
+              />
+            ))}
             <button onClick={clearAll} className="text-xs text-muted-foreground hover:text-foreground transition-colors px-1">Clear</button>
           </div>
         )}
@@ -303,56 +328,81 @@ export function ContactsClient() {
         </div>
       </div>
 
-      {/* ── Filter panel ── */}
-      {showFilters && (
-        <div className="shrink-0 border border-border rounded-[10px] bg-card p-4 space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <FilterSelect label="Source" value={filters.source} onChange={(v) => setFilters((f) => ({ ...f, source: v }))} options={[["", "All sources"], ["ghl", "GHL (Meta lead form)"], ["comment_lead", "Comment lead"]]} />
-            <FilterSelect label="Category" value={filters.category} onChange={(v) => setFilters((f) => ({ ...f, category: v }))} options={[["", "All categories"], ...Object.entries(CATEGORY_BADGE).map(([k, v]) => [k, v.label] as [string, string])]} />
-            <FilterSelect label="Demo" value={filters.hasDemo} onChange={(v) => setFilters((f) => ({ ...f, hasDemo: v }))} options={[["", "All"], ["true", "Has demo"], ["false", "No demo"]]} />
-          </div>
-          {/* Pipeline + Stage */}
-          <div className="grid grid-cols-2 gap-3 pt-3 border-t border-border/60">
-            <FilterSelect
-              label="Pipeline"
-              value={filters.pipelineId}
-              onChange={(v) => setFilters((f) => ({ ...f, pipelineId: v, stageId: "" }))}
-              options={[["", "All pipelines"], ...pipelines.map((p) => [p.id, p.name] as [string, string])]}
-            />
-            <FilterSelect
-              label="Stage"
-              value={filters.stageId}
-              onChange={(v) => setFilters((f) => ({ ...f, stageId: v }))}
-              options={[
-                ["", filters.pipelineId ? "All stages" : "Select pipeline first"],
-                ...(selectedPipeline?.stages ?? []).map((s) => [s.id, s.name] as [string, string]),
-              ]}
-            />
-          </div>
+      {/* ── Smart lists ── */}
+      <div className="flex items-center gap-1 shrink-0 overflow-x-auto">
+        {/* All */}
+        <button
+          onClick={() => { setAdvancedRules([]); setActiveListId(null); }}
+          className={cn(
+            "px-3 py-1.5 text-xs font-medium rounded-[7px] transition-colors whitespace-nowrap",
+            advancedRules.length === 0
+              ? "bg-foreground/8 text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted"
+          )}
+        >
+          All
+        </button>
 
-          {/* Saved presets */}
-          <div className="pt-3 border-t border-border/60 flex items-center gap-2 flex-wrap">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest mr-1">Presets</span>
-            {presets.map((p) => (
-              <div key={p.id} className="flex items-center">
-                <button onClick={() => { setFilters(p.filters); setSearch(p.search); }} className="px-2.5 py-1 text-xs border border-border rounded-l-[6px] bg-card hover:bg-muted transition-colors">{p.name}</button>
-                <button onClick={() => deletePreset(p.id)} className="px-1.5 py-1 border border-l-0 border-border rounded-r-[6px] bg-card text-muted-foreground hover:text-rose-500 hover:bg-rose-50 transition-colors"><Trash2 className="w-3 h-3" /></button>
-              </div>
-            ))}
-            {savingPreset ? (
-              <div className="flex items-center gap-1.5">
-                <input autoFocus value={presetName} onChange={(e) => setPresetName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") savePreset(); if (e.key === "Escape") setSavingPreset(false); }} placeholder="Name…" className="text-xs px-2 py-1 border border-primary/40 rounded-[6px] bg-card focus:outline-none w-28" />
-                <button onClick={savePreset} disabled={!presetName.trim()} className="p-1 text-primary disabled:opacity-30"><Check className="w-3.5 h-3.5" /></button>
-                <button onClick={() => setSavingPreset(false)} className="p-1 text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
-              </div>
-            ) : (
-              <button onClick={() => setSavingPreset(true)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                <BookmarkPlus className="w-3.5 h-3.5" /> Save preset
-              </button>
-            )}
+        {/* Saved lists */}
+        {smartLists.map((list) => (
+          <div key={list.id} className="flex items-center group">
+            <button
+              onClick={() => { setAdvancedRules(list.rules); setActiveListId(list.id); }}
+              className={cn(
+                "px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap",
+                smartLists.length > 0 ? "rounded-l-[7px]" : "rounded-[7px]",
+                activeListId === list.id
+                  ? "bg-primary/10 text-primary border border-r-0 border-primary/20"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent"
+              )}
+            >
+              {list.name}
+            </button>
+            <button
+              onClick={() => deleteList(list.id)}
+              title="Delete list"
+              className={cn(
+                "px-1.5 py-1.5 rounded-r-[7px] text-muted-foreground hover:text-rose-500 transition-all opacity-0 group-hover:opacity-100 border border-l-0",
+                activeListId === list.id
+                  ? "border-primary/20 bg-primary/10"
+                  : "border-transparent hover:border-border/60"
+              )}
+            >
+              <X className="w-3 h-3" />
+            </button>
           </div>
-        </div>
-      )}
+        ))}
+
+        {/* Add smart list */}
+        {savingList ? (
+          <div className="flex items-center gap-1.5 ml-1">
+            <input
+              autoFocus
+              value={listName}
+              onChange={(e) => setListName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveList(); if (e.key === "Escape") setSavingList(false); }}
+              placeholder="List name…"
+              className="text-xs px-2 py-1.5 border border-primary/40 rounded-[6px] bg-card focus:outline-none w-28"
+            />
+            <button onClick={saveList} disabled={!listName.trim()} className="p-1 text-primary disabled:opacity-30">
+              <Check className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={() => setSavingList(false)} className="p-1 text-muted-foreground">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setSavingList(true)}
+            disabled={activeRuleCount === 0}
+            title={activeRuleCount === 0 ? "Apply filters first to save a list" : "Save current filters as a smart list"}
+            className="flex items-center gap-1 ml-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded-[7px] transition-colors whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+          >
+            <Plus className="w-3 h-3" />
+            Add smart list
+          </button>
+        )}
+      </div>
 
       {/* ── Table ── */}
       <div className="flex-1 min-h-0 overflow-auto rounded-[10px] border border-border bg-card">
@@ -391,7 +441,7 @@ export function ContactsClient() {
                   <td colSpan={7} className="py-20 text-center">
                     <Users className="w-9 h-9 text-border mx-auto mb-3" />
                     <p className="text-sm font-medium text-foreground mb-0.5">No contacts found</p>
-                    {(search || activeChips > 0) && <p className="text-xs text-muted-foreground">Try adjusting your search or filters</p>}
+                    {(search || activeRuleCount > 0) && <p className="text-xs text-muted-foreground">Try adjusting your search or filters</p>}
                   </td>
                 </tr>
               )
@@ -428,7 +478,22 @@ export function ContactsClient() {
         </div>
       )}
 
-      {openContact && <ContactModal contact={openContact} onClose={() => { setOpenContact(null); setOpenContactTab(undefined); }} initialTab={openContactTab} />}
+      {openContact && (
+        <ContactModal
+          contact={openContact}
+          onClose={() => { setOpenContact(null); setOpenContactTab(undefined); }}
+          initialTab={openContactTab}
+        />
+      )}
+
+      {showAdvancedPanel && (
+        <AdvancedFiltersPanel
+          rules={advancedRules}
+          onApply={(rules) => { setAdvancedRules(rules); setShowAdvancedPanel(false); setActiveListId(null); }}
+          onClose={() => setShowAdvancedPanel(false)}
+          pipelines={pipelines}
+        />
+      )}
     </div>
   );
 }
@@ -554,17 +619,6 @@ function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
       {label}
       <button onClick={onRemove} className="p-0.5 rounded-full hover:bg-border transition-colors"><X className="w-2.5 h-2.5" /></button>
     </span>
-  );
-}
-
-function FilterSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: [string, string][]; }) {
-  return (
-    <div>
-      <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest mb-1.5">{label}</p>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full text-sm border border-border rounded-[7px] bg-background px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary/15 focus:border-primary/30">
-        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
-    </div>
   );
 }
 
