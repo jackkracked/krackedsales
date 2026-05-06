@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { X, Plus, Trash2, Search } from "lucide-react";
+import { X, Plus, Trash2, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -20,7 +20,7 @@ export interface FilterRule {
   field: FilterField;
   operator: FilterOperator;
   values: string[];
-  connector?: "and" | "or"; // how this rule joins to the PREVIOUS rule (undefined for first)
+  connector?: "and" | "or";
 }
 
 // ─── Field definitions ────────────────────────────────────────────────────────
@@ -116,38 +116,33 @@ const FIELD_DEFS: Record<FilterField, FieldDef> = {
 };
 
 const FIELD_GROUPS = [
-  {
-    label: "Contact",
-    fields: ["name", "email", "source", "brandCategory", "hasDemo"] as FilterField[],
-  },
-  {
-    label: "Pipeline",
-    fields: ["pipelineId", "stageId"] as FilterField[],
-  },
-  {
-    label: "Activity",
-    fields: ["daysSinceLastTouch"] as FilterField[],
-  },
+  { label: "Contact",  fields: ["name", "email", "source", "brandCategory", "hasDemo"] as FilterField[] },
+  { label: "Pipeline", fields: ["pipelineId", "stageId"] as FilterField[] },
+  { label: "Activity", fields: ["daysSinceLastTouch"] as FilterField[] },
 ];
 
 // ─── Multi-value chip input ───────────────────────────────────────────────────
 
-function MultiValueInput({ values, onChange, options }: {
+function MultiValueInput({ values, onChange, options, placeholder = "Select…" }: {
   values: string[];
   onChange: (v: string[]) => void;
   options: { value: string; label: string }[];
+  placeholder?: string;
 }) {
   const remaining = options.filter((o) => !values.includes(o.value));
   return (
-    <div className="flex-1 min-w-0 flex flex-wrap gap-1 px-2 py-1.5 border border-border rounded-[7px] bg-background min-h-[36px] items-center cursor-text">
+    <div className="flex flex-wrap gap-1.5 items-center min-h-[28px]">
       {values.map((v) => {
         const label = options.find((o) => o.value === v)?.label ?? v;
         return (
-          <span key={v} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 bg-primary/10 text-primary text-xs rounded-md font-medium shrink-0">
+          <span
+            key={v}
+            className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 bg-primary/10 text-primary text-xs rounded-[5px] font-medium shrink-0 whitespace-nowrap"
+          >
             {label}
             <button
               onClick={() => onChange(values.filter((x) => x !== v))}
-              className="hover:text-primary/60 transition-colors"
+              className="hover:text-rose-500 transition-colors"
             >
               <X className="w-3 h-3" />
             </button>
@@ -158,77 +153,19 @@ function MultiValueInput({ values, onChange, options }: {
         <select
           value=""
           onChange={(e) => { if (e.target.value) onChange([...values, e.target.value]); }}
-          className="flex-1 min-w-[72px] text-sm bg-transparent focus:outline-none text-muted-foreground"
+          className="text-sm text-muted-foreground bg-transparent focus:outline-none cursor-pointer py-0.5"
         >
-          <option value="">Add…</option>
+          <option value="">{values.length === 0 ? placeholder : "Add…"}</option>
           {remaining.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
       )}
-      {values.length === 0 && remaining.length === 0 && (
-        <span className="text-xs text-muted-foreground">No options</span>
-      )}
     </div>
   );
 }
 
-// ─── Field picker popover ─────────────────────────────────────────────────────
-
-function FieldPicker({
-  value,
-  onChange,
-  onClose,
-}: {
-  value: FilterField;
-  onChange: (f: FilterField) => void;
-  onClose: () => void;
-}) {
-  const [q, setQ] = useState("");
-  return (
-    <div className="absolute left-0 top-full mt-1 w-52 bg-popover border border-border rounded-[10px] shadow-lg z-50 overflow-hidden">
-      <div className="p-2 border-b border-border">
-        <div className="relative flex items-center">
-          <Search className="absolute left-2.5 w-3 h-3 text-muted-foreground" />
-          <input
-            autoFocus
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search field…"
-            className="w-full pl-7 pr-2 py-1.5 text-xs bg-muted/40 rounded-[6px] focus:outline-none"
-          />
-        </div>
-      </div>
-      <div className="max-h-60 overflow-y-auto py-1">
-        {FIELD_GROUPS.map((g) => {
-          const visible = g.fields.filter((f) =>
-            FIELD_DEFS[f].label.toLowerCase().includes(q.toLowerCase())
-          );
-          if (!visible.length) return null;
-          return (
-            <div key={g.label}>
-              <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">{g.label}</p>
-              {visible.map((f) => (
-                <button
-                  key={f}
-                  onClick={() => { onChange(f); onClose(); }}
-                  className={cn(
-                    "w-full text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors",
-                    value === f && "bg-primary/8 text-primary font-medium"
-                  )}
-                >
-                  {FIELD_DEFS[f].label}
-                </button>
-              ))}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ─── Single filter row ────────────────────────────────────────────────────────
+// ─── Single filter card (2-row layout) ───────────────────────────────────────
 
 function FilterRow({
   rule,
@@ -241,7 +178,6 @@ function FilterRow({
   onRemove: () => void;
   pipelines: Array<{ id: string; name: string; stages: Array<{ id: string; name: string }> }>;
 }) {
-  const [showPicker, setShowPicker] = useState(false);
   const def = FIELD_DEFS[rule.field];
 
   function setField(f: FilterField) {
@@ -256,8 +192,8 @@ function FilterRow({
           type="text"
           value={rule.values[0] ?? ""}
           onChange={(e) => onChange({ ...rule, values: e.target.value ? [e.target.value] : [] })}
-          placeholder="Value…"
-          className="flex-1 text-sm px-2.5 py-1.5 border border-border rounded-[7px] bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 min-w-0"
+          placeholder="Type a value…"
+          className="w-full text-sm text-foreground bg-transparent focus:outline-none placeholder:text-muted-foreground/50"
         />
       );
     }
@@ -268,8 +204,8 @@ function FilterRow({
           type="number"
           value={rule.values[0] ?? ""}
           onChange={(e) => onChange({ ...rule, values: e.target.value ? [e.target.value] : [] })}
-          placeholder="Value…"
-          className="flex-1 text-sm px-2.5 py-1.5 border border-border rounded-[7px] bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 min-w-0"
+          placeholder="Enter a number…"
+          className="w-full text-sm text-foreground bg-transparent focus:outline-none placeholder:text-muted-foreground/50"
         />
       );
     }
@@ -291,6 +227,7 @@ function FilterRow({
           values={rule.values}
           onChange={(v) => onChange({ ...rule, values: v })}
           options={options}
+          placeholder="Select pipeline…"
         />
       );
     }
@@ -302,7 +239,10 @@ function FilterRow({
         for (const s of p.stages) {
           if (!seen.has(s.id)) {
             seen.add(s.id);
-            options.push({ value: s.id, label: pipelines.length > 1 ? `${s.name} (${p.name})` : s.name });
+            options.push({
+              value: s.id,
+              label: pipelines.length > 1 ? `${s.name} (${p.name})` : s.name,
+            });
           }
         }
       }
@@ -311,6 +251,7 @@ function FilterRow({
           values={rule.values}
           onChange={(v) => onChange({ ...rule, values: v })}
           options={options}
+          placeholder="Select stage…"
         />
       );
     }
@@ -319,45 +260,58 @@ function FilterRow({
   }
 
   return (
-    <div className="flex items-start gap-2">
-      {/* Field picker */}
-      <div className="relative shrink-0">
-        <button
-          onClick={() => setShowPicker((v) => !v)}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm border border-border rounded-[7px] bg-background hover:bg-muted transition-colors whitespace-nowrap w-36"
-        >
-          <span className="truncate text-left flex-1">{def.label}</span>
-          <span className="text-muted-foreground text-[10px]">▾</span>
-        </button>
-        {showPicker && (
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setShowPicker(false)} />
-            <FieldPicker value={rule.field} onChange={setField} onClose={() => setShowPicker(false)} />
-          </>
-        )}
+    <div className="border border-border rounded-[10px] bg-card overflow-visible">
+      {/* Row 1: Field selector | Operator selector */}
+      <div className="flex items-stretch border-b border-border">
+        {/* Field */}
+        <div className="relative flex-1 min-w-0">
+          <select
+            value={rule.field}
+            onChange={(e) => setField(e.target.value as FilterField)}
+            className="w-full px-3 py-2.5 pr-8 text-sm font-medium text-foreground bg-transparent appearance-none focus:outline-none cursor-pointer"
+          >
+            {FIELD_GROUPS.map((g) => (
+              <optgroup key={g.label} label={g.label}>
+                {g.fields.map((f) => (
+                  <option key={f} value={f}>{FIELD_DEFS[f].label}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+        </div>
+
+        <div className="w-px bg-border shrink-0" />
+
+        {/* Operator */}
+        <div className="relative flex-1 min-w-0">
+          <select
+            value={rule.operator}
+            onChange={(e) => onChange({ ...rule, operator: e.target.value as FilterOperator })}
+            className="w-full px-3 py-2.5 pr-8 text-sm text-foreground bg-transparent appearance-none focus:outline-none cursor-pointer"
+          >
+            {def.operators.map((op) => (
+              <option key={op.value} value={op.value}>{op.label}</option>
+            ))}
+          </select>
+          <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+        </div>
       </div>
 
-      {/* Operator */}
-      <select
-        value={rule.operator}
-        onChange={(e) => onChange({ ...rule, operator: e.target.value as FilterOperator })}
-        className="shrink-0 text-sm px-2 py-1.5 border border-border rounded-[7px] bg-background focus:outline-none w-32"
-      >
-        {def.operators.map((op) => (
-          <option key={op.value} value={op.value}>{op.label}</option>
-        ))}
-      </select>
-
-      {/* Value */}
-      {renderValue()}
-
-      {/* Remove */}
-      <button
-        onClick={onRemove}
-        className="shrink-0 p-1.5 mt-0.5 text-muted-foreground hover:text-rose-500 hover:bg-rose-50 rounded-[6px] transition-colors"
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
+      {/* Row 2: Value | Delete */}
+      <div className="flex items-stretch min-h-[42px]">
+        <div className="flex-1 min-w-0 px-3 py-2.5 flex items-center">
+          {renderValue()}
+        </div>
+        <div className="flex items-center border-l border-border px-2.5 shrink-0">
+          <button
+            onClick={onRemove}
+            className="p-1.5 text-muted-foreground hover:text-rose-500 hover:bg-rose-50 rounded-[6px] transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -394,9 +348,9 @@ export function AdvancedFiltersPanel({ rules: initialRules, onApply, onClose, pi
   }
 
   function toggleConnector(id: string) {
-    setRules((r) => r.map((x) =>
-      x.id === id ? { ...x, connector: x.connector === "or" ? "and" : "or" } : x
-    ));
+    setRules((r) =>
+      r.map((x) => x.id === id ? { ...x, connector: x.connector === "or" ? "and" : "or" } : x)
+    );
   }
 
   function handleApply() {
@@ -419,29 +373,33 @@ export function AdvancedFiltersPanel({ rules: initialRules, onApply, onClose, pi
       <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} />
 
       {/* Panel */}
-      <div className="fixed right-0 top-0 h-full w-[460px] z-50 bg-card border-l border-border shadow-2xl flex flex-col">
+      <div className="fixed right-0 top-0 h-full w-[480px] z-50 bg-card border-l border-border shadow-2xl flex flex-col">
+
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
           <h2 className="text-sm font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>
             Advanced Filters
           </h2>
-          <button onClick={onClose} className="p-1.5 rounded-[7px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-[7px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Rules */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-3">
           {rules.map((rule, i) => (
             <div key={rule.id}>
-              {/* Connector pill — shown between rules */}
+              {/* AND / OR connector pill between rules */}
               {i > 0 && (
-                <div className="flex items-center gap-3 my-3">
+                <div className="flex items-center gap-3 mb-3">
                   <div className="flex-1 h-px bg-border/50" />
                   <button
                     onClick={() => toggleConnector(rule.id)}
                     className={cn(
-                      "px-3 py-0.5 text-[11px] font-bold uppercase tracking-widest rounded-full border transition-colors",
+                      "px-3 py-0.5 text-[11px] font-bold uppercase tracking-widest rounded-full border transition-colors select-none",
                       rule.connector === "or"
                         ? "border-amber-300/70 bg-amber-50 text-amber-600 hover:bg-amber-100"
                         : "border-border bg-muted text-muted-foreground hover:text-foreground"
@@ -452,6 +410,7 @@ export function AdvancedFiltersPanel({ rules: initialRules, onApply, onClose, pi
                   <div className="flex-1 h-px bg-border/50" />
                 </div>
               )}
+
               <FilterRow
                 rule={rule}
                 onChange={(updated) => updateRule(rule.id, updated)}
@@ -463,7 +422,7 @@ export function AdvancedFiltersPanel({ rules: initialRules, onApply, onClose, pi
 
           <button
             onClick={addRule}
-            className="flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 font-medium transition-colors mt-4"
+            className="flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 font-medium transition-colors pt-1"
           >
             <Plus className="w-3.5 h-3.5" />
             Add filter
