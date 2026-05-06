@@ -49,7 +49,10 @@ const OPP_STATUS: Record<string, { label: string; className: string }> = {
 
 // ─── Rule chip label ──────────────────────────────────────────────────────────
 
-function ruleLabel(rule: FilterRule): string {
+function ruleLabel(
+  rule: FilterRule,
+  pipelines: Array<{ id: string; name: string; stages: Array<{ id: string; name: string }> }>
+): string {
   const fieldLabels: Record<string, string> = {
     name: "Name", email: "Email", source: "Source", pipelineId: "Pipeline",
     stageId: "Stage", brandCategory: "Category", hasDemo: "Has Demo",
@@ -60,14 +63,25 @@ function ruleLabel(rule: FilterRule): string {
     is: "is", contains: "contains", not_contains: "doesn't contain",
     gt: ">", lt: "<",
   };
-  const valueLabels: Record<string, Record<string, string>> = {
+  const staticValueLabels: Record<string, Record<string, string>> = {
     source:        { ghl: "GHL", comment_lead: "Comment" },
     brandCategory: { ecommerce: "DTC", service: "Service", local: "Local", b2b: "B2B", other: "Other" },
     hasDemo:       { true: "Yes", false: "No" },
   };
+
   const fLabel = fieldLabels[rule.field] ?? rule.field;
   const oLabel = opLabels[rule.operator] ?? rule.operator;
-  const vLabel = rule.values.map((v) => valueLabels[rule.field]?.[v] ?? v).join(", ") || "…";
+
+  let vLabel: string;
+  if (rule.field === "pipelineId") {
+    vLabel = rule.values.map((v) => pipelines.find((p) => p.id === v)?.name ?? v).join(", ") || "…";
+  } else if (rule.field === "stageId") {
+    const allStages = pipelines.flatMap((p) => p.stages);
+    vLabel = rule.values.map((v) => allStages.find((s) => s.id === v)?.name ?? v).join(", ") || "…";
+  } else {
+    vLabel = rule.values.map((v) => staticValueLabels[rule.field]?.[v] ?? v).join(", ") || "…";
+  }
+
   return `${fLabel} ${oLabel} ${vLabel}`;
 }
 
@@ -286,7 +300,7 @@ export function ContactsClient() {
             {advancedRules.map((rule) => (
               <Chip
                 key={rule.id}
-                label={ruleLabel(rule)}
+                label={ruleLabel(rule, pipelines)}
                 onRemove={() => {
                   const next = advancedRules.filter((r) => r.id !== rule.id);
                   setAdvancedRules(next);
