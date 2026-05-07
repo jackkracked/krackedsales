@@ -38,35 +38,17 @@ interface TikTokComment {
   createdAt: string;
 }
 
-// Raw shape returned by /api/ghl/conversations
-interface GHLConversationRaw {
-  id: string;
-  contactId: string;
-  type?: string;                        // e.g. "TYPE_TIKTOK", "TYPE_PHONE"
-  fullName?: string;
-  contact?: { name?: string };
-  lastMessageBody?: string;
-  lastMessageDate?: string | number;    // GHL returns Unix ms for some channels
-  avatarUrl?: string;
-}
+// ---------------------------------------------------------------------------
+// API helpers — DMs routed through GHL (TikTok's public API has no DM scope)
+// ---------------------------------------------------------------------------
 
-/** Replace raw GHL storage URLs and empty bodies with a readable label */
+/** Replace raw GHL storage URLs with a readable label */
 function cleanPreview(body: string): string {
   if (!body.trim()) return "";
-  // GHL internal attachment URLs: https://storage.googleapis.com/msgsndr/...
-  if (/^https?:\/\/storage\.googleapis\.com\/msgsndr\//i.test(body.trim())) {
-    return "📎 Attachment";
-  }
-  // Any other bare URL as the entire preview
-  if (/^https?:\/\//i.test(body.trim()) && !body.trim().includes(" ")) {
-    return "📎 Attachment";
-  }
+  if (/^https?:\/\/storage\.googleapis\.com\/msgsndr\//i.test(body.trim())) return "📎 Attachment";
+  if (/^https?:\/\//i.test(body.trim()) && !body.trim().includes(" ")) return "📎 Attachment";
   return body;
 }
-
-// ---------------------------------------------------------------------------
-// API helpers — DMs now routed through GHL
-// ---------------------------------------------------------------------------
 
 async function fetchConversations(): Promise<{
   conversations: TikTokConversation[];
@@ -78,30 +60,29 @@ async function fetchConversations(): Promise<{
     throw new Error(body.error ?? `HTTP ${res.status}`);
   }
   const data = await res.json();
-  const raw: GHLConversationRaw[] = data.conversations ?? [];
+  const raw: Array<{
+    id: string; contactId: string; type?: string;
+    fullName?: string; contact?: { name?: string };
+    lastMessageBody?: string; lastMessageDate?: string | number;
+    avatarUrl?: string;
+  }> = data.conversations ?? [];
 
-  // Filter client-side to only TikTok conversations — safety net in case
-  // the GHL server-side type filter is ignored (it sometimes is).
-  const tiktokOnly = raw.filter(
-    (c) => !c.type || c.type === "TYPE_TIKTOK"
-  );
+  const conversations: TikTokConversation[] = raw
+    .filter((c) => !c.type || c.type === "TYPE_TIKTOK")
+    .map((c) => ({
+      id: c.id,
+      contactId: c.contactId,
+      participantName: c.fullName ?? c.contact?.name ?? "Unknown",
+      lastMessage: cleanPreview(c.lastMessageBody ?? ""),
+      updatedAt: c.lastMessageDate
+        ? typeof c.lastMessageDate === "number"
+          ? new Date(c.lastMessageDate).toISOString()
+          : c.lastMessageDate
+        : new Date().toISOString(),
+      avatarUrl: c.avatarUrl,
+    }));
 
-  // Map GHL shape to the flat shape this component uses
-  const conversations: TikTokConversation[] = tiktokOnly.map((c) => ({
-    id: c.id,
-    contactId: c.contactId,
-    participantName: c.fullName ?? c.contact?.name ?? "Unknown",
-    lastMessage: cleanPreview(c.lastMessageBody ?? ""),
-    // GHL stores lastMessageDate as a Unix ms timestamp (number) for some conversations
-    updatedAt: c.lastMessageDate
-      ? typeof c.lastMessageDate === "number"
-        ? new Date(c.lastMessageDate).toISOString()
-        : c.lastMessageDate
-      : new Date().toISOString(),
-    avatarUrl: c.avatarUrl,
-  }));
-
-  return { conversations, notConfigured: false };
+  return { conversations };
 }
 
 async function fetchMessages(id: string): Promise<{ messages: TikTokMessage[] }> {
@@ -109,7 +90,6 @@ async function fetchMessages(id: string): Promise<{ messages: TikTokMessage[] }>
   if (!res.ok) throw new Error("Failed to fetch messages");
   const data = await res.json();
 
-  // GHL messages use `body` and `dateAdded` — map to what the component expects
   const messages: TikTokMessage[] = (data.messages ?? []).map(
     (m: { id: string; body?: string; dateAdded?: string | number; direction?: string }) => ({
       id: m.id,
@@ -170,17 +150,28 @@ async function postCommentReply(
 // NotConfigured banner
 // ---------------------------------------------------------------------------
 
-function NoDmsYet() {
+function NoDmsYet({ notConfigured }: { notConfigured?: boolean }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center">
       <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
         <TikTokIcon className="w-5 h-5 text-muted-foreground" />
       </div>
-      <p className="text-sm font-medium text-foreground">No TikTok DMs yet</p>
-      <p className="text-xs text-muted-foreground max-w-xs leading-relaxed">
-        TikTok DMs will appear here once someone messages your connected account.
-        New messages sync automatically every 10 seconds.
-      </p>
+      {notConfigured ? (
+        <>
+          <p className="text-sm font-medium text-foreground">TikTok not connected</p>
+          <p className="text-xs text-muted-foreground max-w-xs leading-relaxed">
+            Go to <a href="/settings" className="text-primary underline">Settings → TikTok</a> and connect your TikTok account to see DMs here.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="text-sm font-medium text-foreground">No TikTok DMs yet</p>
+          <p className="text-xs text-muted-foreground max-w-xs leading-relaxed">
+            TikTok DMs will appear here once someone messages your connected account.
+            New messages sync automatically every 10 seconds.
+          </p>
+        </>
+      )}
     </div>
   );
 }
@@ -663,7 +654,7 @@ function DmsPanel() {
             </p>
           </div>
         ) : conversations.length === 0 ? (
-          <NoDmsYet />
+          <NoDmsYet notConfigured={data?.notConfigured} />
         ) : (
           <div className="flex-1 overflow-y-auto">
             {conversations.map((convo) => (

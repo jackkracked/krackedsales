@@ -30,7 +30,7 @@ import type { GHLOpportunity, GHLPipeline } from "@/lib/ghl/types";
 import { cn } from "@/lib/utils/cn";
 import { toast } from "sonner";
 
-type OppTab = "overview" | "qualification" | "notes" | "messages";
+type OppTab = "overview" | "qualification" | "notes";
 type LeadTab = "overview" | "comment" | "notes" | "messages";
 
 // ─── Sortable card wrapper ─────────────────────────────────────────────────
@@ -369,7 +369,7 @@ export function KanbanBoard({ pipeline, opportunities, commentLeads = [], unread
                 onToggleSelect={toggleSelectOpp}
                 onSelectAll={() => selectAllInStage(stage.id)}
                 onCardClick={(opp) => openOpp(opp, "overview")}
-                onMessageClick={(opp) => openOpp(opp, "messages")}
+                onMessageClick={(opp) => openOpp(opp)}
                 onCommentLeadClick={(lead) => openCommentLead(lead, "overview")}
                 onCommentLeadMessageClick={(lead) => openCommentLead(lead, "messages")}
                 isOver={isOver}

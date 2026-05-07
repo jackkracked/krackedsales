@@ -501,7 +501,6 @@ export function FollowUpQueue() {
       <OpportunityModal
         opportunity={opportunityModal.opportunity}
         stageName={opportunityModal.stageName}
-        initialTab="messages"
         initialDraft={opportunityModal.draft}
         onClose={() => setOpportunityModal(null)}
       />

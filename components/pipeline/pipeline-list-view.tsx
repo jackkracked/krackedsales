@@ -19,7 +19,7 @@ const STATUS_STYLES: Record<string, string> = {
   abandoned: "bg-muted text-muted-foreground",
 };
 
-type OppTab = "overview" | "qualification" | "notes" | "messages";
+type OppTab = "overview" | "qualification" | "notes";
 
 export function PipelineListView({ pipeline, opportunities }: PipelineListViewProps) {
   const stageMap = Object.fromEntries(pipeline.stages.map((s) => [s.id, s.name]));

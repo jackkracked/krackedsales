@@ -33,7 +33,7 @@ const INBOX_TABS: Array<{ key: InboxTab; label: string; icon?: React.ElementType
 
 export function InboxClient() {
   const [inboxTab, setInboxTab] = useState<InboxTab>("GHL");
-  const [unreadOnly, setUnreadOnly] = useState(true); // Default: unread
+  const [unreadOnly, setUnreadOnly] = useState(false); // Default: all conversations
   const [mobileView, setMobileView] = useState<"list" | "thread">("list");
 
   const channel: ChannelFilter = TAB_TO_CHANNEL[inboxTab] ?? "ALL";

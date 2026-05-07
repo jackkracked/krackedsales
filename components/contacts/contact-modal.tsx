@@ -20,11 +20,10 @@ interface CustomField { id: string; contactUid: string; fieldName: string; field
 interface GHLNote { id: string; body: string; dateAdded?: string; createdAt?: string; }
 interface GHLMessage { id: string; emailMessageId?: string; body?: string; direction?: "inbound" | "outbound"; messageType?: string; dateAdded: string; meta?: { email?: { subject?: string; messageIds?: string[] } }; }
 
-type RightTab = "timeline" | "messages" | "notes" | "qualification";
+type RightTab = "timeline" | "notes" | "qualification";
 
 const RIGHT_TABS: Array<{ id: RightTab; label: string; icon: React.ElementType; ghlOnly?: boolean }> = [
   { id: "timeline",      label: "Timeline",      icon: Clock },
-  { id: "messages",      label: "Messages",      icon: MessageCircle, ghlOnly: true },
   { id: "notes",         label: "Notes",         icon: StickyNote,    ghlOnly: true },
   { id: "qualification", label: "Qualification", icon: ClipboardList, ghlOnly: true },
 ];
@@ -698,7 +697,7 @@ export function ContactModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.35)" }} onClick={onClose}>
       <div
         className="bg-card border border-border rounded-[14px] shadow-2xl flex flex-col overflow-hidden"
-        style={{ width: "min(800px, calc(100vw - 32px))", height: "min(600px, calc(100vh - 32px))" }}
+        style={{ width: "min(1080px, calc(100vw - 32px))", height: "min(680px, calc(100vh - 32px))" }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -755,13 +754,13 @@ export function ContactModal({
           </button>
         </div>
 
-        {/* Two-column body */}
+        {/* Three-pane body: contact info | detail tabs | messages */}
         <div className="flex flex-1 min-h-0">
-          {/* Left: static info */}
+          {/* Left: static contact info */}
           <LeftPanel contact={contact} />
 
-          {/* Right: tabbed activity */}
-          <div className="flex flex-col flex-1 min-w-0 min-h-0">
+          {/* Middle: tabbed detail content */}
+          <div className="flex flex-col flex-[2_2_0] min-w-0 min-h-0 border-r border-border">
             {/* Tab bar */}
             <div className="flex items-center border-b border-border px-4 shrink-0">
               {tabs.map((t) => {
@@ -781,10 +780,17 @@ export function ContactModal({
             {/* Tab content */}
             <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
               {activeTab === "timeline"      && <TimelineTab      contact={contact} />}
-              {activeTab === "messages"      && <MessagesTab      contact={contact} />}
               {activeTab === "notes"         && <NotesTab         contact={contact} />}
               {activeTab === "qualification" && <QualificationTab contact={contact} />}
             </div>
+          </div>
+
+          {/* Right: messages always visible */}
+          <div className="flex flex-col flex-[3_3_0] min-w-0 min-h-0">
+            {contact.ghlContactId
+              ? <MessagesTab contact={contact} />
+              : <EmptyState icon={MessageCircle} message="No GHL contact linked" />
+            }
           </div>
         </div>
       </div>

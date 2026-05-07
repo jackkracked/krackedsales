@@ -35,9 +35,13 @@ export function useConversations(channel: ChannelFilter, unreadOnly = false) {
         convs = convs.filter((c) => (c.unreadCount ?? 0) > 0);
       }
 
-      // GHL's type filter may return wrong results — apply client-side too
+      // GHL's type filter may return wrong results — apply client-side too.
+      // Normalise both sides to handle GHL returning "SMS" vs "TYPE_SMS" inconsistently.
       if (channel !== "ALL") {
-        convs = convs.filter((c) => c.type === channel);
+        const normalise = (t: string | undefined) =>
+          (t ?? "").toUpperCase().replace(/^TYPE_/, "");
+        const target = normalise(channel);
+        convs = convs.filter((c) => normalise(c.type) === target);
       }
 
       return { ...data, conversations: convs };

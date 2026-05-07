@@ -28,7 +28,7 @@ interface GHLNote {
   createdAt?: string;
 }
 
-type Tab = "overview" | "qualification" | "notes" | "messages";
+type Tab = "overview" | "qualification" | "notes";
 
 const STATUS_STYLES: Record<string, string> = {
   open: "bg-primary/10 text-primary",
@@ -338,8 +338,9 @@ function MessagesTab({ contactId, stageName, opportunityId }: {
       return d?.conversations?.[0] ?? null;
     },
     enabled: !!contactId,
-    staleTime: 30 * 1000,
-    retry: false,
+    staleTime: 5 * 60 * 1000,   // conversation ID doesn't change — cache for 5 min
+    gcTime: 10 * 60 * 1000,
+    retry: 2,
   });
 
   const conversationId = convData?.id ?? null;
@@ -353,8 +354,8 @@ function MessagesTab({ contactId, stageName, opportunityId }: {
       return res.json();
     },
     enabled: !!conversationId,
-    staleTime: 10 * 1000,
-    refetchInterval: 15 * 1000,
+    staleTime: 30 * 1000,
+    refetchInterval: 30 * 1000,
   });
 
   // Reverse to oldest-first for natural chat reading order
@@ -400,7 +401,7 @@ function MessagesTab({ contactId, stageName, opportunityId }: {
   return (
     <div className="flex flex-col gap-3 h-full">
       {/* Message thread */}
-      <div ref={scrollRef} className="flex flex-col gap-1.5 flex-1 overflow-y-auto min-h-[200px] max-h-[340px]">
+      <div ref={scrollRef} className="flex flex-col gap-1.5 flex-1 overflow-y-auto min-h-0">
         {msgsLoading && (
           <div className="flex flex-col gap-2.5">
             {[55, 75, 40, 68].map((w, i) => (
@@ -651,7 +652,6 @@ export function OpportunityModal({
     { key: "overview", label: "Overview", icon: User },
     { key: "qualification", label: "Qualification", icon: FileText },
     { key: "notes", label: "Notes", icon: MessageSquare },
-    { key: "messages", label: "Messages", icon: MessageCircle },
   ];
 
   return (
@@ -662,7 +662,7 @@ export function OpportunityModal({
         onClick={onClose}
       />
 
-      <div className="relative bg-card border border-border rounded-[10px] shadow-xl w-full max-w-lg z-10 flex flex-col max-h-[88vh]">
+      <div className="relative bg-card border border-border rounded-[10px] shadow-xl w-full max-w-[1080px] z-10 flex flex-col max-h-[85vh]">
         {/* Header */}
         <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-border shrink-0">
           <div className="min-w-0 flex-1 mr-3">
@@ -726,56 +726,29 @@ export function OpportunityModal({
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="flex items-center border-b border-border px-5 shrink-0">
-          {TABS.map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              onClick={() => setActiveTab(key)}
-              className={cn(
-                "flex items-center gap-1.5 px-1 py-2.5 mr-5 text-sm font-medium border-b-2 transition-colors",
-                activeTab === key
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {label}
-            </button>
-          ))}
-        </div>
+        {/* Two-pane body */}
+        <div className="flex flex-1 min-h-0">
 
-        {/* Stage context strip — Messages tab only, 30px tall, no vertical cost on thread */}
-        {activeTab === "messages" && (
-          <div className="flex items-center gap-1.5 px-5 border-b border-border/40 bg-muted/20 shrink-0">
-            <span className="text-[11px] text-muted-foreground/60 select-none shrink-0">Stage</span>
-            <span className="text-[11px] text-border/80 select-none">/</span>
-            {savingStage ? (
-              <div className="flex items-center gap-1.5 text-[11px] text-primary py-1.5">
-                <RefreshCw className="w-3 h-3 animate-spin" />
-                Saving…
-              </div>
-            ) : (
-              <div className="relative flex items-center min-w-0">
-                <select
-                  value={localStageId}
-                  onChange={(e) => handleStageChange(e.target.value)}
-                  disabled={pipelineStages.length === 0}
-                  className="text-[11px] font-medium text-foreground bg-transparent border-none py-1.5 pl-0 pr-4 appearance-none cursor-pointer focus:outline-none disabled:opacity-40 min-w-0"
+          {/* Left pane — tabs + scrollable detail content */}
+          <div className="w-[40%] flex flex-col min-h-0 border-r border-border">
+            <div className="flex items-center border-b border-border px-5 shrink-0">
+              {TABS.map(({ key, label, icon: Icon }) => (
+                <button
+                  key={key}
+                  onClick={() => setActiveTab(key)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-1 py-2.5 mr-5 text-sm font-medium border-b-2 transition-colors",
+                    activeTab === key
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  )}
                 >
-                  {pipelineStages.length === 0 && <option value={localStageId}>{localStageName}</option>}
-                  {pipelineStages.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-0 w-3 h-3 text-muted-foreground/60 pointer-events-none" />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto px-5 py-5 min-h-0">
+                  <Icon className="w-3.5 h-3.5" />
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-5 min-h-0">
           {activeTab === "overview" && (
             <div className="space-y-5">
               {/* Contact */}
@@ -955,13 +928,18 @@ export function OpportunityModal({
             <NotesTab contactId={contactId} notes={notes} isLoading={isLoading} />
           )}
 
-          {activeTab === "messages" && (
+            </div>
+          </div>
+
+          {/* Right pane — messages always visible */}
+          <div className="flex-1 flex flex-col min-h-0 p-4">
             <MessagesTab
               contactId={contactId}
               stageName={localStageName}
               opportunityId={opportunity.id}
             />
-          )}
+          </div>
+
         </div>
 
       </div>

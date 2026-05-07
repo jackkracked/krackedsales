@@ -46,10 +46,27 @@ export function parseQualificationNote(body: string): QualificationQA[] {
 
   for (const block of blocks) {
     const lines = block.trim().split("\n").filter((l) => l.trim());
-    if (lines.length < 2) continue;
 
-    const question = lines[0].trim().replace(/^[-•*]\s*/, "");
-    const answer = lines.slice(1).join(" ").trim();
+    let question: string;
+    let answer: string;
+
+    if (lines.length >= 2) {
+      // Normal format: question on first line, answer on subsequent lines
+      question = lines[0].trim().replace(/^[-•*]\s*/, "");
+      answer = lines.slice(1).join(" ").trim();
+    } else if (lines.length === 1) {
+      // Inline format: "Question? Answer" — split on the first '?'
+      const single = lines[0].trim();
+      const qMark = single.indexOf("?");
+      if (qMark > 0 && qMark < single.length - 1) {
+        question = single.slice(0, qMark + 1).trim().replace(/^[-•*]\s*/, "");
+        answer = single.slice(qMark + 1).trim();
+      } else {
+        continue;
+      }
+    } else {
+      continue;
+    }
 
     if (!question || !answer) continue;
 

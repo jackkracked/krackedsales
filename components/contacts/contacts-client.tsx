@@ -158,7 +158,7 @@ export function ContactsClient() {
   const [showAdvancedPanel, setShowAdvancedPanel] = useState(false);
   const [selected, setSelected]               = useState<Set<string>>(new Set());
   const [openContact, setOpenContact]         = useState<UnifiedContact | null>(null);
-  const [openContactTab, setOpenContactTab]   = useState<"messages" | undefined>(undefined);
+  const [openContactTab, setOpenContactTab]   = useState<"timeline" | undefined>(undefined);
   const [smartLists, setSmartLists]           = useState<SmartList[]>([]);
   const [activeListId, setActiveListId]       = useState<string | null>(null);
   const [savingList, setSavingList]           = useState(false);
@@ -469,7 +469,7 @@ export function ContactsClient() {
                   selected={selected.has(c.uid)}
                   onSelect={() => setSelected((prev) => { const n = new Set(prev); n.has(c.uid) ? n.delete(c.uid) : n.add(c.uid); return n; })}
                   onClick={() => { setOpenContactTab(undefined); setOpenContact(c); }}
-                  onOpenMessages={() => { setOpenContactTab("messages"); setOpenContact(c); }}
+                  onOpenMessages={() => { setOpenContactTab(undefined); setOpenContact(c); }}
                 />
               ))
             }
