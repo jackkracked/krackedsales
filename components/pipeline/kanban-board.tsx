@@ -38,11 +38,15 @@ type LeadTab = "overview" | "comment" | "notes" | "messages";
 function SortableCard({
   opportunity,
   hasUnread,
+  isSelected,
+  onToggleSelect,
   onCardClick,
   onMessageClick,
 }: {
   opportunity: GHLOpportunity;
   hasUnread: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (e: React.MouseEvent) => void;
   onCardClick: (opp: GHLOpportunity) => void;
   onMessageClick: (opp: GHLOpportunity) => void;
 }) {
@@ -63,6 +67,8 @@ function SortableCard({
         opportunity={opportunity}
         isDragging={isDragging}
         hasUnread={hasUnread}
+        isSelected={isSelected}
+        onToggleSelect={onToggleSelect}
         onClick={() => !isDragging && onCardClick(opportunity)}
         onMessageClick={() => !isDragging && onMessageClick(opportunity)}
       />
@@ -77,20 +83,26 @@ function KanbanColumn({
   opportunities,
   commentLeads,
   unreadContactIds,
+  selectedIds,
   onCardClick,
   onMessageClick,
   onCommentLeadClick,
   onCommentLeadMessageClick,
+  onToggleSelect,
+  onSelectAll,
   isOver,
 }: {
   stage: GHLPipeline["stages"][0];
   opportunities: GHLOpportunity[];
   commentLeads?: CommentLead[];
   unreadContactIds: Set<string>;
+  selectedIds: Set<string>;
   onCardClick: (opp: GHLOpportunity) => void;
   onMessageClick: (opp: GHLOpportunity) => void;
   onCommentLeadClick?: (lead: CommentLead) => void;
   onCommentLeadMessageClick?: (lead: CommentLead) => void;
+  onToggleSelect: (id: string) => void;
+  onSelectAll: () => void;
   isOver: boolean;
 }) {
   const { setNodeRef } = useDroppable({ id: stage.id });
@@ -113,6 +125,16 @@ function KanbanColumn({
         <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
           {opportunities.length + (commentLeads?.length ?? 0)}
         </span>
+        {opportunities.length > 0 && (
+          <button
+            onClick={onSelectAll}
+            className="text-[11px] text-muted-foreground hover:text-foreground transition-colors shrink-0"
+          >
+            {opportunities.length > 0 && opportunities.every((o) => selectedIds.has(o.id))
+              ? "Deselect"
+              : "Select all"}
+          </button>
+        )}
       </div>
 
       <div
@@ -133,6 +155,8 @@ function KanbanColumn({
                 key={card.id}
                 opportunity={card.item}
                 hasUnread={unreadContactIds.has(card.item.contact?.id ?? "")}
+                isSelected={selectedIds.has(card.item.id)}
+                onToggleSelect={(e) => { e.stopPropagation(); onToggleSelect(card.item.id); }}
                 onCardClick={onCardClick}
                 onMessageClick={onMessageClick}
               />
@@ -180,8 +204,28 @@ export function KanbanBoard({ pipeline, opportunities, commentLeads = [], unread
   const [selectedOppTab, setSelectedOppTab] = useState<OppTab>("overview");
   const [selectedCommentLead, setSelectedCommentLead] = useState<CommentLead | null>(null);
   const [selectedLeadTab, setSelectedLeadTab] = useState<LeadTab>("overview");
+  const [selectedOppIds, setSelectedOppIds] = useState<Set<string>>(new Set());
   const updateStage = useUpdateOpportunityStage();
   const recordChange = useStageHistoryStore((s) => s.recordChange);
+
+  function toggleSelectOpp(id: string) {
+    setSelectedOppIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function selectAllInStage(stageId: string) {
+    const stageOpps = opportunitiesByStage(stageId);
+    setSelectedOppIds((prev) => {
+      const next = new Set(prev);
+      const allSelected = stageOpps.length > 0 && stageOpps.every((o) => next.has(o.id));
+      if (allSelected) stageOpps.forEach((o) => next.delete(o.id));
+      else stageOpps.forEach((o) => next.add(o.id));
+      return next;
+    });
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -276,6 +320,11 @@ export function KanbanBoard({ pipeline, opportunities, commentLeads = [], unread
 
   const stageMap = Object.fromEntries(pipeline.stages.map((s) => [s.id, s.name]));
 
+  // Build queue in stage-column order (top-to-bottom per column, left-to-right columns)
+  const queueOpps: GHLOpportunity[] | undefined = selectedOppIds.size >= 2
+    ? pipeline.stages.flatMap((s) => opportunitiesByStage(s.id).filter((o) => selectedOppIds.has(o.id)))
+    : undefined;
+
   function openOpp(opp: GHLOpportunity, tab: OppTab = "overview") {
     setSelectedOpp(opp);
     setSelectedOppTab(tab);
@@ -316,6 +365,9 @@ export function KanbanBoard({ pipeline, opportunities, commentLeads = [], unread
                 opportunities={opportunitiesByStage(stage.id)}
                 commentLeads={stageIndex === 0 ? commentLeads : undefined}
                 unreadContactIds={unreadContactIds}
+                selectedIds={selectedOppIds}
+                onToggleSelect={toggleSelectOpp}
+                onSelectAll={() => selectAllInStage(stage.id)}
                 onCardClick={(opp) => openOpp(opp, "overview")}
                 onMessageClick={(opp) => openOpp(opp, "messages")}
                 onCommentLeadClick={(lead) => openCommentLead(lead, "overview")}
@@ -335,12 +387,36 @@ export function KanbanBoard({ pipeline, opportunities, commentLeads = [], unread
         </DragOverlay>
       </DndContext>
 
+      {/* Selection bar */}
+      {selectedOppIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2.5 bg-card border border-border rounded-[10px] shadow-lg pointer-events-auto">
+          <span className="text-sm font-medium text-foreground tabular-nums">
+            {selectedOppIds.size} selected
+          </span>
+          <div className="w-px h-4 bg-border" />
+          <button
+            onClick={() => setSelectedOppIds(new Set())}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       {selectedOpp && (
         <OpportunityModal
           opportunity={selectedOpp}
           stageName={stageMap[selectedOpp.pipelineStageId] ?? "Unknown"}
           onClose={() => setSelectedOpp(null)}
           initialTab={selectedOppTab}
+          queue={queueOpps}
+          queueIndex={queueOpps ? queueOpps.findIndex((o) => o.id === selectedOpp.id) : undefined}
+          onNavigate={(i) => {
+            if (queueOpps) {
+              setSelectedOpp(queueOpps[i]);
+              setSelectedOppTab("overview");
+            }
+          }}
         />
       )}
 

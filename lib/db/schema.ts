@@ -369,3 +369,59 @@ export const commentLeads = pgTable("comment_leads", {
   demoStartedAt: timestamp("demo_started_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+/**
+ * Unified call log — Google Meet sessions and GHL dialer calls (inbound + outbound).
+ * Synced via /api/calls/sync or the sync-calls cron job.
+ */
+export const calls = pgTable("calls", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  callType: text("call_type").notNull(), // "meet" | "dialer"
+  direction: text("direction"),          // "inbound" | "outbound" | null (Meet has no direction)
+  contactId: text("contact_id"),         // GHL contact ID (may be null for orphaned calls)
+  contactName: text("contact_name"),
+  repEmail: text("rep_email"),           // Google email (Meet) or GHL user email (Dialer)
+  repName: text("rep_name"),
+  startedAt: timestamp("started_at").notNull(),
+  durationSeconds: integer("duration_seconds"),
+  // Meet-specific
+  meetConferenceId: text("meet_conference_id").unique(), // dedup key
+  meetSpaceId: text("meet_space_id"),
+  transcriptAvailable: boolean("transcript_available").default(false).notNull(),
+  smartNotesUrl: text("smart_notes_url"),
+  // Dialer-specific
+  ghlMessageId: text("ghl_message_id").unique(),         // dedup key
+  ghlConversationId: text("ghl_conversation_id"),
+  recordingAvailable: boolean("recording_available").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/**
+ * Rep calendar configuration — links a team member's Google Workspace email
+ * to their GHL calendar and a display color for the calendar view.
+ */
+export const userCalendars = pgTable("user_calendars", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  repName: text("rep_name").notNull(),
+  repEmail: text("rep_email").notNull().unique(), // Google Workspace email
+  ghlCalendarId: text("ghl_calendar_id"),
+  color: text("color").notNull().default("#6366f1"), // hex color for UI
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/**
+ * Per-calendar booking automation rules — when a call is booked or confirmed
+ * on a specific calendar, automatically move the linked opportunity to a stage.
+ */
+export const bookingAutomationRules = pgTable("booking_automation_rules", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  ghlCalendarId: text("ghl_calendar_id").notNull(),
+  calendarName: text("calendar_name").notNull(),
+  trigger: text("trigger").notNull(), // "call_booked" | "call_confirmed"
+  pipelineId: text("pipeline_id").notNull(),
+  stageId: text("stage_id").notNull(),
+  stageName: text("stage_name").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});

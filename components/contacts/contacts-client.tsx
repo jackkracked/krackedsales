@@ -495,13 +495,26 @@ export function ContactsClient() {
         </div>
       )}
 
-      {openContact && (
-        <ContactModal
-          contact={openContact}
-          onClose={() => { setOpenContact(null); setOpenContactTab(undefined); }}
-          initialTab={openContactTab}
-        />
-      )}
+      {openContact && (() => {
+        const queueContacts = selected.size >= 2
+          ? contacts.filter((c) => selected.has(c.uid))
+          : undefined;
+        const queueIndex = queueContacts
+          ? queueContacts.findIndex((c) => c.uid === openContact.uid)
+          : undefined;
+        return (
+          <ContactModal
+            contact={openContact}
+            onClose={() => { setOpenContact(null); setOpenContactTab(undefined); }}
+            initialTab={openContactTab}
+            queue={queueContacts}
+            queueIndex={queueIndex}
+            onNavigate={(i) => {
+              if (queueContacts) setOpenContact(queueContacts[i]);
+            }}
+          />
+        );
+      })()}
 
       {showAdvancedPanel && (
         <AdvancedFiltersPanel

@@ -18,6 +18,8 @@ import {
   Settings2,
   Target,
   Users,
+  Phone,
+  CalendarDays,
 } from "lucide-react";
 
 const NAV_SECTIONS = [
@@ -27,6 +29,8 @@ const NAV_SECTIONS = [
       { href: "/dashboard",  label: "Dashboard", icon: LayoutDashboard },
       { href: "/pipeline",   label: "Pipeline",  icon: GitMerge },
       { href: "/contacts",   label: "Contacts",  icon: Users },
+      { href: "/calls",      label: "Calls",     icon: Phone },
+      { href: "/calendar",   label: "Calendar",  icon: CalendarDays },
       { href: "/inbox",      label: "Inbox",     icon: MessageSquare },
     ],
   },

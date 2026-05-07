@@ -3,12 +3,13 @@
 import React, { useState } from "react";
 import { CreateTaskModal } from "@/components/shared/create-task-modal";
 import { CreateDemoModal } from "@/components/shared/create-demo-modal";
+import { MessageComposer } from "@/components/shared/message-composer";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   X, Mail, Phone, Tag, Calendar, User, TrendingUp,
   FileText, RefreshCw, Clock, ExternalLink, Edit2, Check, MessageSquare,
   Send, DollarSign, MessageCircle, ListTodo, Layers, ClipboardCheck, Zap,
-  ChevronDown, ArrowLeft,
+  ChevronDown, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { formatDateTime, relativeTime } from "@/lib/utils/date";
 import { cn } from "@/lib/utils/cn";
@@ -320,13 +321,11 @@ function NotesTab({
 }
 
 /** Messages tab — fetches conversation thread by contactId */
-function MessagesTab({ contactId, stageName, opportunityId, initialDraft }: {
+function MessagesTab({ contactId, stageName, opportunityId }: {
   contactId: string;
   stageName: string;
   opportunityId: string;
-  initialDraft?: string;
 }) {
-  const [draft, setDraft] = useState(initialDraft ?? "");
   const stageChanges = useStageHistoryStore((s) => s.changes);
 
   // Step 1: find the conversation for this contact
@@ -356,19 +355,6 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft }: {
     enabled: !!conversationId,
     staleTime: 10 * 1000,
     refetchInterval: 15 * 1000,
-  });
-
-  const sendMutation = useMutation({
-    mutationFn: async (text: string) => {
-      const res = await fetch(`/api/ghl/conversations/${conversationId}/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, type: "SMS", contactId }),
-      });
-      if (!res.ok) throw new Error("Failed to send");
-      return res.json();
-    },
-    onSuccess: () => { setDraft(""); refetch(); },
   });
 
   // Reverse to oldest-first for natural chat reading order
@@ -519,41 +505,12 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft }: {
         )}
       </div>
 
-      {/* Reply composer */}
-      <div className="border border-border rounded-[10px] overflow-hidden shrink-0 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/40 transition-all">
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              if (draft.trim() && !sendMutation.isPending) sendMutation.mutate(draft.trim());
-            }
-          }}
-          placeholder="Reply via SMS…"
-          rows={2}
-          className="w-full px-3.5 py-2.5 text-sm bg-transparent text-foreground placeholder:text-muted-foreground/50 resize-none focus:outline-none"
-        />
-        <div className="flex items-center justify-between px-3.5 pb-2.5 pt-0">
-          <span className="text-[11px] text-muted-foreground/50">⌘↵ to send</span>
-          <button
-            onClick={() => { if (draft.trim() && !sendMutation.isPending) sendMutation.mutate(draft.trim()); }}
-            disabled={!draft.trim() || sendMutation.isPending}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[7px] transition-colors",
-              draft.trim() && !sendMutation.isPending
-                ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                : "bg-muted text-muted-foreground/50 cursor-not-allowed"
-            )}
-          >
-            {sendMutation.isPending ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-            Send
-          </button>
-        </div>
-      </div>
-      {sendMutation.isError && (
-        <p className="text-xs text-destructive mt-1">Failed to send. Check your GHL connection.</p>
-      )}
+      <MessageComposer
+        conversationId={conversationId}
+        contactId={contactId}
+        messages={messages}
+        onSent={() => refetch()}
+      />
     </div>
   );
 }
@@ -566,6 +523,9 @@ interface OpportunityModalProps {
   onClose: () => void;
   initialTab?: Tab;
   initialDraft?: string; // pre-fills the Messages tab reply composer
+  queue?: GHLOpportunity[];
+  queueIndex?: number;
+  onNavigate?: (index: number) => void;
 }
 
 export function OpportunityModal({
@@ -574,8 +534,28 @@ export function OpportunityModal({
   onClose,
   initialTab,
   initialDraft,
+  queue,
+  queueIndex,
+  onNavigate,
 }: OpportunityModalProps) {
   const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? "overview");
+  const inQueue = queue && queue.length >= 2 && queueIndex !== undefined;
+
+  // Keyboard navigation for queue
+  React.useEffect(() => {
+    const fn = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { onClose(); return; }
+      if (!inQueue || !onNavigate) return;
+      const target = document.activeElement;
+      const isTyping = target instanceof HTMLElement &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      if (isTyping) return;
+      if (e.key === "ArrowLeft"  && queueIndex! > 0)                  onNavigate(queueIndex! - 1);
+      if (e.key === "ArrowRight" && queueIndex! < queue!.length - 1)  onNavigate(queueIndex! + 1);
+    };
+    window.addEventListener("keydown", fn);
+    return () => window.removeEventListener("keydown", fn);
+  }, [onClose, inQueue, onNavigate, queueIndex, queue]);
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [showCreateDemo, setShowCreateDemo] = useState(false);
   const [editingValue, setEditingValue] = useState(false);
@@ -686,17 +666,25 @@ export function OpportunityModal({
         {/* Header */}
         <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-border shrink-0">
           <div className="min-w-0 flex-1 mr-3">
-            <h2
-              className="text-base font-semibold text-foreground leading-tight"
-              style={{ fontFamily: "var(--font-heading)" }}
-            >
-              {name}
-            </h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2
+                className="text-base font-semibold text-foreground leading-tight"
+                style={{ fontFamily: "var(--font-heading)" }}
+              >
+                {name}
+              </h2>
+              {/* Stage badge — shown in queue mode since contacts can span different stages */}
+              {inQueue && (
+                <span className="inline-flex items-center px-2 py-px rounded-full text-[11px] font-medium bg-muted text-muted-foreground border border-border/60 shrink-0">
+                  {localStageName}
+                </span>
+              )}
+            </div>
             <p className="text-xs text-muted-foreground mt-0.5">
               Created {relativeTime(opportunity.createdAt)}
             </p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <span
               className={cn(
                 "px-2.5 py-0.5 rounded-full text-xs font-medium capitalize",
@@ -706,6 +694,29 @@ export function OpportunityModal({
             >
               {opportunity.status}
             </span>
+            {inQueue && (
+              <div className="flex items-center gap-0.5 ml-1">
+                <span className="text-xs tabular-nums text-muted-foreground mr-1 select-none">
+                  {queueIndex! + 1} / {queue!.length}
+                </span>
+                <button
+                  onClick={() => onNavigate!(queueIndex! - 1)}
+                  disabled={queueIndex === 0}
+                  className="p-1.5 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-25 disabled:cursor-default"
+                  aria-label="Previous"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => onNavigate!(queueIndex! + 1)}
+                  disabled={queueIndex === queue!.length - 1}
+                  className="p-1.5 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-25 disabled:cursor-default"
+                  aria-label="Next"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
             <button
               onClick={onClose}
               className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -949,7 +960,6 @@ export function OpportunityModal({
               contactId={contactId}
               stageName={localStageName}
               opportunityId={opportunity.id}
-              initialDraft={initialDraft}
             />
           )}
         </div>

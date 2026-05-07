@@ -1,58 +1,76 @@
-# Settings → KPI Cost Automation — Plan
+# Calls Page + Calendar Page
 
-## Goal
-1. Settings: add Software Costs section (name + monthly cost, list of entries)
-2. Settings: add Cost Per Email field (single value)
-3. KPIs: auto-calculate `software-cost` = sum of all active software costs
-4. KPIs: auto-calculate `team-fulfillment` = costPerEmail × completed demos that month
+## Status: Complete — needs DB migration + Google setup
 
-Both KPI cards already exist in the UI — they just need live data instead of zeroes.
+### Phase 1 — Foundation ✓
+- [x] Install googleapis package
+- [x] Add calls, user_calendars, booking_automation_rules tables to schema
+- [x] Create lib/google/client.ts (service account + delegation)
 
----
+### Phase 2 — Calls data ✓
+- [x] POST /api/calls/sync (+ named runSync export)
+- [x] GET /api/calls (filters + metrics)
+- [x] GET /api/calls/[id]/transcript
+- [x] POST /api/cron/sync-calls
 
-## DB Schema (2 new tables)
+### Phase 3 — Calendar data ✓
+- [x] GET /api/calendar/events
+- [x] POST /api/calendar/book
+- [x] CRUD /api/settings/user-calendars + [id]
+- [x] CRUD /api/settings/booking-rules + [id]
+- [x] GET /api/ghl/contacts/search
 
-**`software_costs`**
-- id (uuid PK)
-- name (text) — e.g. "GoHighLevel"
-- monthly_cost (doublePrecision)
-- active (bool, default true)
-- created_at (timestamp)
+### Phase 4 — Calls page UI ✓
+- [x] app/(app)/calls/page.tsx
+- [x] components/calls/calls-client.tsx
+- [x] components/calls/transcript-drawer.tsx
 
-**`cost_settings`**
-- id (uuid PK)
-- cost_per_email (doublePrecision) — cost per completed demo
-- updated_at (timestamp)
-(Single-row table — always upsert the one row)
+### Phase 5 — Calendar page UI ✓
+- [x] app/(app)/calendar/page.tsx
+- [x] components/calendar/calendar-client.tsx (week/month/day)
+- [x] components/calendar/event-panel.tsx
+- [x] components/calendar/book-call-drawer.tsx
 
----
+### Phase 6 — Settings + Automation ✓
+- [x] components/settings/user-calendars-settings.tsx
+- [x] components/settings/booking-rules-settings.tsx
+- [x] Settings page Calendars tab
+- [x] GHL webhook: AppointmentBooked/Updated → booking automation rules
 
-## Steps
-
-- [ ] 1. Add both tables to `lib/db/schema.ts`
-- [ ] 2. User runs `npx drizzle-kit push`
-- [ ] 3. Create `/api/settings/software-costs` (GET list, POST create)
-- [ ] 4. Create `/api/settings/software-costs/[id]` (DELETE)
-- [ ] 5. Create `/api/settings/cost-settings` (GET + POST upsert)
-- [ ] 6. Create `/api/kpi/computed-costs?since=&until=` 
-        Returns: { softwareCost: number, teamFulfillment: number }
-        - softwareCost = sum of active monthly costs (same every month, not date-filtered)
-        - teamFulfillment = costPerEmail × emailDemosStarted for the period
-- [ ] 7. Build `components/settings/software-costs.tsx`
-        - List entries (name + £X/mo), delete button per row
-        - Add form: name + cost
-        - Shows total at bottom
-- [ ] 8. Build cost-per-email field inside a small "Cost Settings" card
-        `components/settings/cost-settings.tsx`
-- [ ] 9. Add both to settings page (row below the top grid)
-- [ ] 10. Update `kpis-client.tsx` — add query for `/api/kpi/computed-costs`
-         Inject into `data.detail.softwareCost` and `data.detail.teamFulfillment`
-- [ ] 11. DB push + deploy
+### Phase 7 — Navigation ✓
+- [x] Calls + Calendar added to sidebar (Work section)
 
 ---
 
-## Notes
-- "Completed demos" = `emailDemosStarted` count (same API already used in KPIs)
-- Software cost is not date-scoped — it's the same monthly total regardless of period
-  (For weekly/quarterly views the KPI page will show the same monthly total, which is fine — it reflects their fixed monthly overhead)
-- Manual overrides in the KPI page still work on top of these calculated values
+## What you need to do
+
+### 1. Run DB migration
+In /Users/jackpointer/Projects/kracked-sales with .env.local active:
+```
+npx drizzle-kit push
+```
+This creates 3 new tables: calls, user_calendars, booking_automation_rules.
+
+### 2. Set up Google service account (for Meet + Calendar)
+In Google Workspace Admin → Security → API Controls → Domain-wide delegation, add service account with these scopes:
+- https://www.googleapis.com/auth/calendar
+- https://www.googleapis.com/auth/meetings.space.readonly
+
+Add to .env.local:
+```
+GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@project.iam.gserviceaccount.com
+GOOGLE_SERVICE_ACCOUNT_KEY=base64:<base64-encoded-service-account-json>
+GOOGLE_WORKSPACE_DOMAIN=yourworkspace.com
+```
+
+To base64-encode the JSON key file:
+```
+base64 -i service-account-key.json | tr -d '\n'
+```
+Then prefix with "base64:" in the env var.
+
+### 3. Add reps to calendar settings
+Go to /settings → Calendars tab and add each rep's name, Google email, and GHL calendar ID.
+
+### 4. Add calls sync cron to Vercel
+In vercel.json or project settings, add a cron that hits POST /api/cron/sync-calls with Authorization: Bearer {CRON_SECRET} header, on whatever schedule you want (e.g. every hour).

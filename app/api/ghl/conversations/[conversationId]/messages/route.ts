@@ -51,9 +51,9 @@ export async function POST(
   { params }: { params: Promise<{ conversationId: string }> }
 ) {
   const { conversationId } = await params;
-  const { message, type = "TYPE_SMS", contactId } = await req.json();
+  const { message, type = "TYPE_SMS", contactId, subject, html, cc, bcc } = await req.json();
 
-  if (!message?.trim()) {
+  if (!message?.trim() && !html?.trim()) {
     return NextResponse.json({ error: "Message is required" }, { status: 400 });
   }
 
@@ -67,12 +67,22 @@ export async function POST(
     // GHL send API: POST /conversations/messages (global endpoint).
     // The conversation-scoped path /conversations/{id}/messages is GET-only.
     // conversationId must be in the request body, not the URL path.
-    const data = await ghl.post(`/conversations/messages`, {
+    const payload: Record<string, string> = {
       type: sendType,
       conversationId,
       contactId,
-      message: message.trim(),
-    });
+      message: (message ?? "").trim(),
+    };
+
+    // Email-specific fields — only forwarded when present
+    if (sendType === "Email") {
+      if (html?.trim()) payload.html = html.trim();
+      if (subject?.trim()) payload.subject = subject.trim();
+      if (cc?.trim()) payload.emailTo = cc.trim();   // GHL uses emailTo for CC-style addressing
+      if (bcc?.trim()) payload.bcc = bcc.trim();
+    }
+
+    const data = await ghl.post(`/conversations/messages`, payload);
     return NextResponse.json(data);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

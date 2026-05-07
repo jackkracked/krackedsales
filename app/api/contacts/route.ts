@@ -121,10 +121,16 @@ async function getConversationChannelMap(): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   try {
     const locId = locationId();
-    const MAX_PAGES = 20;
-    for (let page = 1; page <= MAX_PAGES; page++) {
-      const data = await ghl.get<{ conversations: Array<{ contactId: string; type: string }> }>(
-        `/conversations/search?locationId=${locId}&limit=100&page=${page}&sortBy=last_message_date&sortOrder=desc`
+    const MAX_ROUNDS = 20;
+    let lastId: string | undefined;
+
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      const cursor = lastId ? `&lastId=${lastId}` : "";
+      const data = await ghl.get<{
+        conversations: Array<{ id: string; contactId: string; type: string }>;
+        meta?: { total?: number; currentPage?: number; nextPage?: boolean };
+      }>(
+        `/conversations/search?locationId=${locId}&limit=100&sortBy=last_message_date&sortOrder=desc${cursor}`
       );
       const batch = data.conversations ?? [];
       for (const conv of batch) {
@@ -134,6 +140,9 @@ async function getConversationChannelMap(): Promise<Map<string, string>> {
         }
       }
       if (batch.length < 100) break;
+      // Advance cursor to the last conversation's ID for the next round
+      lastId = batch[batch.length - 1]?.id;
+      if (!lastId) break;
     }
     _convMap = map;
     _convAt = Date.now();

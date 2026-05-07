@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { cn } from "@/lib/utils/cn";
-import { Clock, ExternalLink, MessageCircle } from "lucide-react";
+import { Check, Clock, ExternalLink, MessageCircle } from "lucide-react";
 import { relativeTime } from "@/lib/utils/date";
 import { cleanUrl, looksLikeUrl, parseQualificationNote, isQualificationNote } from "@/lib/utils/url";
 import type { GHLOpportunity } from "@/lib/ghl/types";
@@ -65,6 +65,8 @@ interface OpportunityCardProps {
   opportunity: GHLOpportunity;
   isDragging?: boolean;
   hasUnread?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (e: React.MouseEvent) => void;
   onClick?: () => void;
   onMessageClick?: () => void;
 }
@@ -73,6 +75,8 @@ export function OpportunityCard({
   opportunity,
   isDragging,
   hasUnread,
+  isSelected,
+  onToggleSelect,
   onClick,
   onMessageClick,
 }: OpportunityCardProps) {
@@ -142,13 +146,40 @@ export function OpportunityCard({
     <div
       onClick={onClick}
       className={cn(
-        "bg-card border border-border rounded-[10px] p-3 cursor-pointer",
+        "group relative bg-card border rounded-[10px] p-3 cursor-pointer",
         "hover:border-primary/40 hover:shadow-sm transition-all duration-150",
-        isDragging && "opacity-50 rotate-1 shadow-lg"
+        isDragging && "opacity-50 rotate-1 shadow-lg",
+        isSelected
+          ? "border-primary/30 bg-primary/[0.03] ring-1 ring-primary/15"
+          : "border-border"
       )}
     >
-      {/* Name */}
-      <p className="text-sm font-semibold text-foreground leading-tight mb-1.5 line-clamp-1">
+      {/* Checkbox — appears on hover, always shown when selected */}
+      {onToggleSelect && (
+        <div
+          onClick={(e) => { e.stopPropagation(); onToggleSelect(e); }}
+          onPointerDown={(e) => e.stopPropagation()}
+          className={cn(
+            "absolute top-2.5 left-2.5 z-10 transition-opacity duration-100",
+            isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          )}
+        >
+          <div className={cn(
+            "w-[15px] h-[15px] rounded-[3px] flex items-center justify-center border transition-colors",
+            isSelected
+              ? "bg-primary border-primary"
+              : "bg-card border-border hover:border-primary/50"
+          )}>
+            {isSelected && <Check className="w-2.5 h-2.5 text-primary-foreground" />}
+          </div>
+        </div>
+      )}
+
+      {/* Name — shifts right on hover/selection to make room for the checkbox */}
+      <p className={cn(
+        "text-sm font-semibold text-foreground leading-tight mb-1.5 line-clamp-1 transition-[padding] duration-150",
+        onToggleSelect && (isSelected ? "pl-5" : "group-hover:pl-5")
+      )}>
         {name}
       </p>
 

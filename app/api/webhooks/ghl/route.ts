@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pusherTrigger } from "@/lib/pusher/server";
 import { db } from "@/lib/db";
-import { pipelineStageEvents, followupSends } from "@/lib/db/schema";
+import { pipelineStageEvents, followupSends, bookingAutomationRules } from "@/lib/db/schema";
 import { and, eq, gte, desc } from "drizzle-orm";
+import { ghl, locationId } from "@/lib/ghl/client";
 
 export const dynamic = "force-dynamic";
 
@@ -131,6 +132,77 @@ export async function POST(req: NextRequest) {
           // Non-fatal — don't let this break the webhook response
           console.error("[GHL Webhook] Failed to mark follow-up reply:", e);
         }
+      }
+    }
+
+    // ── 4. Booking automation — move opportunity stage on appointment events ──
+
+    if (eventType === "AppointmentBooked" || eventType === "AppointmentUpdated") {
+      const calendarId = body?.calendarId;
+      const contactId  = body?.contactId;
+
+      // Determine which trigger this event maps to
+      let trigger: "call_booked" | "call_confirmed" | null = null;
+      if (eventType === "AppointmentBooked") {
+        trigger = "call_booked";
+      } else if (eventType === "AppointmentUpdated" && body?.status === "confirmed") {
+        trigger = "call_confirmed";
+      }
+
+      if (calendarId && contactId && trigger) {
+        try {
+          // Find active automation rules for this calendar + trigger
+          const rules = await db()
+            .select()
+            .from(bookingAutomationRules)
+            .where(
+              and(
+                eq(bookingAutomationRules.ghlCalendarId, calendarId),
+                eq(bookingAutomationRules.trigger, trigger),
+                eq(bookingAutomationRules.isActive, true)
+              )
+            );
+
+          if (rules.length > 0) {
+            // Find the contact's opportunity in GHL
+            type OpportunitySearchResult = {
+              opportunities: Array<{ id: string }>;
+            };
+            const searchResult = await ghl.get<OpportunitySearchResult>(
+              `/opportunities/search?location_id=${locationId()}&contact_id=${contactId}`
+            );
+            const opportunity = searchResult.opportunities?.[0];
+
+            if (!opportunity) {
+              console.log(
+                `[GHL Webhook] No opportunity found for contact=${contactId}, skipping booking automation`
+              );
+            } else {
+              for (const rule of rules) {
+                try {
+                  await ghl.patch(`/opportunities/${opportunity.id}`, {
+                    pipelineStageId: rule.stageId,
+                  });
+                  console.log(
+                    `[GHL Webhook] Booking automation: moved opportunity=${opportunity.id} to stage=${rule.stageName} (trigger=${trigger}, calendar=${calendarId})`
+                  );
+                } catch (ruleErr) {
+                  console.error(
+                    `[GHL Webhook] Booking automation failed for rule=${rule.id} opportunity=${opportunity.id}:`,
+                    ruleErr
+                  );
+                }
+              }
+            }
+          }
+        } catch (e) {
+          // Non-fatal — don't let this break the webhook response
+          console.error("[GHL Webhook] Booking automation error:", e);
+        }
+      } else {
+        console.log(
+          `[GHL Webhook] AppointmentUpdated skipped — status=${body?.status ?? "unknown"} (not confirmed)`
+        );
       }
     }
 

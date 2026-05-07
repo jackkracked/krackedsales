@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/followup-analyse",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/sync-calls",
+      "schedule": "0 * * * *"
     }
   ]
 }

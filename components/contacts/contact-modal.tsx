@@ -4,10 +4,11 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   X, ExternalLink, User, Clock, MessageCircle, ClipboardList, StickyNote,
-  RefreshCw, Send, Plus, Pencil, Trash2, Check, Globe, Phone, Mail,
+  RefreshCw, Plus, Pencil, Trash2, Check, Globe, Phone, Mail,
   Tag, TrendingUp, GitMerge, Calendar, Star, AlertCircle, ArrowDown,
-  ArrowUp, FileText, MessageSquare, ChevronDown,
+  ArrowUp, FileText, MessageSquare, ChevronDown, ChevronLeft, ChevronRight,
 } from "lucide-react";
+import { MessageComposer } from "@/components/shared/message-composer";
 import { cn } from "@/lib/utils/cn";
 import { formatDate, formatDateTime, relativeTime } from "@/lib/utils/date";
 import { parseQualificationNote, isQualificationNote, looksLikeUrl, cleanUrl } from "@/lib/utils/url";
@@ -471,8 +472,6 @@ function EmailCard({ message }: { message: GHLMessage }) {
 }
 
 function MessagesTab({ contact }: { contact: UnifiedContact }) {
-  const [reply, setReply] = useState("");
-  const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   const { data: convData, isLoading: convLoading } = useQuery<{ conversations: Array<{ id: string }> }>({
@@ -501,16 +500,6 @@ function MessagesTab({ contact }: { contact: UnifiedContact }) {
     .sort((a, b) => new Date(a.dateAdded).getTime() - new Date(b.dateAdded).getTime());
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages.length]);
-
-  async function send() {
-    if (!reply.trim() || !convId) return;
-    setSending(true);
-    try {
-      await fetch(`/api/ghl/conversations/${convId}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: reply.trim() }) });
-      setReply("");
-      setTimeout(() => refetch(), 600);
-    } finally { setSending(false); }
-  }
 
   if (convLoading || msgLoading) {
     return (
@@ -549,17 +538,13 @@ function MessagesTab({ contact }: { contact: UnifiedContact }) {
         }
         <div ref={endRef} />
       </div>
-      {convId && (
-        <div className="px-4 pb-4 shrink-0">
-          <div className="flex items-end gap-2 border border-border rounded-[10px] px-3 py-2 bg-card focus-within:ring-2 focus-within:ring-primary/15 focus-within:border-primary/30 transition-shadow">
-            <textarea rows={1} value={reply} onChange={(e) => setReply(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-              placeholder="Reply…" className="flex-1 text-sm bg-transparent resize-none focus:outline-none placeholder:text-muted-foreground/40 max-h-28" />
-            <button onClick={send} disabled={!reply.trim() || sending} className="p-1.5 rounded-[7px] bg-primary text-white hover:bg-primary/90 disabled:opacity-40 transition-colors shrink-0">
-              {sending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-            </button>
-          </div>
-        </div>
+      {convId && contact.ghlContactId && (
+        <MessageComposer
+          conversationId={convId}
+          contactId={contact.ghlContactId}
+          messages={messages}
+          onSent={() => { setTimeout(() => refetch(), 600); }}
+        />
       )}
     </div>
   );
@@ -673,16 +658,41 @@ function EmptyState({ icon: Icon, message }: { icon: React.ElementType; message:
 
 // ─── Modal ─────────────────────────────────────────────────────────────────────
 
-export function ContactModal({ contact, onClose, initialTab }: { contact: UnifiedContact; onClose: () => void; initialTab?: RightTab }) {
+export function ContactModal({
+  contact,
+  onClose,
+  initialTab,
+  queue,
+  queueIndex,
+  onNavigate,
+}: {
+  contact: UnifiedContact;
+  onClose: () => void;
+  initialTab?: RightTab;
+  queue?: UnifiedContact[];
+  queueIndex?: number;
+  onNavigate?: (index: number) => void;
+}) {
   const isGHL = contact.source === "ghl";
   const tabs = RIGHT_TABS.filter((t) => !t.ghlOnly || isGHL);
   const [activeTab, setActiveTab] = useState<RightTab>(initialTab && tabs.find((t) => t.id === initialTab) ? initialTab : tabs[0].id);
 
+  const inQueue = queue && queue.length >= 2 && queueIndex !== undefined;
+
   useEffect(() => {
-    const fn = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const fn = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { onClose(); return; }
+      if (!inQueue || !onNavigate) return;
+      const target = document.activeElement;
+      const isTyping = target instanceof HTMLElement &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      if (isTyping) return;
+      if (e.key === "ArrowLeft"  && queueIndex! > 0)                  onNavigate(queueIndex! - 1);
+      if (e.key === "ArrowRight" && queueIndex! < queue!.length - 1)  onNavigate(queueIndex! + 1);
+    };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
-  }, [onClose]);
+  }, [onClose, inQueue, onNavigate, queueIndex, queue]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.35)" }} onClick={onClose}>
@@ -717,7 +727,30 @@ export function ContactModal({ contact, onClose, initialTab }: { contact: Unifie
               </div>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors ml-3 shrink-0">
+          {inQueue && (
+            <div className="flex items-center gap-0.5 ml-3 shrink-0">
+              <span className="text-xs tabular-nums text-muted-foreground mr-1.5 select-none">
+                {queueIndex! + 1} / {queue!.length}
+              </span>
+              <button
+                onClick={() => onNavigate!(queueIndex! - 1)}
+                disabled={queueIndex === 0}
+                className="p-1.5 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-25 disabled:cursor-default"
+                aria-label="Previous contact"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => onNavigate!(queueIndex! + 1)}
+                disabled={queueIndex === queue!.length - 1}
+                className="p-1.5 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-25 disabled:cursor-default"
+                aria-label="Next contact"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+          <button onClick={onClose} className="p-1.5 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors ml-1 shrink-0">
             <X className="w-4 h-4" />
           </button>
         </div>
