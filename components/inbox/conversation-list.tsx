@@ -91,8 +91,11 @@ export function ConversationList({
             onClick={() => onSelect(conv.id)}
             className={cn(
               "flex items-center gap-3 px-4 py-3 text-left w-full transition-colors duration-100",
-              "hover:bg-muted/40",
-              isSelected && "bg-primary/5 border-l-2 border-l-primary"
+              isSelected
+                ? "bg-primary/8 border-l-2 border-l-primary"
+                : hasUnread
+                ? "bg-primary/[0.04] hover:bg-primary/[0.07] border-l-2 border-l-primary/40"
+                : "hover:bg-muted/40 border-l-2 border-l-transparent"
             )}
           >
             {/* Avatar */}
@@ -103,11 +106,14 @@ export function ConversationList({
               <div className="flex items-center justify-between gap-1 mb-0.5">
                 <span className={cn(
                   "text-sm truncate",
-                  hasUnread ? "font-semibold text-foreground" : "font-medium text-foreground"
+                  hasUnread ? "font-bold text-foreground" : "font-medium text-foreground/80"
                 )}>
                   {conv.fullName || conv.phone || conv.email || "Unknown"}
                 </span>
-                <span className="text-xs text-muted-foreground shrink-0">
+                <span className={cn(
+                  "text-xs shrink-0",
+                  hasUnread ? "text-foreground/70 font-medium" : "text-muted-foreground"
+                )}>
                   {conv.lastMessageDate ? formatMessageTime(conv.lastMessageDate) : ""}
                 </span>
               </div>
@@ -115,12 +121,14 @@ export function ConversationList({
                 <Icon className={cn("w-3 h-3 shrink-0", iconColor)} />
                 <span className={cn(
                   "text-xs truncate flex-1",
-                  hasUnread ? "text-foreground" : "text-muted-foreground"
+                  hasUnread ? "text-foreground/80" : "text-muted-foreground"
                 )}>
                   {cleanPreview(conv.lastMessageBody)}
                 </span>
                 {hasUnread && (
-                  <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
+                  <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center shrink-0">
+                    {conv.unreadCount > 9 ? "9+" : conv.unreadCount}
+                  </span>
                 )}
               </div>
             </div>

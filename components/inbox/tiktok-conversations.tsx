@@ -609,6 +609,7 @@ function CommentThread({ comment }: { comment: TikTokComment }) {
 
 function DmsPanel() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const queryClient = useQueryClient();
 
   const { data, isLoading, isFetching, error } = useQuery({
@@ -628,17 +629,40 @@ function DmsPanel() {
     <div className="flex h-full overflow-hidden">
       {/* Left panel */}
       <div className="flex flex-col border-r border-border bg-card w-full lg:w-80 xl:w-96 shrink-0">
-        {/* Sub-header with refresh */}
+        {/* Sub-header with unread toggle + refresh */}
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <span className="text-xs font-medium text-muted-foreground">Direct Messages</span>
-          <button
-            onClick={handleRefresh}
-            disabled={isFetching}
-            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-40"
-            aria-label="Refresh"
-          >
-            <RefreshCw className={cn("w-3.5 h-3.5", isFetching && "animate-spin")} />
-          </button>
+          <div className="flex items-center gap-1.5">
+            {isFetching && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+            <div className="flex items-center bg-muted rounded-lg p-0.5">
+              <button
+                onClick={() => setUnreadOnly(true)}
+                className={cn(
+                  "px-2.5 py-1 text-xs font-medium rounded-md transition-colors",
+                  unreadOnly ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Unread
+              </button>
+              <button
+                onClick={() => setUnreadOnly(false)}
+                className={cn(
+                  "px-2.5 py-1 text-xs font-medium rounded-md transition-colors",
+                  !unreadOnly ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                All
+              </button>
+            </div>
+            <button
+              onClick={handleRefresh}
+              disabled={isFetching}
+              className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-40"
+              aria-label="Refresh"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", isFetching && "animate-spin")} />
+            </button>
+          </div>
         </div>
 
         {/* List */}

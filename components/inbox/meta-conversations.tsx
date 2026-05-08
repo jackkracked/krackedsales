@@ -219,8 +219,12 @@ function ConversationRow({
     <button
       onClick={onSelect}
       className={cn(
-        "w-full text-left px-4 py-3 border-b border-border transition-colors",
-        isSelected ? "bg-primary/6" : "hover:bg-muted/60"
+        "w-full text-left px-4 py-3 border-b border-border transition-colors border-l-2",
+        isSelected
+          ? "bg-primary/8 border-l-primary"
+          : unread
+          ? "bg-primary/[0.04] hover:bg-primary/[0.07] border-l-primary/40"
+          : "hover:bg-muted/60 border-l-transparent"
       )}
     >
       <div className="flex items-start gap-2.5">
@@ -233,17 +237,17 @@ function ConversationRow({
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-1">
-            <span className={cn("text-sm truncate", unread ? "font-semibold text-foreground" : "font-medium text-foreground")}>
+            <span className={cn("text-sm truncate", unread ? "font-bold text-foreground" : "font-medium text-foreground/80")}>
               {conversation.participantName}
             </span>
             <div className="flex items-center gap-1.5 shrink-0">
+              <span className={cn("text-xs", unread ? "text-foreground/70 font-medium" : "text-muted-foreground")}>{timeAgo}</span>
               {unread && (
-                <span className="w-2 h-2 rounded-full bg-primary" />
+                <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
               )}
-              <span className="text-xs text-muted-foreground">{timeAgo}</span>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground truncate mt-0.5">
+          <p className={cn("text-xs truncate mt-0.5", unread ? "text-foreground/75" : "text-muted-foreground")}>
             {conversation.lastMessage}
           </p>
         </div>
@@ -680,6 +684,7 @@ const PLATFORM_TABS: { key: PlatformTab; label: string; icon?: React.ElementType
 
 export function MetaConversations() {
   const [platformTab, setPlatformTab] = useState<PlatformTab>("all");
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [seenMap, setSeenMap] = useState<SeenMap>(loadSeenMap);
   const initializedRef = useRef(false);
@@ -780,10 +785,9 @@ export function MetaConversations() {
     }
   }
 
-  const filtered =
-    platformTab === "all"
-      ? allConversations
-      : allConversations.filter((c) => c.platform === platformTab);
+  const filtered = allConversations
+    .filter((c) => platformTab === "all" || c.platform === platformTab)
+    .filter((c) => !unreadOnly || isUnread(c));
 
   const selectedConversation = allConversations.find((c) => c.id === selectedId) ?? null;
 
@@ -793,8 +797,8 @@ export function MetaConversations() {
     <div className="flex h-full overflow-hidden">
       {/* Left panel */}
       <div className="flex flex-col border-r border-border bg-card w-full lg:w-80 xl:w-96 shrink-0">
-        {/* Platform tabs + refresh */}
-        <div className="px-4 py-3 border-b border-border">
+        {/* Platform tabs + unread toggle + refresh */}
+        <div className="px-4 py-3 border-b border-border space-y-2">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1 bg-muted rounded-lg p-1 w-fit">
               {PLATFORM_TABS.map(({ key, label, icon: Icon }) => (
@@ -813,14 +817,37 @@ export function MetaConversations() {
                 </button>
               ))}
             </div>
-            <button
-              onClick={handleRefresh}
-              disabled={isFetching}
-              className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-40"
-              aria-label="Refresh conversations"
-            >
-              <RefreshCw className={cn("w-3.5 h-3.5", isFetching && "animate-spin")} />
-            </button>
+            <div className="flex items-center gap-1.5">
+              {isFetching && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+              <div className="flex items-center bg-muted rounded-lg p-0.5">
+                <button
+                  onClick={() => setUnreadOnly(true)}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-medium rounded-md transition-colors",
+                    unreadOnly ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Unread
+                </button>
+                <button
+                  onClick={() => setUnreadOnly(false)}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-medium rounded-md transition-colors",
+                    !unreadOnly ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  All
+                </button>
+              </div>
+              <button
+                onClick={handleRefresh}
+                disabled={isFetching}
+                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-40"
+                aria-label="Refresh conversations"
+              >
+                <RefreshCw className={cn("w-3.5 h-3.5", isFetching && "animate-spin")} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -837,8 +864,13 @@ export function MetaConversations() {
             </p>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-40 text-muted-foreground">
-            <p className="text-sm">No conversations yet</p>
+          <div className="flex flex-col items-center justify-center h-40 gap-2 text-muted-foreground">
+            <p className="text-sm">{unreadOnly ? "No unread conversations" : "No conversations yet"}</p>
+            {unreadOnly && (
+              <button onClick={() => setUnreadOnly(false)} className="text-xs text-primary hover:underline">
+                Show all conversations
+              </button>
+            )}
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">
