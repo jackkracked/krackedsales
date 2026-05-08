@@ -677,9 +677,8 @@ function CommentLeadThread({ conversation }: { conversation: CommentConversation
 type PlatformTab = "all" | "facebook" | "instagram";
 
 const PLATFORM_TABS: { key: PlatformTab; label: string; icon?: React.ElementType }[] = [
-  { key: "all", label: "All" },
-  { key: "facebook", label: "Facebook", icon: FacebookIcon },
-  { key: "instagram", label: "Instagram", icon: InstagramIcon },
+  { key: "facebook", label: "FB", icon: FacebookIcon },
+  { key: "instagram", label: "IG", icon: InstagramIcon },
 ];
 
 export function MetaConversations() {
@@ -778,10 +777,12 @@ export function MetaConversations() {
   }
 
   function handleTabChange(tab: PlatformTab) {
-    setPlatformTab(tab);
-    if (tab !== "all") {
+    // Clicking the active tab toggles back to "all"
+    const next = platformTab === tab ? "all" : tab;
+    setPlatformTab(next);
+    if (next !== "all") {
       const sel = allConversations.find((c) => c.id === selectedId);
-      if (sel && sel.platform !== tab) setSelectedId(null);
+      if (sel && sel.platform !== next) setSelectedId(null);
     }
   }
 
