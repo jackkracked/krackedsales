@@ -15,6 +15,7 @@ export interface GHLConversation {
   lastMessageBody?: string;
   lastMessageDate?: string;
   lastMessageDirection?: "inbound" | "outbound";
+  lastMessageType?: string;
   type: GHLChannelType;
   unreadCount: number;
   fullName?: string;

@@ -220,7 +220,14 @@ export function InboxClient() {
               <ReplyComposer
                 conversationId={selectedConversationId}
                 contactId={selectedConversation.contactId ?? selectedConversation.contact?.id ?? ""}
-                defaultChannelType={selectedConversation.type}
+                defaultChannelType={
+                  inboxTab === "Email" ? "TYPE_EMAIL"
+                  : inboxTab === "SMS" ? "TYPE_SMS"
+                  // TYPE_PHONE/TYPE_CALL are call-only channels; fall back to SMS
+                  : (selectedConversation.type === "TYPE_PHONE" || selectedConversation.type === "TYPE_CALL")
+                    ? "TYPE_SMS"
+                    : selectedConversation.type
+                }
               />
             </div>
 

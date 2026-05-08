@@ -23,6 +23,7 @@ export const softwareCosts = pgTable("software_costs", {
 export const costSettings = pgTable("cost_settings", {
   id: uuid("id").primaryKey().defaultRandom(),
   costPerEmail: doublePrecision("cost_per_email").notNull().default(0),
+  costPerAudit: doublePrecision("cost_per_audit").notNull().default(0),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 

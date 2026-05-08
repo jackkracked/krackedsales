@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { CreateTaskModal } from "@/components/shared/create-task-modal";
 import { CreateDemoModal } from "@/components/shared/create-demo-modal";
+import { CreateAuditModal } from "@/components/shared/create-audit-modal";
 import { MessageComposer } from "@/components/shared/message-composer";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -559,6 +560,7 @@ export function OpportunityModal({
   }, [onClose, inQueue, onNavigate, queueIndex, queue]);
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [showCreateDemo, setShowCreateDemo] = useState(false);
+  const [showCreateAudit, setShowCreateAudit] = useState(false);
   const [editingValue, setEditingValue] = useState(false);
   const [valueInput, setValueInput] = useState(
     String(opportunity.monetaryValue && opportunity.monetaryValue > 0 ? opportunity.monetaryValue : 1000)
@@ -909,7 +911,7 @@ export function OpportunityModal({
                     Create Demo
                   </button>
                   <button
-                    onClick={() => {}}
+                    onClick={() => setShowCreateAudit(true)}
                     className="flex flex-col items-center gap-1.5 py-3 text-xs font-medium text-foreground border border-border rounded-[7px] hover:bg-muted hover:border-primary/20 transition-colors"
                   >
                     <ClipboardCheck className="w-4 h-4 text-muted-foreground" />
@@ -963,6 +965,14 @@ export function OpportunityModal({
         opportunityId={opportunity.id}
         opportunitySource={opportunity.source}
         onClose={() => setShowCreateDemo(false)}
+      />
+    )}
+
+    {showCreateAudit && (
+      <CreateAuditModal
+        contactId={opportunity.contact?.id}
+        contactName={opportunity.contact?.name}
+        onClose={() => setShowCreateAudit(false)}
       />
     )}
     </>

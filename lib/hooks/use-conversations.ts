@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { GHLConversation, GHLMessage } from "@/lib/ghl/types";
 
-type ChannelFilter = "ALL" | "TYPE_SMS" | "TYPE_EMAIL" | "TYPE_INSTAGRAM" | "TYPE_FB";
+type ChannelFilter = "ALL" | "TYPE_SMS" | "TYPE_EMAIL" | "TYPE_INSTAGRAM" | "TYPE_FB" | "TYPE_TIKTOK";
 
 interface ConversationsResponse {
   conversations: GHLConversation[];
@@ -19,8 +19,9 @@ export function useConversations(channel: ChannelFilter, unreadOnly = false) {
     queryFn: async () => {
       const params = new URLSearchParams();
       if (channel !== "ALL") params.set("type", channel);
-      // Fetch more when filtering unread so we don't miss any
-      params.set("limit", unreadOnly ? "100" : "25");
+      // Email and TikTok convs often live under TYPE_PHONE in GHL — fetch more to catch them
+      const needsBigFetch = unreadOnly || channel === "TYPE_EMAIL" || channel === "TYPE_TIKTOK";
+      params.set("limit", needsBigFetch ? "100" : "25");
       const res = await fetch(`/api/ghl/conversations?${params}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -36,12 +37,17 @@ export function useConversations(channel: ChannelFilter, unreadOnly = false) {
       }
 
       // GHL's type filter may return wrong results — apply client-side too.
-      // Normalise both sides to handle GHL returning "SMS" vs "TYPE_SMS" inconsistently.
+      // Also check lastMessageType because GHL often keeps conversations as TYPE_PHONE
+      // even when the last message was email or TikTok.
       if (channel !== "ALL") {
         const normalise = (t: string | undefined) =>
           (t ?? "").toUpperCase().replace(/^TYPE_/, "");
         const target = normalise(channel);
-        convs = convs.filter((c) => normalise(c.type) === target);
+        convs = convs.filter(
+          (c) =>
+            normalise(c.type) === target ||
+            normalise((c as { lastMessageType?: string }).lastMessageType) === target
+        );
       }
 
       return { ...data, conversations: convs };

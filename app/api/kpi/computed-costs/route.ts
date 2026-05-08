@@ -4,15 +4,17 @@ import { softwareCosts, costSettings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
 /**
- * GET /api/kpi/computed-costs?since=ISO&until=ISO
+ * GET /api/kpi/computed-costs?since=ISO&until=ISO&auditsCount=N
  *
- * Returns the auto-calculated software cost and team fulfillment for the KPI page.
- * - softwareCost = sum of all active monthly software costs (period-independent)
- * - teamFulfillment = costPerEmail × completedDemos (fetched from the demos API)
+ * Returns auto-calculated costs for the KPI page:
+ * - softwareCost    = sum of active monthly software subscriptions
+ * - teamFulfillment = (costPerEmail × completedEmailDemos) + (costPerAudit × auditsCount)
  */
 export async function GET(req: NextRequest) {
-  const since = req.nextUrl.searchParams.get("since") ?? "";
-  const until = req.nextUrl.searchParams.get("until") ?? "";
+  const { searchParams } = req.nextUrl;
+  const since = searchParams.get("since") ?? "";
+  const until = searchParams.get("until") ?? "";
+  const auditsCount = parseInt(searchParams.get("auditsCount") ?? "0", 10) || 0;
 
   // Sum of active software subscriptions
   const items = await db()
@@ -22,11 +24,12 @@ export async function GET(req: NextRequest) {
 
   const softwareCostTotal = items.reduce((sum, r) => sum + r.monthlyCost, 0);
 
-  // Cost per email setting
+  // Cost settings
   const settingsRows = await db().select().from(costSettings).limit(1);
   const costPerEmail = settingsRows[0]?.costPerEmail ?? 0;
+  const costPerAudit = settingsRows[0]?.costPerAudit ?? 0;
 
-  // Completed demos for the period — reuse the existing demos count API
+  // Completed email demos for the period
   let completedDemos = 0;
   if (since && until && costPerEmail > 0) {
     try {
@@ -40,11 +43,13 @@ export async function GET(req: NextRequest) {
         completedDemos = data.count ?? 0;
       }
     } catch {
-      // Non-fatal — team fulfillment stays 0
+      // Non-fatal — email fulfillment stays 0
     }
   }
 
-  const teamFulfillment = parseFloat((costPerEmail * completedDemos).toFixed(2));
+  const emailFulfillment = costPerEmail * completedDemos;
+  const auditFulfillment = costPerAudit * auditsCount;
+  const teamFulfillment = parseFloat((emailFulfillment + auditFulfillment).toFixed(2));
 
   return NextResponse.json({ softwareCost: softwareCostTotal, teamFulfillment });
 }

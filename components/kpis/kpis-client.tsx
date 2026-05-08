@@ -946,9 +946,11 @@ export function KpisClient() {
   });
 
   const { data: computedCostsData } = useQuery({
-    queryKey: ["computed-costs", since, until],
+    queryKey: ["computed-costs", since, until, baseData.detail.audits],
     queryFn: async () => {
-      const res = await fetch(`/api/kpi/computed-costs?since=${since}&until=${until}`);
+      const res = await fetch(
+        `/api/kpi/computed-costs?since=${since}&until=${until}&auditsCount=${baseData.detail.audits ?? 0}`
+      );
       if (!res.ok) return null;
       return res.json() as Promise<{ softwareCost: number; teamFulfillment: number }>;
     },

@@ -19,31 +19,30 @@ export function MessageThread({ messages }: MessageThreadProps) {
   const [emailHtml, setEmailHtml] = useState<Record<string, string | null>>({});
   const [emailLoading, setEmailLoading] = useState<Set<string>>(new Set());
 
-  const fetchEmailHtml = useCallback(async (messageId: string) => {
-    if (emailHtml[messageId] !== undefined || emailLoading.has(messageId)) return;
-    setEmailLoading((prev) => new Set(prev).add(messageId));
+  const fetchEmailHtml = useCallback(async (stateId: string, fetchId: string) => {
+    if (emailHtml[stateId] !== undefined || emailLoading.has(stateId)) return;
+    setEmailLoading((prev) => new Set(prev).add(stateId));
     try {
-      const res = await fetch(`/api/ghl/conversations/messages/email/${messageId}`);
+      const res = await fetch(`/api/ghl/conversations/messages/email/${fetchId}`);
       const data = await res.json();
-      console.log("[email-expand] raw GHL response:", data);
       // GHL returns HTML in `body` when contentType is text/html;
       // fall back through known field names in case the schema differs
       const html = data.html ?? data.htmlBody ?? data.body ?? null;
-      setEmailHtml((prev) => ({ ...prev, [messageId]: html }));
+      setEmailHtml((prev) => ({ ...prev, [stateId]: html }));
     } catch {
-      setEmailHtml((prev) => ({ ...prev, [messageId]: null }));
+      setEmailHtml((prev) => ({ ...prev, [stateId]: null }));
     } finally {
-      setEmailLoading((prev) => { const s = new Set(prev); s.delete(messageId); return s; });
+      setEmailLoading((prev) => { const s = new Set(prev); s.delete(stateId); return s; });
     }
   }, [emailHtml, emailLoading]);
 
-  function toggleEmail(id: string) {
+  function toggleEmail(id: string, fetchId: string) {
     setExpandedEmails((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else {
         next.add(id);
-        fetchEmailHtml(id);
+        fetchEmailHtml(id, fetchId);
       }
       return next;
     });
@@ -99,6 +98,8 @@ export function MessageThread({ messages }: MessageThreadProps) {
 
         // ── Email: expandable card with rendered HTML ────────────────
         if (isEmail) {
+          // GHL email messages have a separate emailMessageId used for the HTML fetch endpoint
+          const fetchId = (msg as GHLMessage & { emailMessageId?: string }).emailMessageId ?? msg.id;
           const subject = msg.meta?.email?.subject ?? "Email";
           const emailDir = msg.meta?.email?.direction ?? (isOutbound ? "outbound" : "inbound");
           const sentByUs = emailDir === "outbound";
@@ -126,7 +127,7 @@ export function MessageThread({ messages }: MessageThreadProps) {
                 </div>
                 {/* Subject + expand toggle */}
                 <button
-                  onClick={() => toggleEmail(msg.id)}
+                  onClick={() => toggleEmail(msg.id, fetchId)}
                   className={cn(
                     "w-full text-left px-3.5 py-2.5 flex items-start justify-between gap-2 transition-colors",
                     sentByUs ? "bg-[#C8A96E]/6 hover:bg-[#C8A96E]/10" : "bg-muted/20 hover:bg-muted/40"
@@ -169,10 +170,17 @@ export function MessageThread({ messages }: MessageThreadProps) {
                         title={`Email: ${subject}`}
                       />
                     ) : emailHtml[msg.id] === null ? (
-                      // API returned no HTML — fall back to plain text body if available
+                      // API returned no HTML — fall back to cleaned plain text body if available
                       hasBody ? (
                         <div className="px-3.5 py-3 text-xs text-foreground/80 bg-muted/10 whitespace-pre-wrap leading-relaxed">
-                          {msg.body}
+                          {msg.body
+                            // Strip GHL [storage-url] image placeholders
+                            .replace(/\[https?:\/\/storage\.googleapis\.com\/[^\]]+\]/g, "")
+                            // Strip remaining bare storage URLs
+                            .replace(/https?:\/\/storage\.googleapis\.com\/\S+/g, "")
+                            // Clean up excess blank lines left behind
+                            .replace(/\n{3,}/g, "\n\n")
+                            .trim()}
                         </div>
                       ) : (
                         <div className="px-3.5 py-3 text-xs text-muted-foreground italic bg-muted/10">

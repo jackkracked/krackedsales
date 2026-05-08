@@ -6,6 +6,25 @@ import { MessageSquare, Mail } from "lucide-react";
 import { InstagramIcon, FacebookIcon } from "@/components/shared/channel-icon";
 import type { GHLConversation } from "@/lib/ghl/types";
 
+function cleanPreview(body: string | undefined): string {
+  if (!body?.trim()) return "No messages yet";
+  const trimmed = body.trim();
+  // GHL wraps storage URLs in brackets: [https://storage.googleapis.com/...]
+  if (/^\[?https?:\/\/storage\.googleapis\.com\//i.test(trimmed)) return "📎 Attachment";
+  // Strip HTML tags (emails often have full HTML in lastMessageBody)
+  let stripped = trimmed
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    // Remove GHL [url] and [url][url] patterns
+    .replace(/\[https?:\/\/[^\]]+\]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped || "📎 Attachment";
+}
+
 const CHANNEL_ICONS: Record<string, React.ElementType> = {
   TYPE_SMS: MessageSquare,
   TYPE_EMAIL: Mail,
@@ -58,8 +77,12 @@ export function ConversationList({
     <div className="flex flex-col divide-y divide-border overflow-y-auto flex-1">
       {conversations.map((conv) => {
         const isSelected = conv.id === selectedId;
-        const Icon = CHANNEL_ICONS[conv.type] ?? MessageSquare;
-        const iconColor = CHANNEL_COLORS[conv.type] ?? "text-muted-foreground";
+        // Prefer lastMessageType for icon (e.g. TYPE_PHONE conversations that last messaged via email)
+        const displayType = conv.lastMessageType && CHANNEL_ICONS[conv.lastMessageType]
+          ? conv.lastMessageType
+          : conv.type;
+        const Icon = CHANNEL_ICONS[displayType] ?? MessageSquare;
+        const iconColor = CHANNEL_COLORS[displayType] ?? "text-muted-foreground";
         const hasUnread = conv.unreadCount > 0;
 
         return (
@@ -94,7 +117,7 @@ export function ConversationList({
                   "text-xs truncate flex-1",
                   hasUnread ? "text-foreground" : "text-muted-foreground"
                 )}>
-                  {conv.lastMessageBody ?? "No messages yet"}
+                  {cleanPreview(conv.lastMessageBody)}
                 </span>
                 {hasUnread && (
                   <span className="w-2 h-2 rounded-full bg-primary shrink-0" />

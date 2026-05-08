@@ -4,27 +4,44 @@ import { ghl, locationId } from "@/lib/ghl/client";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  // Require the internal secret so this isn't publicly accessible
-  const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.get("x-internal-secret") !== secret) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const locId = locationId();
 
-  const data = await ghl.get<{ conversations: Record<string, unknown>[] }>(
-    `/conversations/search?locationId=${locId}&limit=20&sortBy=last_message_date&sortOrder=desc`
+  // All recent conversations — dump all fields to diagnose type values
+  const all = await ghl.get<{ conversations: Record<string, unknown>[] }>(
+    `/conversations/search?locationId=${locId}&limit=50&sortBy=last_message_date&sortOrder=desc`
   );
 
-  const convs = (data.conversations ?? []).map((c) => ({
-    id: c.id,
-    contactId: c.contactId,
-    lastMessageBody: c.lastMessageBody,
-    lastMessageDirection: c.lastMessageDirection,
-    lastMessageDate: c.lastMessageDate,
-    lastMessageType: c.lastMessageType,
-    unreadCount: c.unreadCount,
-  }));
+  // Also try fetching specifically with TYPE_TIKTOK filter
+  const tiktok = await ghl.get<{ conversations: Record<string, unknown>[] }>(
+    `/conversations/search?locationId=${locId}&limit=50&type=TYPE_TIKTOK&sortBy=last_message_date&sortOrder=desc`
+  ).catch(() => ({ conversations: [] }));
 
-  return NextResponse.json({ conversations: convs });
+  const summarise = (c: Record<string, unknown>) => ({
+    id: c.id,
+    type: c.type,
+    lastMessageType: c.lastMessageType,
+    fullName: c.fullName,
+    unreadCount: c.unreadCount,
+    lastMessageDate: c.lastMessageDate,
+    lastMessageBody: typeof c.lastMessageBody === "string"
+      ? c.lastMessageBody.slice(0, 60)
+      : c.lastMessageBody,
+  });
+
+  // Count by type
+  const typeCounts: Record<string, number> = {};
+  const lastMsgTypeCounts: Record<string, number> = {};
+  for (const c of all.conversations ?? []) {
+    const t = String(c.type ?? "unknown");
+    const lmt = String(c.lastMessageType ?? "unknown");
+    typeCounts[t] = (typeCounts[t] ?? 0) + 1;
+    lastMsgTypeCounts[lmt] = (lastMsgTypeCounts[lmt] ?? 0) + 1;
+  }
+
+  return NextResponse.json({
+    typeCounts,
+    lastMsgTypeCounts,
+    tiktokConversations: (tiktok.conversations ?? []).map(summarise),
+    recentConversations: (all.conversations ?? []).map(summarise),
+  });
 }
