@@ -13,6 +13,41 @@ interface MessagesResponse {
   messages: GHLMessage[];
 }
 
+// ─── localStorage cache helpers ───────────────────────────────────────────────
+// Shows last-known conversations instantly on mount while the fresh fetch runs
+// in the background — eliminates the "Loading…" blank state after cold starts.
+
+function cacheKey(channel: ChannelFilter) {
+  return `ghl-convs-v1-${channel}`;
+}
+
+function readCache(channel: ChannelFilter): ConversationsResponse | undefined {
+  try {
+    const raw = localStorage.getItem(cacheKey(channel));
+    return raw ? JSON.parse(raw) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readCacheTimestamp(channel: ChannelFilter): number {
+  try {
+    const ts = localStorage.getItem(`${cacheKey(channel)}-ts`);
+    return ts ? parseInt(ts, 10) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeCache(channel: ChannelFilter, data: ConversationsResponse) {
+  try {
+    localStorage.setItem(cacheKey(channel), JSON.stringify(data));
+    localStorage.setItem(`${cacheKey(channel)}-ts`, Date.now().toString());
+  } catch {}
+}
+
+// ─── Hooks ────────────────────────────────────────────────────────────────────
+
 export function useConversations(channel: ChannelFilter, unreadOnly = false) {
   return useQuery<ConversationsResponse>({
     queryKey: ["conversations", channel, unreadOnly],
@@ -50,10 +85,21 @@ export function useConversations(channel: ChannelFilter, unreadOnly = false) {
         );
       }
 
-      return { ...data, conversations: convs };
+      const result: ConversationsResponse = { ...data, conversations: convs };
+
+      // Cache the "all conversations" view (not filtered unread) so the list
+      // loads instantly on next mount even before the network request completes.
+      if (!unreadOnly) {
+        writeCache(channel, result);
+      }
+
+      return result;
     },
-    staleTime: 10 * 1000,
-    refetchInterval: 15 * 1000,
+    // Use cached data as initial data so the list renders immediately
+    initialData: !unreadOnly ? () => readCache(channel) : undefined,
+    initialDataUpdatedAt: !unreadOnly ? () => readCacheTimestamp(channel) : undefined,
+    staleTime: 30 * 1000,
+    refetchInterval: 20 * 1000,
   });
 }
 
@@ -66,8 +112,8 @@ export function useMessages(conversationId: string | null) {
       return res.json();
     },
     enabled: !!conversationId,
-    staleTime: 5 * 1000,
-    refetchInterval: 10 * 1000,
+    staleTime: 10 * 1000,
+    refetchInterval: 15 * 1000,
   });
 }
 
