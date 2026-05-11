@@ -6,18 +6,13 @@ import { ghl, locationId } from "@/lib/ghl/client";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 import { startOfMonth, endOfMonth } from "date-fns";
 
-async function getAllOpportunities(): Promise<GHLOpportunity[]> {
-  const all: GHLOpportunity[] = [];
+async function getOpportunities(): Promise<GHLOpportunity[]> {
+  // Single page fetch — enough for monthly KPI calculations on most accounts
   const locId = locationId();
-  for (let page = 1; page <= 20; page++) {
-    const data = await ghl.get<{ opportunities: GHLOpportunity[] }>(
-      `/opportunities/search?location_id=${locId}&limit=100&page=${page}`
-    );
-    const batch = data.opportunities ?? [];
-    all.push(...batch);
-    if (batch.length < 100) break;
-  }
-  return all;
+  const data = await ghl.get<{ opportunities: GHLOpportunity[] }>(
+    `/opportunities/search?location_id=${locId}&limit=100`
+  );
+  return data.opportunities ?? [];
 }
 
 /**
@@ -35,7 +30,7 @@ export async function GET() {
   const monthEnd = endOfMonth(now);
 
   const [opportunities, softwareRows, callCount] = await Promise.allSettled([
-    getAllOpportunities(),
+    getOpportunities(),
     db()
       .select({ monthlyCost: softwareCosts.monthlyCost })
       .from(softwareCosts)

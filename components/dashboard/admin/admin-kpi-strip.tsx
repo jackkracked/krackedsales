@@ -102,14 +102,29 @@ function StripSkeleton() {
 }
 
 export function AdminKpiStrip() {
-  const { data, isLoading } = useQuery<AdminMetrics>({
+  const { data, isLoading, isError } = useQuery<AdminMetrics>({
     queryKey: ["admin-metrics"],
-    queryFn: () => fetch("/api/kpi/admin-metrics").then((r) => r.json()),
+    queryFn: async () => {
+      const r = await fetch("/api/kpi/admin-metrics");
+      if (!r.ok) throw new Error(`admin-metrics ${r.status}`);
+      return r.json();
+    },
     staleTime: 2 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
+    retry: 1,
   });
 
-  if (isLoading || !data) return <StripSkeleton />;
+  if (isLoading) return <StripSkeleton />;
+
+  if (isError || !data) {
+    return (
+      <div className="bg-card border border-border rounded-[10px] flex overflow-hidden">
+        <div className="flex-1 px-6 py-4 text-xs text-muted-foreground">
+          Could not load metrics — retrying…
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-card border border-border rounded-[10px] flex overflow-hidden">
