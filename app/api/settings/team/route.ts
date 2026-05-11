@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { users, repTargets, rolePermissions, userPermissionOverrides } from "@/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
+import bcrypt from "bcryptjs";
 
 /**
  * GET /api/settings/team
@@ -58,17 +59,22 @@ export async function GET() {
  */
 export async function PATCH(req: NextRequest) {
   const body = await req.json();
-  const { userId, role, isActive, ghlUserId, targets, permissionOverrides } = body;
+  const { userId, role, isActive, ghlUserId, targets, permissionOverrides, name, email, newPassword } = body;
 
   if (!userId) {
     return NextResponse.json({ error: "userId required" }, { status: 400 });
   }
 
   // Update user fields if provided
-  const userUpdates: Partial<{ role: string; isActive: boolean; ghlUserId: string | null }> = {};
+  const userUpdates: Partial<{ role: string; isActive: boolean; ghlUserId: string | null; name: string; email: string; passwordHash: string }> = {};
   if (role !== undefined) userUpdates.role = role;
   if (isActive !== undefined) userUpdates.isActive = isActive;
   if (ghlUserId !== undefined) userUpdates.ghlUserId = ghlUserId || null;
+  if (name && typeof name === "string" && name.trim()) userUpdates.name = name.trim();
+  if (email && typeof email === "string" && email.trim()) userUpdates.email = email.trim().toLowerCase();
+  if (newPassword && typeof newPassword === "string" && newPassword.length >= 8) {
+    userUpdates.passwordHash = await bcrypt.hash(newPassword, 10);
+  }
 
   if (Object.keys(userUpdates).length > 0) {
     await db().update(users).set(userUpdates).where(eq(users.id, userId));

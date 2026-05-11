@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  UserPlus, Users, X, ChevronRight, Eye, EyeOff, RefreshCw, CheckCircle2,
+  UserPlus, Users, X, ChevronRight, Eye, EyeOff, RefreshCw, CheckCircle2, KeyRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { FEATURES, FEATURE_LABELS, type FeatureKey } from "@/lib/auth/permission-constants";
@@ -147,6 +147,13 @@ interface SlideOverProps {
 function SlideOver({ user, onClose }: SlideOverProps) {
   const queryClient = useQueryClient();
 
+  // Profile fields
+  const [name, setName] = useState(user.name);
+  const [email, setEmail] = useState(user.email);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+
   const [role, setRole] = useState(user.role);
   const [isActive, setIsActive] = useState(user.isActive);
   const [ghlUserId, setGhlUserId] = useState(user.ghlUserId ?? "");
@@ -175,7 +182,12 @@ function SlideOver({ user, onClose }: SlideOverProps) {
     },
   });
 
+  const passwordMismatch = newPassword.length > 0 && newPassword !== confirmPassword;
+  const passwordTooShort = newPassword.length > 0 && newPassword.length < 8;
+
   function handleSave() {
+    if (passwordMismatch || passwordTooShort) return;
+
     // Only store overrides that differ from the current role preset
     const overrides: Record<string, boolean> = {};
     for (const f of FEATURES) {
@@ -186,6 +198,9 @@ function SlideOver({ user, onClose }: SlideOverProps) {
     }
 
     mutation.mutate({
+      name: name.trim() !== user.name ? name : undefined,
+      email: email.trim().toLowerCase() !== user.email ? email : undefined,
+      newPassword: newPassword.length >= 8 ? newPassword : undefined,
       role,
       isActive,
       ghlUserId,
@@ -221,6 +236,71 @@ function SlideOver({ user, onClose }: SlideOverProps) {
 
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-6">
+          {/* Profile */}
+          <section>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+              Profile
+            </p>
+            <div className="space-y-3">
+              <Input label="Display name" value={name} onChange={setName} placeholder="Alice Galperin" />
+              <Input label="Email" value={email} onChange={setEmail} type="email" placeholder="alice@example.com" />
+
+              {/* Change password */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                  <KeyRound className="w-3 h-3 text-muted-foreground" />
+                  New password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Leave blank to keep current"
+                    className={cn(
+                      "w-full rounded-[6px] border bg-background px-3 py-2 pr-10",
+                      "text-sm text-foreground placeholder:text-muted-foreground",
+                      "focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors",
+                      passwordTooShort ? "border-destructive" : "border-border"
+                    )}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((v) => !v)}
+                    tabIndex={-1}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                {passwordTooShort && (
+                  <p className="text-[11px] text-destructive">Minimum 8 characters</p>
+                )}
+              </div>
+
+              {newPassword.length > 0 && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-foreground">Confirm password</label>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Re-enter new password"
+                    className={cn(
+                      "w-full rounded-[6px] border bg-background px-3 py-2",
+                      "text-sm text-foreground placeholder:text-muted-foreground",
+                      "focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors",
+                      passwordMismatch ? "border-destructive" : "border-border"
+                    )}
+                  />
+                  {passwordMismatch && (
+                    <p className="text-[11px] text-destructive">Passwords do not match</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </section>
+
           {/* Role + Status */}
           <section>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
@@ -319,7 +399,7 @@ function SlideOver({ user, onClose }: SlideOverProps) {
         <div className="px-5 py-4 border-t border-border flex items-center gap-3 shrink-0">
           <button
             onClick={handleSave}
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || passwordMismatch || passwordTooShort}
             className={cn(
               "flex items-center gap-1.5 px-4 py-2 rounded-[6px] text-sm font-medium transition-colors",
               "bg-primary text-white hover:bg-primary/90",
