@@ -74,8 +74,8 @@ export function RepDashboard({ userId, userName, email, ghlUserId }: RepDashboar
         <p className="text-sm text-muted-foreground mt-0.5">{today}</p>
       </div>
 
-      {/* Hero row: Quota ring + Activity bars + Calendar */}
-      <div className="grid grid-cols-1 xl:grid-cols-[auto_1fr_260px] gap-5 items-start">
+      {/* Hero row: Quota ring + Activity bars + Calendar — all same height */}
+      <div className="grid grid-cols-1 xl:grid-cols-[auto_1fr_260px] gap-5 items-stretch">
         <div className="bg-card border border-border rounded-[10px] p-5 flex items-center justify-center">
           <QuotaRing
             current={metrics?.dealsWon ?? 0}
@@ -86,7 +86,7 @@ export function RepDashboard({ userId, userName, email, ghlUserId }: RepDashboar
               : undefined}
           />
         </div>
-        <div className="bg-card border border-border rounded-[10px] p-4">
+        <div className="bg-card border border-border rounded-[10px] p-4 flex flex-col justify-between">
           <ActivityBars data={activityBars} targetPerDay={targets.callsPerDay} />
         </div>
         <CalendarWidget events={calendarEvents} />
