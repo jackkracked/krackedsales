@@ -101,9 +101,13 @@ export function AdminKpiStrip() {
       if (!r.ok) throw new Error(`admin-metrics ${r.status}`);
       return r.json() as Promise<AdminMetrics>;
     },
-    staleTime: 2 * 60 * 1000,
-    refetchInterval: 5 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
     retry: 1,
+    // Keep previous data visible during any background refetch — prevents
+    // the strip from flickering to skeleton when focus triggers a re-fetch
+    placeholderData: (prev) => prev,
   });
 
   // Always return the outer wrapper — never an early return that could
