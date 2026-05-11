@@ -33,7 +33,44 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  role: text("role").notNull().default("admin"), // "admin" | "rep"
+  isActive: boolean("is_active").notNull().default(true),
+  ghlUserId: text("ghl_user_id"), // links to GHL user for pipeline/calendar filtering
   createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/**
+ * Default permission presets per role — editable in Settings › Team.
+ * One row per role × featureKey. Seeded on first migration.
+ */
+export const rolePermissions = pgTable("role_permissions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  role: text("role").notNull(),           // "admin" | "rep"
+  featureKey: text("feature_key").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+});
+
+/**
+ * Per-user permission overrides — take precedence over role presets.
+ * Only exists when a user's permission differs from their role default.
+ */
+export const userPermissionOverrides = pgTable("user_permission_overrides", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  featureKey: text("feature_key").notNull(),
+  enabled: boolean("enabled").notNull(),
+});
+
+/**
+ * Monthly performance targets per sales rep — set by admin in Settings › Team.
+ */
+export const repTargets = pgTable("rep_targets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  dealsPerMonth: integer("deals_per_month").notNull().default(5),
+  callsPerDay: integer("calls_per_day").notNull().default(15),
+  revenueTarget: doublePrecision("revenue_target").notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 /** Contacts who have received a demo — tracked for follow-up management */

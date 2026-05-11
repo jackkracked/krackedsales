@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Users, DollarSign, Zap, BarChart2, CalendarDays } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
-import { UserManager } from "@/components/settings/user-manager";
+import { TeamSettings } from "@/components/settings/team-settings";
 import { SoftwareCosts } from "@/components/settings/software-costs";
 import { CostSettings } from "@/components/settings/cost-settings";
 import { DemoTargets } from "@/components/settings/demo-targets";
@@ -67,7 +67,7 @@ export function SettingsTabs() {
         {activeTab === "team" && (
           <div className="p-6">
             <div className="max-w-3xl">
-              <UserManager />
+              <TeamSettings />
             </div>
           </div>
         )}
