@@ -1,7 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ghl } from "@/lib/ghl/client";
+import type { GHLOpportunity } from "@/lib/ghl/types";
 
 export const dynamic = "force-dynamic";
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ opportunityId: string }> }
+) {
+  const { opportunityId } = await params;
+  try {
+    const data = await ghl.get<{ opportunity: GHLOpportunity }>(
+      `/opportunities/${opportunityId}`
+    );
+    return NextResponse.json(data.opportunity ?? data);
+  } catch (err) {
+    console.error("[GET /api/ghl/opportunities/[id]]", err);
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+}
 
 export async function PATCH(
   req: NextRequest,

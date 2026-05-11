@@ -5,7 +5,7 @@ import { format, getHours } from "date-fns";
 import { QuotaRing } from "./quota-ring";
 import { ActivityBars } from "./activity-bars";
 import { TodaysFocus } from "./todays-focus";
-import { RepPipelineList } from "./rep-pipeline-list";
+import { GoingColdWidget, type PipelineOpp } from "./going-cold-widget";
 import { CalendarWidget } from "@/components/dashboard/calendar-widget";
 import { AiCopilotPanel } from "@/components/dashboard/ai-copilot-panel";
 import type { GHLCalendarEvent } from "@/lib/ghl/types";
@@ -23,6 +23,7 @@ interface RepMetrics {
   revenueWon: number;
   callsToday: number;
   activityBars: { date: string; calls: number }[];
+  pipelineOpps: PipelineOpp[];
 }
 
 interface RepDashboardProps {
@@ -92,10 +93,13 @@ export function RepDashboard({ userId, userName, email, ghlUserId }: RepDashboar
         <CalendarWidget events={calendarEvents} />
       </div>
 
-      {/* Second row: Today's Focus + Own Pipeline */}
+      {/* Second row: Today's Focus + Going Cold */}
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-5">
         <TodaysFocus />
-        <RepPipelineList userId={userId} ghlUserId={ghlUserId} email={email} />
+        <GoingColdWidget
+          opps={metrics?.pipelineOpps ?? []}
+          isLoading={!metrics}
+        />
       </div>
 
       {/* AI Copilot */}
