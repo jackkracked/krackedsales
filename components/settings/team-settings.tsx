@@ -189,7 +189,7 @@ function SlideOver({ user, onClose }: SlideOverProps) {
       role,
       isActive,
       ghlUserId,
-      targets: { dealsPerMonth, callsPerDay, revenueTarget },
+      targets: role === "rep" ? { dealsPerMonth, callsPerDay, revenueTarget } : undefined,
       permissionOverrides: overrides,
     });
   }
@@ -266,31 +266,33 @@ function SlideOver({ user, onClose }: SlideOverProps) {
             </p>
           </section>
 
-          {/* Targets (rep only) */}
-          <section>
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
-              Monthly Targets
-            </p>
-            <div className="space-y-3">
-              <NumberInput
-                label="Deals per month"
-                value={dealsPerMonth}
-                onChange={setDealsPerMonth}
-                min={1}
-              />
-              <NumberInput
-                label="Calls per day"
-                value={callsPerDay}
-                onChange={setCallsPerDay}
-                min={1}
-              />
-              <NumberInput
-                label="Revenue target ($)"
-                value={revenueTarget}
-                onChange={setRevenueTarget}
-              />
-            </div>
-          </section>
+          {/* Targets — rep only */}
+          {role === "rep" && (
+            <section>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+                Monthly Targets
+              </p>
+              <div className="space-y-3">
+                <NumberInput
+                  label="Deals per month"
+                  value={dealsPerMonth}
+                  onChange={setDealsPerMonth}
+                  min={1}
+                />
+                <NumberInput
+                  label="Calls per day"
+                  value={callsPerDay}
+                  onChange={setCallsPerDay}
+                  min={1}
+                />
+                <NumberInput
+                  label="Revenue target ($)"
+                  value={revenueTarget}
+                  onChange={setRevenueTarget}
+                />
+              </div>
+            </section>
+          )}
 
           {/* Permission overrides */}
           <section>

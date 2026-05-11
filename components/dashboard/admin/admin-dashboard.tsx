@@ -1,5 +1,8 @@
+"use client";
+
 import { Suspense } from "react";
 import { format, getHours } from "date-fns";
+import { useQuery } from "@tanstack/react-query";
 import { AdminKpiStrip } from "./admin-kpi-strip";
 import { TeamPerformanceGrid } from "./team-performance-grid";
 import { PipelineHealthPanel } from "./pipeline-health-panel";
@@ -17,20 +20,27 @@ function getGreeting(): string {
 }
 
 function Skeleton({ className }: { className?: string }) {
-  return (
-    <div className={`animate-pulse rounded-[10px] bg-muted/60 ${className ?? ""}`} />
-  );
+  return <div className={`animate-pulse rounded-[10px] bg-muted/60 ${className ?? ""}`} />;
 }
 
 interface AdminDashboardProps {
   userName: string;
-  calendarEvents: GHLCalendarEvent[];
-  salesContext: string;
+  ghlUserId: string | null;
 }
 
-export function AdminDashboard({ userName, calendarEvents, salesContext }: AdminDashboardProps) {
+export function AdminDashboard({ userName, ghlUserId }: AdminDashboardProps) {
   const today = format(new Date(), "EEEE, d MMMM yyyy");
-  const firstName = userName.split(" ")[0];
+  const firstName = userName.split(" ")[0] || "";
+
+  // Calendar events fetched client-side — no longer blocks page render
+  const { data: calendarData } = useQuery<{ events: GHLCalendarEvent[] }>({
+    queryKey: ["calendar-today", ghlUserId],
+    queryFn: () => fetch("/api/ghl/calendar").then((r) => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const calendarEvents = calendarData?.events ?? [];
+  const salesContext = `Today: ${today}. Calendar events: ${calendarEvents.length}.`;
 
   return (
     <div className="flex flex-col h-full p-6 gap-5 overflow-y-auto">
@@ -40,7 +50,7 @@ export function AdminDashboard({ userName, calendarEvents, salesContext }: Admin
           className="text-2xl font-bold text-foreground"
           style={{ fontFamily: "var(--font-heading)" }}
         >
-          {getGreeting()}, {firstName}
+          {getGreeting()}{firstName ? `, ${firstName}` : ""}
         </h1>
         <p className="text-sm text-muted-foreground mt-0.5">{today}</p>
       </div>

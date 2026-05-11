@@ -30,10 +30,9 @@ interface RepDashboardProps {
   userName: string;
   email: string;
   ghlUserId: string | null;
-  calendarEvents: GHLCalendarEvent[];
 }
 
-export function RepDashboard({ userId, userName, email, ghlUserId, calendarEvents }: RepDashboardProps) {
+export function RepDashboard({ userId, userName, email, ghlUserId }: RepDashboardProps) {
   const today = format(new Date(), "EEEE, d MMMM yyyy");
   const firstName = userName.split(" ")[0];
 
@@ -47,6 +46,13 @@ export function RepDashboard({ userId, userName, email, ghlUserId, calendarEvent
     refetchInterval: 3 * 60 * 1000,
   });
 
+  const { data: calendarData } = useQuery<{ events: GHLCalendarEvent[] }>({
+    queryKey: ["calendar-today", ghlUserId],
+    queryFn: () => fetch("/api/ghl/calendar").then((r) => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const calendarEvents = calendarData?.events ?? [];
   const targets = metrics?.targets ?? { dealsPerMonth: 5, callsPerDay: 15, revenueTarget: 0 };
   const activityBars = metrics?.activityBars ?? Array.from({ length: 7 }, (_, i) => ({
     date: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i],
@@ -70,7 +76,6 @@ export function RepDashboard({ userId, userName, email, ghlUserId, calendarEvent
 
       {/* Hero row: Quota ring + Activity bars + Calendar */}
       <div className="grid grid-cols-1 xl:grid-cols-[auto_1fr_260px] gap-5 items-start">
-        {/* Quota ring */}
         <div className="bg-card border border-border rounded-[10px] p-5 flex items-center justify-center">
           <QuotaRing
             current={metrics?.dealsWon ?? 0}
@@ -81,16 +86,9 @@ export function RepDashboard({ userId, userName, email, ghlUserId, calendarEvent
               : undefined}
           />
         </div>
-
-        {/* Activity bars */}
         <div className="bg-card border border-border rounded-[10px] p-4">
-          <ActivityBars
-            data={activityBars}
-            targetPerDay={targets.callsPerDay}
-          />
+          <ActivityBars data={activityBars} targetPerDay={targets.callsPerDay} />
         </div>
-
-        {/* Calendar */}
         <CalendarWidget events={calendarEvents} />
       </div>
 

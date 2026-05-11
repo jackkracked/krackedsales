@@ -1,7 +1,6 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { cn } from "@/lib/utils/cn";
 
 interface Stage {
   id: string;
@@ -14,67 +13,42 @@ interface PipelineData {
   total: number;
 }
 
-// We derive pipeline health from GHL opportunities via the existing opps endpoint
 async function fetchPipelineHealth(): Promise<PipelineData> {
-  const res = await fetch("/api/ghl/opportunities?limit=100");
-  if (!res.ok) throw new Error("Failed to fetch pipeline");
-  const data = await res.json();
-  const opps = (data.opportunities ?? []) as Array<{
-    pipelineStageId: string;
-    status: string;
-    contact?: { name?: string };
-  }>;
+  // Get available pipelines first, then fetch opps for the first one
+  const pipelinesRes = await fetch("/api/ghl/pipelines").then((r) => r.json());
+  const pipelines: Array<{ id: string; name: string; stages?: Array<{ id: string; name: string }> }> =
+    pipelinesRes?.pipelines ?? [];
 
-  // Only open opportunities
+  if (pipelines.length === 0) return { stages: [], total: 0 };
+
+  const pipeline = pipelines[0];
+  const stageNames = new Map<string, string>(
+    (pipeline.stages ?? []).map((s) => [s.id, s.name])
+  );
+
+  const oppsRes = await fetch(`/api/ghl/opportunities?pipelineId=${pipeline.id}&limit=100`).then((r) =>
+    r.json()
+  );
+  const opps: Array<{ pipelineStageId: string; status: string }> = oppsRes?.opportunities ?? [];
   const open = opps.filter((o) => o.status === "open");
 
-  // Group by stage (we don't have stage names here — use pipelineStageId as key)
   const counts = new Map<string, number>();
   for (const o of open) {
     counts.set(o.pipelineStageId, (counts.get(o.pipelineStageId) ?? 0) + 1);
   }
 
-  const stages: Stage[] = Array.from(counts.entries()).map(([id, count]) => ({
-    id,
-    name: id, // will be replaced with real stage names from GHL pipelines API below
-    count,
-  }));
+  // Order by pipeline stage order, not by count
+  const stages: Stage[] = (pipeline.stages ?? [])
+    .filter((s) => counts.has(s.id))
+    .map((s) => ({ id: s.id, name: stageNames.get(s.id) ?? s.name, count: counts.get(s.id)! }));
 
   return { stages, total: open.length };
-}
-
-async function fetchPipelineHealthWithNames(): Promise<PipelineData> {
-  const [health, pipelinesRes] = await Promise.allSettled([
-    fetchPipelineHealth(),
-    fetch("/api/ghl/pipelines").then((r) => r.json()),
-  ]);
-
-  if (health.status === "rejected") throw health.reason;
-  const data = health.value;
-
-  if (pipelinesRes.status === "fulfilled") {
-    const pipelines = pipelinesRes.value?.pipelines ?? [];
-    const stageNames = new Map<string, string>();
-    for (const pipeline of pipelines) {
-      for (const stage of pipeline.stages ?? []) {
-        stageNames.set(stage.id, stage.name);
-      }
-    }
-    data.stages = data.stages.map((s) => ({
-      ...s,
-      name: stageNames.get(s.id) ?? s.name,
-    }));
-  }
-
-  // Sort by count desc
-  data.stages.sort((a, b) => b.count - a.count);
-  return data;
 }
 
 export function PipelineHealthPanel() {
   const { data, isLoading } = useQuery<PipelineData>({
     queryKey: ["pipeline-health"],
-    queryFn: fetchPipelineHealthWithNames,
+    queryFn: fetchPipelineHealth,
     staleTime: 2 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
   });

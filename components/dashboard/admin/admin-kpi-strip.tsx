@@ -88,14 +88,14 @@ function StripSkeleton() {
   return (
     <div className="bg-card border border-border rounded-[10px] flex overflow-hidden">
       {[0, 1, 2, 3].map((i) => (
-        <>
-          {i > 0 && <Divider key={`d${i}`} />}
-          <div key={i} className="flex-1 px-6 py-4 flex flex-col gap-2">
+        <div key={i} className="contents">
+          {i > 0 && <Divider />}
+          <div className="flex-1 px-6 py-4 flex flex-col gap-2">
             <div className="h-2.5 w-16 bg-muted/60 rounded animate-pulse" />
             <div className="h-7 w-24 bg-muted/60 rounded animate-pulse" />
             <div className="h-2.5 w-28 bg-muted/60 rounded animate-pulse" />
           </div>
-        </>
+        </div>
       ))}
     </div>
   );
