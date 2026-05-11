@@ -91,10 +91,10 @@ function MetricSection({
 }
 
 export function AdminKpiStrip() {
-  // isPending is the correct React Query v5 term for "no data yet"
-  // isLoading = isPending && isFetching, which is false on the very first
-  // synchronous render before useEffect fires — causing isLoading to miss
-  const { data, isPending } = useQuery<AdminMetrics>({
+  // isPending = status === 'pending' (no data in cache yet, first load only)
+  // isError covers the case where both initial fetch + retry failed — without
+  // this check, !data flips the strip back to skeleton forever after a failure
+  const { data, isPending, isError } = useQuery<AdminMetrics>({
     queryKey: ["admin-metrics"],
     queryFn: async () => {
       const r = await fetch("/api/kpi/admin-metrics");
@@ -105,17 +105,19 @@ export function AdminKpiStrip() {
     refetchInterval: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
     retry: 1,
-    // Keep previous data visible during any background refetch — prevents
-    // the strip from flickering to skeleton when focus triggers a re-fetch
     placeholderData: (prev) => prev,
   });
 
-  // Always return the outer wrapper — never an early return that could
-  // silently disappear. Skeleton uses Fragment+key instead of display:contents
-  // to avoid a Tailwind v4 class-generation edge case.
+  // Three states:
+  // 1. isPending — first load, no data yet → skeleton
+  // 2. isError && !data — fetches failed, no cached value → show dashes (never stuck skeleton)
+  // 3. data exists — show real values
+  const showSkeleton = isPending;
+  const showDashes = isError && !data;
+
   return (
     <div className="bg-card border border-border rounded-[10px] flex overflow-hidden">
-      {isPending || !data ? (
+      {showSkeleton ? (
         <>
           {[0, 1, 2, 3].map((i) => (
             <Fragment key={i}>
@@ -132,36 +134,42 @@ export function AdminKpiStrip() {
         <>
           <MetricSection
             label="Cash"
-            value={formatCurrency(data.cash)}
+            value={showDashes ? "--" : formatCurrency(data!.cash)}
             sub={
-              <span className="text-[11px] text-muted-foreground">
-                {formatCurrency(data.spend)} spend
-              </span>
+              !showDashes ? (
+                <span className="text-[11px] text-muted-foreground">
+                  {formatCurrency(data!.spend)} spend
+                </span>
+              ) : undefined
             }
-            delta={<Delta current={safeNum(data.cash)} prev={safeNum(data.cashPrev)} />}
+            delta={!showDashes ? <Delta current={safeNum(data!.cash)} prev={safeNum(data!.cashPrev)} /> : undefined}
             accent
           />
           <Divider />
           <MetricSection
             label="Spend"
-            value={formatCurrency(data.spend)}
+            value={showDashes ? "--" : formatCurrency(data!.spend)}
             sub={
-              <span className="text-[11px] text-muted-foreground">monthly recurring</span>
+              !showDashes ? (
+                <span className="text-[11px] text-muted-foreground">monthly recurring</span>
+              ) : undefined
             }
           />
           <Divider />
           <MetricSection
             label="Calls"
-            value={safeNum(data.calls).toLocaleString()}
+            value={showDashes ? "--" : safeNum(data!.calls).toLocaleString()}
             sub={
-              <span className="text-[11px] text-muted-foreground">this month</span>
+              !showDashes ? (
+                <span className="text-[11px] text-muted-foreground">this month</span>
+              ) : undefined
             }
           />
           <Divider />
           <MetricSection
             label="Leads"
-            value={safeNum(data.leads).toLocaleString()}
-            delta={<Delta current={safeNum(data.leads)} prev={safeNum(data.leadsPrev)} />}
+            value={showDashes ? "--" : safeNum(data!.leads).toLocaleString()}
+            delta={!showDashes ? <Delta current={safeNum(data!.leads)} prev={safeNum(data!.leadsPrev)} /> : undefined}
           />
         </>
       )}
