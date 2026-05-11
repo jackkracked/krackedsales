@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
@@ -13,10 +14,15 @@ interface AdminMetrics {
   leadsPrev: number;
 }
 
-function formatCurrency(n: number): string {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
-  return `$${n.toFixed(0)}`;
+function safeNum(n: unknown): number {
+  return typeof n === "number" && isFinite(n) ? n : 0;
+}
+
+function formatCurrency(n: unknown): string {
+  const num = safeNum(n);
+  if (num >= 1_000_000) return `$${(num / 1_000_000).toFixed(1)}M`;
+  if (num >= 1_000) return `$${(num / 1_000).toFixed(1)}K`;
+  return `$${num.toFixed(0)}`;
 }
 
 function pctChange(current: number, prev: number): number | null {
@@ -43,6 +49,10 @@ function Delta({ current, prev }: { current: number; prev: number }) {
       {Math.abs(pct)}% vs last month
     </span>
   );
+}
+
+function Divider() {
+  return <div className="w-px self-stretch bg-border shrink-0" />;
 }
 
 function MetricSection({
@@ -80,87 +90,77 @@ function MetricSection({
   );
 }
 
-function Divider() {
-  return <div className="w-px self-stretch bg-border shrink-0" />;
-}
-
-function StripSkeleton() {
-  return (
-    <div className="bg-card border border-border rounded-[10px] flex overflow-hidden">
-      {[0, 1, 2, 3].map((i) => (
-        <div key={i} className="contents">
-          {i > 0 && <Divider />}
-          <div className="flex-1 px-6 py-4 flex flex-col gap-2">
-            <div className="h-2.5 w-16 bg-muted/60 rounded animate-pulse" />
-            <div className="h-7 w-24 bg-muted/60 rounded animate-pulse" />
-            <div className="h-2.5 w-28 bg-muted/60 rounded animate-pulse" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function AdminKpiStrip() {
-  const { data, isLoading, isError } = useQuery<AdminMetrics>({
+  // isPending is the correct React Query v5 term for "no data yet"
+  // isLoading = isPending && isFetching, which is false on the very first
+  // synchronous render before useEffect fires — causing isLoading to miss
+  const { data, isPending } = useQuery<AdminMetrics>({
     queryKey: ["admin-metrics"],
     queryFn: async () => {
       const r = await fetch("/api/kpi/admin-metrics");
       if (!r.ok) throw new Error(`admin-metrics ${r.status}`);
-      return r.json();
+      return r.json() as Promise<AdminMetrics>;
     },
     staleTime: 2 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
     retry: 1,
   });
 
-  if (isLoading) return <StripSkeleton />;
-
-  if (isError || !data) {
-    return (
-      <div className="bg-card border border-border rounded-[10px] flex overflow-hidden">
-        <div className="flex-1 px-6 py-4 text-xs text-muted-foreground">
-          Could not load metrics — retrying…
-        </div>
-      </div>
-    );
-  }
-
+  // Always return the outer wrapper — never an early return that could
+  // silently disappear. Skeleton uses Fragment+key instead of display:contents
+  // to avoid a Tailwind v4 class-generation edge case.
   return (
     <div className="bg-card border border-border rounded-[10px] flex overflow-hidden">
-      <MetricSection
-        label="Cash"
-        value={formatCurrency(data.cash)}
-        sub={
-          <span className="text-[11px] text-muted-foreground">
-            {formatCurrency(data.spend)} spend
-          </span>
-        }
-        delta={<Delta current={data.cash} prev={data.cashPrev} />}
-        accent
-      />
-      <Divider />
-      <MetricSection
-        label="Spend"
-        value={formatCurrency(data.spend)}
-        sub={
-          <span className="text-[11px] text-muted-foreground">monthly recurring</span>
-        }
-      />
-      <Divider />
-      <MetricSection
-        label="Calls"
-        value={data.calls.toLocaleString()}
-        sub={
-          <span className="text-[11px] text-muted-foreground">this month</span>
-        }
-      />
-      <Divider />
-      <MetricSection
-        label="Leads"
-        value={data.leads.toLocaleString()}
-        delta={<Delta current={data.leads} prev={data.leadsPrev} />}
-      />
+      {isPending || !data ? (
+        <>
+          {[0, 1, 2, 3].map((i) => (
+            <Fragment key={i}>
+              {i > 0 && <Divider />}
+              <div className="flex-1 px-6 py-4 flex flex-col gap-2">
+                <div className="h-2.5 w-16 rounded animate-pulse" style={{ background: "var(--muted)", opacity: 0.6 }} />
+                <div className="h-7 w-24 rounded animate-pulse" style={{ background: "var(--muted)", opacity: 0.6 }} />
+                <div className="h-2.5 w-28 rounded animate-pulse" style={{ background: "var(--muted)", opacity: 0.6 }} />
+              </div>
+            </Fragment>
+          ))}
+        </>
+      ) : (
+        <>
+          <MetricSection
+            label="Cash"
+            value={formatCurrency(data.cash)}
+            sub={
+              <span className="text-[11px] text-muted-foreground">
+                {formatCurrency(data.spend)} spend
+              </span>
+            }
+            delta={<Delta current={safeNum(data.cash)} prev={safeNum(data.cashPrev)} />}
+            accent
+          />
+          <Divider />
+          <MetricSection
+            label="Spend"
+            value={formatCurrency(data.spend)}
+            sub={
+              <span className="text-[11px] text-muted-foreground">monthly recurring</span>
+            }
+          />
+          <Divider />
+          <MetricSection
+            label="Calls"
+            value={safeNum(data.calls).toLocaleString()}
+            sub={
+              <span className="text-[11px] text-muted-foreground">this month</span>
+            }
+          />
+          <Divider />
+          <MetricSection
+            label="Leads"
+            value={safeNum(data.leads).toLocaleString()}
+            delta={<Delta current={safeNum(data.leads)} prev={safeNum(data.leadsPrev)} />}
+          />
+        </>
+      )}
     </div>
   );
 }
