@@ -27,18 +27,13 @@ function DaysBadge({ days }: { days: number }) {
   const label = days === 1 ? "1d" : `${days}d`;
   const cls =
     days >= 14
-      ? "bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400"
+      ? "text-red-500"
       : days >= 7
-      ? "bg-orange-50 text-orange-600 dark:bg-orange-950/40 dark:text-orange-400"
-      : "bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400";
+      ? "text-orange-500"
+      : "text-amber-500";
 
   return (
-    <span
-      className={cn(
-        "text-[10px] font-semibold px-1.5 py-0.5 rounded-[4px] tabular-nums shrink-0",
-        cls
-      )}
-    >
+    <span className={cn("text-xs font-bold tabular-nums shrink-0", cls)}>
       {label}
     </span>
   );
