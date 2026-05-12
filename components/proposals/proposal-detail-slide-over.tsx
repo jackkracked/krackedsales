@@ -390,43 +390,55 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated }: Propos
             Preview Client View
           </a>
 
-          {proposal.status === "draft" && sendStep === "idle" && (
-            <button
-              onClick={() => { setSendEmail(proposal.contactEmail ?? ""); setSendStep("confirm"); }}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground text-sm font-medium rounded-[8px] hover:bg-primary/90 transition-colors"
-            >
-              <Send className="w-3.5 h-3.5" />
-              Send to Client
-            </button>
-          )}
-
-          {proposal.status === "draft" && sendStep === "confirm" && (
+          {proposal.status === "draft" && (
             <div className="space-y-2">
-              <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border border-border rounded-[7px]">
-                <Mail className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                <input
-                  type="email"
-                  value={sendEmail}
-                  onChange={(e) => setSendEmail(e.target.value)}
-                  placeholder="Recipient email"
-                  className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
-                />
+              {/* Primary send button — slides out when confirm opens */}
+              <div
+                className="overflow-hidden transition-all duration-300 ease-out"
+                style={{ maxHeight: sendStep === "idle" ? "52px" : "0px", opacity: sendStep === "idle" ? 1 : 0 }}
+              >
+                <button
+                  onClick={() => { setSendEmail(proposal.contactEmail ?? ""); setSendStep("confirm"); }}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground text-sm font-medium rounded-[8px] hover:bg-primary/90 transition-colors"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  Send to Client
+                </button>
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setSendStep("idle")}
-                  className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => sendMutation.mutate(sendEmail.trim() !== proposal.contactEmail ? sendEmail.trim() : undefined)}
-                  disabled={sendMutation.isPending || !sendEmail.trim()}
-                  className="flex-[2] flex items-center justify-center gap-2 px-3 py-2 bg-primary text-primary-foreground text-xs font-medium rounded-[7px] hover:bg-primary/90 transition-colors disabled:opacity-60"
-                >
-                  <Send className="w-3 h-3" />
-                  {sendMutation.isPending ? "Sending…" : "Confirm & Send"}
-                </button>
+
+              {/* Confirm step — slides in */}
+              <div
+                className="overflow-hidden transition-all duration-300 ease-out"
+                style={{ maxHeight: sendStep === "confirm" ? "120px" : "0px", opacity: sendStep === "confirm" ? 1 : 0 }}
+              >
+                <div className="space-y-2 pt-0.5">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border border-border rounded-[7px]">
+                    <Mail className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <input
+                      type="email"
+                      value={sendEmail}
+                      onChange={(e) => setSendEmail(e.target.value)}
+                      placeholder="Recipient email"
+                      className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setSendStep("idle")}
+                      className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => sendMutation.mutate(sendEmail.trim() !== proposal.contactEmail ? sendEmail.trim() : undefined)}
+                      disabled={sendMutation.isPending || !sendEmail.trim()}
+                      className="flex-[2] flex items-center justify-center gap-2 px-3 py-2 bg-primary text-primary-foreground text-xs font-medium rounded-[7px] hover:bg-primary/90 transition-colors disabled:opacity-60"
+                    >
+                      <Send className="w-3 h-3" />
+                      {sendMutation.isPending ? "Sending…" : "Confirm & Send"}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           )}

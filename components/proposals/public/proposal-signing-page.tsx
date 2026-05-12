@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
 import ReactMarkdown from "react-markdown";
@@ -356,6 +356,7 @@ function PricingTable({ proposal }: { proposal: ProposalData }) {
 export function ProposalSigningPage({ token, preview = false }: { token: string; preview?: boolean }) {
   const [signed, setSigned] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
+  const [signerName, setSignerName] = useState("");
   const today = format(new Date(), "MM/dd/yyyy");
 
   const { data, isLoading, isError } = useQuery<
@@ -367,6 +368,13 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
     staleTime: 60 * 1000,
     retry: false,
   });
+
+  // Initialise signerName once proposal data arrives
+  useEffect(() => {
+    if (data && "proposal" in data && !signerName) {
+      setSignerName((data as { proposal: ProposalData }).proposal.contactName);
+    }
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const signMutation = useMutation({
     mutationFn: async (signatureDataUrl: string) => {
@@ -446,7 +454,6 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
   const isPreview = preview || ("preview" in data && data.preview === true);
   const { proposal } = data as { proposal: ProposalData };
   const isManagement = proposal.type === "management";
-  const [signerName, setSignerName] = useState(proposal.contactName);
 
   return (
     <div className="min-h-screen bg-[#f5f5f0]">
