@@ -7,22 +7,28 @@ import { hasStripe, stripe } from "@/lib/stripe/client";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { id } = await params;
+    const body = await req.json().catch(() => ({}));
+    const recipientEmail: string | undefined = body?.recipientEmail;
+
     const [proposal] = await db().select().from(proposals).where(eq(proposals.id, id)).limit(1);
     if (!proposal) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (proposal.status !== "draft") {
       return NextResponse.json({ error: "Proposal already sent" }, { status: 400 });
     }
 
+    // Use override email if provided, fall back to contact email
+    const effectiveEmail = recipientEmail || proposal.contactEmail;
+
     let stripeCustomerId = proposal.stripeCustomerId ?? null;
     let stripeInvoiceId = proposal.stripeInvoiceId ?? null;
 
-    if (hasStripe() && proposal.contactEmail) {
+    if (hasStripe() && effectiveEmail) {
       // Create or retrieve Stripe customer
       if (!stripeCustomerId) {
         const existing = await db()
@@ -36,7 +42,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
         } else {
           const customer = await stripe().customers.create({
             name: proposal.contactName,
-            email: proposal.contactEmail,
+            email: effectiveEmail,
             metadata: { ghl_contact_id: proposal.ghlContactId },
           });
           stripeCustomerId = customer.id;

@@ -85,8 +85,22 @@ async function searchContacts(query: string) {
       if (results.length >= 3) break;
     }
 
-    if (results.length === 0) return { found: 0, contacts: [], searched: terms };
-    return { found: results.length, contacts: results, searched: terms };
+    if (results.length > 0) return { found: results.length, contacts: results, searched: terms };
+
+    // No contacts found — automatically fall back to conversation search
+    // Use the most specific term (brand name if extracted, otherwise full query)
+    const fallbackTerm = terms[terms.length - 1] ?? query;
+    const convos = await searchConversations(fallbackTerm);
+    if ("conversations" in convos && convos.found > 0) {
+      return {
+        found: 0,
+        contacts: [],
+        searched: terms,
+        conversationFallback: convos,
+      };
+    }
+
+    return { found: 0, contacts: [], searched: terms };
   } catch {
     return { found: 0, error: "Could not search contacts" };
   }
@@ -349,7 +363,7 @@ CAPABILITIES:
 
 SEARCH STRATEGY:
 1. Always try search_contacts first with the user's query (including full URLs).
-2. If search_contacts returns 0 results, try search_conversations with the same query.
+2. search_contacts automatically falls back to conversations when no contacts match — check for a "conversationFallback" key in the result and surface those matches to the user.
 3. If asking about a channel (Instagram, Messenger etc.) use search_conversations with that channel filter.
 4. Never say "I can only search by name/email/phone" — you can search by anything.
 

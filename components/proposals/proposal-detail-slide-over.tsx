@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { X, ExternalLink, Copy, Check, Send, Clock, CreditCard, Repeat, Download, Eye } from "lucide-react";
+import { X, ExternalLink, Copy, Check, Send, Clock, CreditCard, Repeat, Download, Eye, Mail } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils/cn";
 import { ProposalStatusBadge } from "./proposal-status-badge";
@@ -60,6 +60,44 @@ function fmtAmount(amount: number, currency: string) {
   }).format(amount);
 }
 
+function ScopeDisplay({ text }: { text: string }) {
+  const sections = text.split(/\n\n+/);
+  return (
+    <div className="space-y-3">
+      {sections.map((section, si) => {
+        const lines = section.split("\n").filter(Boolean);
+        if (!lines.length) return null;
+        const firstLine = lines[0];
+        const isHeader = firstLine.endsWith(":") && !firstLine.startsWith("•");
+        const header = isHeader ? firstLine.slice(0, -1) : null;
+        const bodyLines = isHeader ? lines.slice(1) : lines;
+        const bullets = bodyLines.filter((l) => l.startsWith("•") || l.startsWith("-") || l.startsWith("*"));
+        const prose = bodyLines.filter((l) => !l.startsWith("•") && !l.startsWith("-") && !l.startsWith("*"));
+        return (
+          <div key={si}>
+            {header && (
+              <p className="text-[10px] font-bold text-foreground uppercase tracking-wide mb-1">{header}</p>
+            )}
+            {bullets.length > 0 && (
+              <ul className="space-y-0.5">
+                {bullets.map((line, li) => (
+                  <li key={li} className="flex items-baseline gap-1.5 text-xs text-foreground/80">
+                    <span className="text-foreground/40 shrink-0">•</span>
+                    <span>{line.replace(/^[•\-*]\s*/, "")}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {prose.map((line, li) => (
+              <p key={li} className="text-xs text-foreground/80 leading-relaxed">{line}</p>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function InstalmentBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     pending: "bg-muted text-muted-foreground",
@@ -79,12 +117,19 @@ function InstalmentBadge({ status }: { status: string }) {
 
 export function ProposalDetailSlideOver({ proposal, onClose, onUpdated }: ProposalDetailSlideOverProps) {
   const [copied, setCopied] = useState(false);
+  const [sendStep, setSendStep] = useState<"idle" | "confirm">("idle");
+  const [sendEmail, setSendEmail] = useState(proposal.contactEmail ?? "");
   const queryClient = useQueryClient();
 
   const sendMutation = useMutation({
-    mutationFn: () =>
-      fetch(`/api/proposals/${proposal.id}/send`, { method: "POST" }).then((r) => r.json()),
+    mutationFn: (recipientEmail?: string) =>
+      fetch(`/api/proposals/${proposal.id}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipientEmail: recipientEmail || undefined }),
+      }).then((r) => r.json()),
     onSuccess: () => {
+      setSendStep("idle");
       queryClient.invalidateQueries({ queryKey: ["proposals"] });
       onUpdated();
     },
@@ -197,7 +242,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated }: Propos
           {proposal.serviceDescription && (
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Service</p>
-              <p className="text-sm text-foreground/80 leading-relaxed">{proposal.serviceDescription}</p>
+              <ScopeDisplay text={proposal.serviceDescription} />
             </div>
           )}
 
@@ -345,15 +390,45 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated }: Propos
             Preview Client View
           </a>
 
-          {proposal.status === "draft" && (
+          {proposal.status === "draft" && sendStep === "idle" && (
             <button
-              onClick={() => sendMutation.mutate()}
-              disabled={sendMutation.isPending}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground text-sm font-medium rounded-[8px] hover:bg-primary/90 transition-colors disabled:opacity-60"
+              onClick={() => { setSendEmail(proposal.contactEmail ?? ""); setSendStep("confirm"); }}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground text-sm font-medium rounded-[8px] hover:bg-primary/90 transition-colors"
             >
               <Send className="w-3.5 h-3.5" />
-              {sendMutation.isPending ? "Sending…" : "Send to Client"}
+              Send to Client
             </button>
+          )}
+
+          {proposal.status === "draft" && sendStep === "confirm" && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border border-border rounded-[7px]">
+                <Mail className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                <input
+                  type="email"
+                  value={sendEmail}
+                  onChange={(e) => setSendEmail(e.target.value)}
+                  placeholder="Recipient email"
+                  className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSendStep("idle")}
+                  className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => sendMutation.mutate(sendEmail.trim() !== proposal.contactEmail ? sendEmail.trim() : undefined)}
+                  disabled={sendMutation.isPending || !sendEmail.trim()}
+                  className="flex-[2] flex items-center justify-center gap-2 px-3 py-2 bg-primary text-primary-foreground text-xs font-medium rounded-[7px] hover:bg-primary/90 transition-colors disabled:opacity-60"
+                >
+                  <Send className="w-3 h-3" />
+                  {sendMutation.isPending ? "Sending…" : "Confirm & Send"}
+                </button>
+              </div>
+            </div>
           )}
 
           {proposal.status === "signed" && proposal.stripeHostedUrl && (
