@@ -25,6 +25,80 @@ function fmtAmt(amount: number, currency: string) {
   }).format(amount);
 }
 
+// ─── Proposal link email (sent to client when proposal is dispatched) ─────────
+
+export async function sendProposalLinkEmail(proposal: ProposalEmailData & {
+  token: string;
+  type: string;
+}): Promise<void> {
+  const resend = client();
+  if (!resend) {
+    console.warn("[email] RESEND_API_KEY not set — skipping proposal link email");
+    return;
+  }
+
+  const amount = fmtAmt(proposal.totalAmount, proposal.currency);
+  const appUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : "https://kracked-sales.vercel.app";
+  const signingUrl = `${appUrl}/p/${proposal.token}`;
+  const serviceType = proposal.type === "management" ? "Management Retainer" : "Project";
+
+  const to: string[] = [];
+  if (proposal.contactEmail) to.push(proposal.contactEmail);
+  if (to.length === 0) {
+    console.warn("[email] No recipient email — skipping proposal link email");
+    return;
+  }
+
+  await resend.emails.send({
+    from: FROM,
+    to,
+    cc: [GAGE],
+    subject: `Your Proposal from Kracked Retention — ${proposal.title}`,
+    html: `
+      <div style="font-family: Helvetica, Arial, sans-serif; font-size: 14px; color: #1a1a1a; max-width: 600px; margin: 0 auto;">
+        <div style="text-align: center; padding: 32px 0 24px;">
+          <div style="font-size: 22px; font-weight: 900; letter-spacing: -0.5px;">Kracked</div>
+          <div style="font-size: 9px; font-weight: 700; letter-spacing: 4px; margin-top: 2px;">RETENTION</div>
+        </div>
+
+        <div style="height: 6px; background: #1a1a1a; border-radius: 1px; margin-bottom: 28px;"></div>
+
+        <p style="margin: 0 0 16px;">Hi ${proposal.contactName},</p>
+        <p style="margin: 0 0 16px;">
+          Your proposal for <strong>${proposal.title}</strong> (${serviceType} — ${amount}) is ready to review and sign.
+        </p>
+        <p style="margin: 0 0 24px;">
+          Click the button below to view the full agreement and add your signature:
+        </p>
+
+        <div style="text-align: center; margin: 0 0 28px;">
+          <a href="${signingUrl}" style="display: inline-block; background: #1a1a1a; color: #fff; font-size: 14px; font-weight: 600; padding: 12px 28px; border-radius: 6px; text-decoration: none; letter-spacing: 0.01em;">
+            Review &amp; Sign
+          </a>
+        </div>
+
+        <p style="margin: 0 0 16px; font-size: 12px; color: #666;">
+          Or copy this link into your browser:<br>
+          <a href="${signingUrl}" style="color: #1a1a1a;">${signingUrl}</a>
+        </p>
+
+        <p style="margin: 0 0 16px;">
+          If you have any questions, reply to this email or reach us at
+          <a href="mailto:admin@krackedretention.com" style="color: #1a1a1a;">admin@krackedretention.com</a>.
+        </p>
+        <p style="margin: 0;">— The Kracked Retention Team</p>
+
+        <div style="height: 1px; background: #e0e0e0; margin: 32px 0;"></div>
+        <p style="font-size: 11px; color: #999; margin: 0;">
+          © 2026 Kracked Retention · admin@krackedretention.com
+        </p>
+      </div>
+    `,
+  });
+}
+
 // ─── Signed agreement email ───────────────────────────────────────────────────
 
 export async function sendSignedAgreementEmail(

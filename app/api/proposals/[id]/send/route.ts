@@ -4,6 +4,7 @@ import { proposals, proposalInstalments, stripeCustomers } from "@/lib/db/schema
 import { eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
 import { hasStripe, stripe } from "@/lib/stripe/client";
+import { sendProposalLinkEmail } from "@/lib/email/resend";
 
 export const dynamic = "force-dynamic";
 
@@ -127,6 +128,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         updatedAt: new Date(),
       })
       .where(eq(proposals.id, id));
+
+    // Fire-and-forget: email the proposal link to the client
+    sendProposalLinkEmail({
+      contactName: proposal.contactName,
+      contactEmail: effectiveEmail,
+      title: proposal.title,
+      totalAmount: proposal.totalAmount,
+      currency: proposal.currency,
+      token: proposal.token,
+      type: proposal.type,
+    }).catch((e) => console.error("[send] Proposal link email failed:", e));
 
     return NextResponse.json({ success: true });
   } catch (err) {
