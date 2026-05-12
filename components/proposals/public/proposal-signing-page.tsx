@@ -307,16 +307,17 @@ function PricingTable({ proposal }: { proposal: ProposalData }) {
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
-export function ProposalSigningPage({ token }: { token: string }) {
+export function ProposalSigningPage({ token, preview = false }: { token: string; preview?: boolean }) {
   const [signed, setSigned] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
   const today = format(new Date(), "MM/dd/yyyy");
 
   const { data, isLoading, isError } = useQuery<
-    { proposal: ProposalData } | { status: string; title?: string }
+    { preview?: boolean; proposal: ProposalData } | { status: string; title?: string }
   >({
-    queryKey: ["public-proposal", token],
-    queryFn: () => fetch(`/api/proposals/public/${token}`).then((r) => r.json()),
+    queryKey: ["public-proposal", token, preview],
+    queryFn: () =>
+      fetch(`/api/proposals/public/${token}${preview ? "?preview=1" : ""}`).then((r) => r.json()),
     staleTime: 60 * 1000,
     retry: false,
   });
@@ -396,11 +397,20 @@ export function ProposalSigningPage({ token }: { token: string }) {
     );
   }
 
+  const isPreview = preview || ("preview" in data && data.preview === true);
   const { proposal } = data as { proposal: ProposalData };
   const isManagement = proposal.type === "management";
 
   return (
     <div className="min-h-screen bg-[#f5f5f0]">
+      {/* Preview banner */}
+      {isPreview && (
+        <div className="bg-primary text-primary-foreground px-6 py-2.5 flex items-center justify-center gap-3 text-sm font-medium print:hidden">
+          <span className="px-2 py-0.5 bg-white/20 rounded text-xs font-bold tracking-wide uppercase">Preview</span>
+          <span>This is how your client will see the proposal. Signing is disabled.</span>
+        </div>
+      )}
+
       {/* Expiry banner */}
       {proposal.expiresAt && (
         <div className="bg-amber-50 border-b border-amber-200 px-6 py-2 flex items-center justify-end gap-2">
@@ -664,10 +674,16 @@ export function ProposalSigningPage({ token }: { token: string }) {
                     </div>
                   )}
 
-                  <SignatureCanvas
-                    onSign={(dataUrl) => signMutation.mutate(dataUrl)}
-                    disabled={signMutation.isPending}
-                  />
+                  {isPreview ? (
+                    <div className="flex items-center justify-center py-6 border-2 border-dashed border-border rounded-[6px] text-xs text-muted-foreground">
+                      Signature disabled in preview mode
+                    </div>
+                  ) : (
+                    <SignatureCanvas
+                      onSign={(dataUrl) => signMutation.mutate(dataUrl)}
+                      disabled={signMutation.isPending}
+                    />
+                  )}
                 </div>
               </div>
 

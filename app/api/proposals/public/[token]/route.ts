@@ -112,9 +112,10 @@ You agree:
 - This Agreement constitutes the entire understanding between the parties and supersedes all prior agreements, whether written or verbal.
 - **Time is of the essence** in fulfilling all obligations under this Agreement.`;
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   try {
     const { token } = await params;
+    const preview = req.nextUrl.searchParams.get("preview") === "1";
 
     const [proposal] = await db()
       .select()
@@ -126,8 +127,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
 
-    // Return status info for non-sent proposals
-    if (proposal.status !== "sent") {
+    // Return status info for non-sent proposals (unless preview mode)
+    if (proposal.status !== "sent" && !preview) {
       return NextResponse.json({ status: proposal.status, title: proposal.title });
     }
 
@@ -152,6 +153,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
       (proposal.type === "management" ? DEFAULT_MANAGEMENT_TERMS : DEFAULT_PROJECT_TERMS);
 
     return NextResponse.json({
+      preview,
       proposal: {
         id: proposal.id,
         title: proposal.title,
