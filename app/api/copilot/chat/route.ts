@@ -9,27 +9,145 @@ import type { ClickUpTasksResponse } from "@/lib/clickup/types";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function normaliseDomain(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/\/.*$/, "")
+    .trim();
+}
+
+function extractSearchTerms(query: string): string[] {
+  const terms = new Set<string>();
+  terms.add(query.trim());
+
+  // If it looks like a URL, extract domain and brand name
+  if (query.includes("://") || query.includes(".com") || query.includes(".co") || query.includes(".io")) {
+    const domain = normaliseDomain(query);
+    terms.add(domain);
+    // Also add just the brand part (before the TLD)
+    const brand = domain.split(".")[0];
+    if (brand && brand.length > 1) terms.add(brand);
+  }
+
+  return [...terms].filter(Boolean);
+}
+
+type GHLContactRaw = {
+  id: string;
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+  email?: string;
+  phone?: string;
+  companyName?: string;
+  tags?: string[];
+  source?: string;
+  website?: string;
+};
+
+function formatContact(c: GHLContactRaw) {
+  return {
+    id: c.id,
+    name: (c.fullName ?? [c.firstName, c.lastName].filter(Boolean).join(" ")) || "Unknown",
+    email: c.email ?? null,
+    phone: c.phone ?? null,
+    company: c.companyName ?? null,
+    tags: c.tags ?? [],
+    source: c.source ?? null,
+    website: c.website ?? null,
+    url: `/contacts/${c.id}`,
+  };
+}
+
 // ── Tool implementations ───────────────────────────────────────────────────────
 
 async function searchContacts(query: string) {
   try {
+    const terms = extractSearchTerms(query);
+    const seen = new Set<string>();
+    const results: ReturnType<typeof formatContact>[] = [];
+
+    // Try each term — stop early if we get hits
+    for (const term of terms) {
+      const data = await ghl.get<{ contacts: GHLContactRaw[] }>(
+        `/contacts/?locationId=${locationId()}&query=${encodeURIComponent(term)}&limit=10`
+      );
+      for (const c of data.contacts ?? []) {
+        if (!seen.has(c.id)) {
+          seen.add(c.id);
+          results.push(formatContact(c));
+        }
+      }
+      if (results.length >= 3) break;
+    }
+
+    if (results.length === 0) return { found: 0, contacts: [], searched: terms };
+    return { found: results.length, contacts: results, searched: terms };
+  } catch {
+    return { found: 0, error: "Could not search contacts" };
+  }
+}
+
+async function searchConversations(query: string, channelType?: string) {
+  try {
+    const CHANNEL_MAP: Record<string, string> = {
+      instagram: "TYPE_INSTAGRAM",
+      messenger: "TYPE_FB",
+      facebook: "TYPE_FB",
+      fb: "TYPE_FB",
+      sms: "TYPE_SMS",
+      email: "TYPE_EMAIL",
+      whatsapp: "TYPE_WHATSAPP",
+      tiktok: "TYPE_TIKTOK",
+    };
+
+    const params = new URLSearchParams({
+      locationId: locationId(),
+      limit: "10",
+      sortBy: "last_message_date",
+      sortOrder: "desc",
+    });
+
+    if (query) params.set("query", query);
+
+    // Map plain-English channel names to GHL type codes
+    const resolvedType = channelType
+      ? (CHANNEL_MAP[channelType.toLowerCase()] ?? channelType)
+      : null;
+    if (resolvedType) params.set("type", resolvedType);
+
     const data = await ghl.get<{
-      contacts: Array<{ id: string; firstName?: string; lastName?: string; email?: string; phone?: string }>;
-    }>(`/contacts/search?locationId=${locationId()}&query=${encodeURIComponent(query)}&limit=5`);
-    const contacts = data.contacts ?? [];
-    if (contacts.length === 0) return { found: 0, contacts: [] };
+      conversations: Array<{
+        id: string;
+        contactId: string;
+        contactName?: string;
+        lastMessageBody?: string;
+        lastMessageDate?: string;
+        type?: string;
+        unreadCount?: number;
+      }>;
+    }>(`/conversations/search?${params.toString()}`);
+
+    const convos = data.conversations ?? [];
+    if (convos.length === 0) return { found: 0, conversations: [] };
+
     return {
-      found: contacts.length,
-      contacts: contacts.map((c) => ({
-        id: c.id,
-        name: [c.firstName, c.lastName].filter(Boolean).join(" ") || "Unknown",
-        email: c.email ?? null,
-        phone: c.phone ?? null,
-        url: `/contacts/${c.id}`,
+      found: convos.length,
+      conversations: convos.map((c) => ({
+        contactId: c.contactId,
+        contactName: c.contactName ?? "Unknown",
+        channel: c.type ?? "unknown",
+        lastMessage: c.lastMessageBody ?? "",
+        date: c.lastMessageDate ?? null,
+        url: `/inbox?contact=${c.contactId}`,
       })),
     };
   } catch {
-    return { found: 0, error: "Could not search contacts" };
+    return { found: 0, error: "Could not search conversations" };
   }
 }
 
@@ -115,6 +233,11 @@ async function executeTool(name: string, args: Record<string, unknown>) {
   switch (name) {
     case "search_contacts":
       return searchContacts(String(args.query ?? ""));
+    case "search_conversations":
+      return searchConversations(
+        String(args.query ?? ""),
+        args.channel ? String(args.channel) : undefined
+      );
     case "get_pipeline":
       return getPipeline();
     case "get_demo_tracker":
@@ -133,13 +256,25 @@ const TOOLS: Tool[] = [
     functionDeclarations: [
       {
         name: "search_contacts",
-        description: "Search for contacts/leads by name, email, or phone. Use when the user asks about a specific person.",
+        description: "Search for contacts/leads by ANY identifier: name, email, phone, website URL, domain name, brand name, or company. Handles full URLs like https://tkave.com — automatically extracts the domain and brand name. Always try this first when a user asks about a specific person or brand.",
         parameters: {
           type: SchemaType.OBJECT,
           properties: {
-            query: { type: SchemaType.STRING, description: "Name, email, or phone to search for" },
+            query: { type: SchemaType.STRING, description: "Any identifier: name, email, phone, URL, domain, brand name, or company name" },
           },
           required: ["query"],
+        },
+      },
+      {
+        name: "search_conversations",
+        description: "Search GHL conversations by any text query and/or channel type. Use when the user asks about a conversation, message, or wants to find leads from a specific channel (Instagram, Messenger, Facebook, SMS, email, WhatsApp, TikTok). Can search message content, contact names, or filter by channel. Use this when search_contacts returns no results.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            query: { type: SchemaType.STRING, description: "Text to search in conversations and contact names. Can be empty if filtering by channel only." },
+            channel: { type: SchemaType.STRING, description: "Optional channel filter: instagram, messenger, facebook, sms, email, whatsapp, tiktok" },
+          },
+          required: [],
         },
       },
       {
@@ -205,16 +340,24 @@ export async function POST(req: NextRequest) {
 Today is ${today}. The user is on: ${pageCtx}.
 
 CAPABILITIES:
-- Search contacts and leads by name, email, phone
-- Fetch pipeline data (stages, deal counts, values)
-- Fetch Demo Tracker data (in-progress demos, waiting to send, demos sent — from ClickUp)
-- Navigate the user to any page
-- Answer questions about the business, sales process, and data
+- Search contacts/leads by ANY query: name, email, phone, website URL, domain (e.g. tkave.com), brand name, company. Full URLs are supported — you extract the domain automatically.
+- Search conversations by message content or channel (Instagram, Messenger, Facebook, SMS, Email, WhatsApp, TikTok).
+- Fetch pipeline data (stages, deal counts, values).
+- Fetch Demo Tracker data (in-progress demos, waiting to send, demos sent — from ClickUp).
+- Navigate the user to any page.
+- Answer questions about the business, sales process, and data.
+
+SEARCH STRATEGY:
+1. Always try search_contacts first with the user's query (including full URLs).
+2. If search_contacts returns 0 results, try search_conversations with the same query.
+3. If asking about a channel (Instagram, Messenger etc.) use search_conversations with that channel filter.
+4. Never say "I can only search by name/email/phone" — you can search by anything.
 
 RESPONSE FORMAT:
 - Markdown. **Bold** key values. Bullet lists for multiple items.
 - For contacts/deals, include links: [Name](/contacts/ID)
 - Sharp and direct. One paragraph for simple answers, structured lists for complex ones.
+- If a search returns partial results, suggest the user check the Contacts or Inbox pages directly.
 
 BUSINESS CONTEXT:
 Kracked Retention sells email design services to DTC ecommerce brands.

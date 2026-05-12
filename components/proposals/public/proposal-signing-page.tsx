@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Pen, RefreshCw, Check, AlertTriangle, Clock, Shield, Download } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
@@ -201,6 +202,51 @@ function StatusScreen({
         <h1 className="text-xl font-bold text-foreground mb-2" style={{ fontFamily: "var(--font-heading)" }}>{title}</h1>
         <p className="text-sm text-muted-foreground leading-relaxed">{message}</p>
       </div>
+    </div>
+  );
+}
+
+// ─── Scope display ─────────────────────────────────────────────────────────────
+// Parses the compileScope() output format into clean section headers + bullet lists
+
+function ScopeDisplay({ text }: { text: string }) {
+  const sections = text.split(/\n\n+/);
+  return (
+    <div className="mb-4 space-y-3">
+      {sections.map((section, si) => {
+        const lines = section.split("\n").filter(Boolean);
+        if (!lines.length) return null;
+
+        // Check if first line is a section header (ends with : and no bullet)
+        const firstLine = lines[0];
+        const isHeader = firstLine.endsWith(":") && !firstLine.startsWith("•");
+        const header = isHeader ? firstLine.slice(0, -1) : null;
+        const bodyLines = isHeader ? lines.slice(1) : lines;
+
+        const bullets = bodyLines.filter((l) => l.startsWith("•") || l.startsWith("-") || l.startsWith("*"));
+        const prose = bodyLines.filter((l) => !l.startsWith("•") && !l.startsWith("-") && !l.startsWith("*"));
+
+        return (
+          <div key={si}>
+            {header && (
+              <p className="text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">{header}</p>
+            )}
+            {bullets.length > 0 && (
+              <ul className="space-y-0.5">
+                {bullets.map((line, li) => (
+                  <li key={li} className="flex items-baseline gap-2 text-sm text-foreground/80">
+                    <span className="text-foreground/40 shrink-0">•</span>
+                    <span>{line.replace(/^[•\-*]\s*/, "")}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {prose.map((line, li) => (
+              <p key={li} className="text-sm text-foreground/80 leading-relaxed">{line}</p>
+            ))}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -477,9 +523,7 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
             </p>
 
             {proposal.serviceDescription ? (
-              <div className="text-sm text-foreground/80 leading-relaxed mb-2 whitespace-pre-wrap pl-4 border-l-2 border-foreground/15">
-                {proposal.serviceDescription}
-              </div>
+              <ScopeDisplay text={proposal.serviceDescription} />
             ) : (
               <ul className="text-sm text-foreground/80 leading-relaxed list-disc pl-6 mb-2 space-y-1">
                 {isManagement ? (
@@ -511,6 +555,7 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
             {/* Agreement terms (legal sections) */}
             <div className="text-sm text-foreground/80 leading-relaxed">
               <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
                 components={{
                   h2: ({ children }) => (
                     <h2 className="text-sm font-bold text-foreground mt-5 mb-1.5">{children}</h2>
