@@ -295,7 +295,7 @@ export function ProposalsClient() {
 
       {selected && (
         <ProposalDetailSlideOver
-          proposal={selected}
+          proposal={allProposals.find((p) => p.id === selected.id) ?? selected}
           onClose={() => setSelected(null)}
           onUpdated={() => queryClient.invalidateQueries({ queryKey: ["proposals"] })}
         />
