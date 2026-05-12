@@ -214,6 +214,14 @@ function FlowPill({ label, count, onToggle, onCountChange, unit }: {
   unit: string;
 }) {
   const selected = (count ?? 0) > 0;
+  // Local raw string so the user can clear the field and retype freely
+  const [raw, setRaw] = useState(String(count ?? 1));
+
+  // Keep in sync when the pill is first toggled on
+  useEffect(() => {
+    if (selected) setRaw(String(count ?? 1));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
 
   if (!selected) {
     return (
@@ -229,10 +237,18 @@ function FlowPill({ label, count, onToggle, onCountChange, unit }: {
       <span className="text-xs font-medium whitespace-nowrap">{label}</span>
       <input
         type="number"
-        value={count ?? 1}
+        value={raw}
         min={1}
         max={99}
-        onChange={e => onCountChange(Math.max(1, parseInt(e.target.value) || 1))}
+        onChange={e => {
+          setRaw(e.target.value);
+          const n = parseInt(e.target.value);
+          if (!isNaN(n) && n >= 1) onCountChange(n);
+        }}
+        onBlur={() => {
+          const n = parseInt(raw);
+          if (isNaN(n) || n < 1) { setRaw("1"); onCountChange(1); }
+        }}
         onClick={e => e.stopPropagation()}
         className="w-8 text-center text-xs font-semibold bg-primary/10 border-0 rounded-[3px] text-primary focus:outline-none focus:ring-1 focus:ring-primary/50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
       />

@@ -177,6 +177,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ proposal });
   } catch (err) {
     console.error("[POST /api/proposals]", err);
-    return NextResponse.json({ error: "Failed to create proposal" }, { status: 500 });
+    const msg = err instanceof Error ? err.message : "Failed to create proposal";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
