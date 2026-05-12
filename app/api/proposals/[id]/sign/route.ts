@@ -1,8 +1,70 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { proposals, proposalInstalments, slackSettings } from "@/lib/db/schema";
+import { proposals, proposalInstalments, slackSettings, agreementTemplates } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { hasStripe, stripe } from "@/lib/stripe/client";
+import { generateAgreementPdf } from "@/lib/pdf/render";
+import { sendSignedAgreementEmail } from "@/lib/email/resend";
+
+const DEFAULT_MANAGEMENT_TERMS = `**Service Collaboration & Cooperation**
+
+To maintain a fair and healthy long-term relationship, Kracked Retention reserves the right to temporarily **pause services** if cooperation or communication from the Client prevents effective service delivery.
+
+---
+
+**Term & Renewal**
+
+This Agreement operates on a **month-to-month basis** and will automatically renew unless terminated in accordance with the Pause & Termination Policy.
+
+---
+
+**Pause & Termination Policy**
+
+- **Notice Requirement:** A minimum of 30 days' written notice must be provided to admin@krackedretention.com.
+- **Work Completed in Advance:** Any work already completed or in progress at the time of notice will remain billable.
+- **No Immediate Termination:** Pausing without the required notice may result in outstanding invoices.
+
+---
+
+**Privacy & Confidentiality**
+
+Both parties agree to maintain the confidentiality of all business information, data, and assets shared.
+
+---
+
+**Terms of Sale**
+
+- All sales are final and non-refundable.
+- The Client retains sole ownership of all Customer Materials upon full payment.
+
+---
+
+**Governing Law**
+
+This Agreement is governed by the laws of the State of Tennessee.`;
+
+const DEFAULT_PROJECT_TERMS = `**Additional Scope Pricing**
+
+| Additional Scope | Cost |
+|---|---|
+| Flow Emails | $300 per email |
+| SMS | $100 per SMS/MMS |
+| Pop-Up | $150 per Pop-Up |
+| Flow Email Edits | $100 per email |
+
+---
+
+**Privacy & Confidentiality**
+
+Both parties agree to maintain the confidentiality of all business information, data, and assets shared.
+
+---
+
+**Terms of Sale**
+
+- All sales are final and non-refundable.
+- The Client retains sole ownership of all Customer Materials upon full payment.
+- This Agreement is governed by the laws of the State of Tennessee.`;
 
 export const dynamic = "force-dynamic";
 
@@ -98,7 +160,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       })
       .where(eq(proposals.id, id));
 
-    // Fire-and-forget: Slack notification
+    // Fire-and-forget: Slack + email
     (async () => {
       try {
         const [slack] = await db().select().from(slackSettings).limit(1);
@@ -117,6 +179,61 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         }
       } catch (e) {
         console.error("[sign] Slack notification failed:", e);
+      }
+
+      try {
+        // Fetch instalments for PDF
+        const allInstalments =
+          proposal.paymentStructure === "instalment"
+            ? await db()
+                .select()
+                .from(proposalInstalments)
+                .where(eq(proposalInstalments.proposalId, id))
+            : [];
+
+        // Fetch agreement terms
+        const [template] = await db()
+          .select()
+          .from(agreementTemplates)
+          .where(eq(agreementTemplates.type, proposal.type))
+          .limit(1);
+
+        const agreementTerms =
+          template?.body ??
+          (proposal.type === "management" ? DEFAULT_MANAGEMENT_TERMS : DEFAULT_PROJECT_TERMS);
+
+        const pdfBuffer = await generateAgreementPdf({
+          id: proposal.id,
+          title: proposal.title,
+          type: proposal.type,
+          contactName: proposal.contactName,
+          contactEmail: proposal.contactEmail,
+          totalAmount: proposal.totalAmount,
+          currency: proposal.currency,
+          serviceDescription: proposal.serviceDescription,
+          paymentStructure: proposal.paymentStructure,
+          billingInterval: proposal.billingInterval,
+          billingIntervalCount: proposal.billingIntervalCount,
+          startDate: proposal.startDate,
+          endDate: proposal.endDate,
+          signedAt: new Date(),
+          instalments: allInstalments,
+          agreementTerms,
+          signatureData: signature,
+        });
+
+        await sendSignedAgreementEmail(
+          {
+            contactName: proposal.contactName,
+            contactEmail: proposal.contactEmail,
+            title: proposal.title,
+            totalAmount: proposal.totalAmount,
+            currency: proposal.currency,
+          },
+          pdfBuffer
+        );
+      } catch (e) {
+        console.error("[sign] Email notification failed:", e);
       }
     })();
 

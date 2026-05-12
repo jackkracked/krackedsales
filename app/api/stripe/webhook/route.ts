@@ -1,9 +1,84 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { proposals, proposalInstalments, stripeEvents } from "@/lib/db/schema";
+import { proposals, proposalInstalments, stripeEvents, agreementTemplates } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { stripe } from "@/lib/stripe/client";
 import type Stripe from "stripe";
+import { generateAgreementPdf } from "@/lib/pdf/render";
+import { sendPaymentReceiptEmail } from "@/lib/email/resend";
+
+const DEFAULT_MANAGEMENT_TERMS = `**Service Collaboration & Cooperation**
+
+To maintain a fair and healthy long-term relationship, Kracked Retention reserves the right to temporarily **pause services** if cooperation or communication from the Client prevents effective service delivery.
+
+---
+
+**Governing Law**
+
+This Agreement is governed by the laws of the State of Tennessee.`;
+
+const DEFAULT_PROJECT_TERMS = `**Terms of Sale**
+
+All sales are final and non-refundable. This Agreement is governed by the laws of the State of Tennessee.`;
+
+async function sendReceiptForProposal(proposalId: string) {
+  const [proposal] = await db()
+    .select()
+    .from(proposals)
+    .where(eq(proposals.id, proposalId))
+    .limit(1);
+
+  if (!proposal) return;
+
+  const instalments =
+    proposal.paymentStructure === "instalment"
+      ? await db()
+          .select()
+          .from(proposalInstalments)
+          .where(eq(proposalInstalments.proposalId, proposalId))
+      : [];
+
+  const [template] = await db()
+    .select()
+    .from(agreementTemplates)
+    .where(eq(agreementTemplates.type, proposal.type))
+    .limit(1);
+
+  const agreementTerms =
+    template?.body ??
+    (proposal.type === "management" ? DEFAULT_MANAGEMENT_TERMS : DEFAULT_PROJECT_TERMS);
+
+  const pdfBuffer = await generateAgreementPdf({
+    id: proposal.id,
+    title: proposal.title,
+    type: proposal.type,
+    contactName: proposal.contactName,
+    contactEmail: proposal.contactEmail,
+    totalAmount: proposal.totalAmount,
+    currency: proposal.currency,
+    serviceDescription: proposal.serviceDescription,
+    paymentStructure: proposal.paymentStructure,
+    billingInterval: proposal.billingInterval,
+    billingIntervalCount: proposal.billingIntervalCount,
+    startDate: proposal.startDate,
+    endDate: proposal.endDate,
+    signedAt: proposal.signedAt,
+    instalments,
+    agreementTerms,
+    signatureData: proposal.signatureData,
+  });
+
+  await sendPaymentReceiptEmail(
+    {
+      contactName: proposal.contactName,
+      contactEmail: proposal.contactEmail,
+      title: proposal.title,
+      totalAmount: proposal.totalAmount,
+      currency: proposal.currency,
+    },
+    pdfBuffer
+  );
+}
 
 export const dynamic = "force-dynamic";
 
@@ -76,12 +151,51 @@ export async function POST(req: NextRequest) {
               .set({ status: "paid", paidAt: new Date(), updatedAt: new Date() })
               .where(eq(proposals.id, proposalId));
           }
-        } else {
+
+          // Send receipt on first instalment
+          if (metadata.instalment_number === "1") {
+            sendReceiptForProposal(proposalId).catch((e) =>
+              console.error("[webhook] Receipt email failed:", e)
+            );
+          }
+        } else if (metadata.proposal_id) {
           // Single payment
           await db()
             .update(proposals)
             .set({ status: "paid", paidAt: new Date(), updatedAt: new Date() })
             .where(eq(proposals.stripeInvoiceId, stripeInvoiceId));
+
+          sendReceiptForProposal(metadata.proposal_id).catch((e) =>
+            console.error("[webhook] Receipt email failed:", e)
+          );
+        } else {
+          // Single payment matched by invoice id (no metadata)
+          await db()
+            .update(proposals)
+            .set({ status: "paid", paidAt: new Date(), updatedAt: new Date() })
+            .where(eq(proposals.stripeInvoiceId, stripeInvoiceId));
+        }
+        break;
+      }
+
+      case "checkout.session.completed": {
+        // Subscription first payment
+        const session = event.data.object as Stripe.Checkout.Session;
+        const sessionMeta = session.metadata ?? {};
+        if (sessionMeta.proposal_id) {
+          await db()
+            .update(proposals)
+            .set({
+              status: "paid",
+              paidAt: new Date(),
+              stripeSubscriptionId: typeof session.subscription === "string" ? session.subscription : null,
+              updatedAt: new Date(),
+            })
+            .where(eq(proposals.id, sessionMeta.proposal_id));
+
+          sendReceiptForProposal(sessionMeta.proposal_id).catch((e) =>
+            console.error("[webhook] Receipt email failed:", e)
+          );
         }
         break;
       }

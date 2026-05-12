@@ -4,7 +4,7 @@ import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
 import ReactMarkdown from "react-markdown";
-import { Pen, RefreshCw, Check, AlertTriangle, Clock, Shield } from "lucide-react";
+import { Pen, RefreshCw, Check, AlertTriangle, Clock, Shield, Download } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
 interface Instalment {
@@ -415,7 +415,19 @@ export function ProposalSigningPage({ token }: { token: string }) {
         <div className="flex flex-col lg:flex-row gap-8 lg:gap-10 items-start">
 
           {/* ── Left: Full SOW document ── */}
-          <div className="flex-1 min-w-0 bg-white shadow-sm border border-black/8 rounded-[4px] px-10 py-10 lg:py-12">
+          <div className="flex-1 min-w-0 bg-white shadow-sm border border-black/8 rounded-[4px] px-10 py-10 lg:py-12 print:shadow-none print:border-0 print:px-0">
+
+            {/* Download PDF button — hidden in print */}
+            <div className="flex justify-end mb-6 print:hidden">
+              <a
+                href={`/api/proposals/${proposal.id}/pdf`}
+                download
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted-foreground border border-border rounded-[6px] hover:border-foreground/40 hover:text-foreground transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Download PDF
+              </a>
+            </div>
 
             {/* Logo */}
             <div className="text-center mb-8">
@@ -591,7 +603,7 @@ export function ProposalSigningPage({ token }: { token: string }) {
           </div>
 
           {/* ── Right: Sticky action panel ── */}
-          <div className="lg:w-72 shrink-0">
+          <div className="lg:w-72 shrink-0 print:hidden">
             <div className="lg:sticky lg:top-8 space-y-3">
               <div className="bg-white border border-black/8 rounded-[8px] overflow-hidden shadow-sm">
                 {/* Amount */}

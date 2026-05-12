@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { X, ExternalLink, Copy, Check, Send, Clock, CreditCard, Repeat } from "lucide-react";
+import { X, ExternalLink, Copy, Check, Send, Clock, CreditCard, Repeat, Download } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils/cn";
 import { ProposalStatusBadge } from "./proposal-status-badge";
@@ -333,7 +333,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated }: Propos
         </div>
 
         {/* Footer actions */}
-        <div className="px-5 py-4 border-t border-border shrink-0">
+        <div className="px-5 py-4 border-t border-border shrink-0 space-y-2">
           {proposal.status === "draft" && (
             <button
               onClick={() => sendMutation.mutate()}
@@ -369,6 +369,18 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated }: Propos
               <Check className="w-3.5 h-3.5" />
               {fmtDate(proposal.paidAt) ? `Paid on ${fmtDate(proposal.paidAt)}` : "Paid in full"}
             </div>
+          )}
+
+          {/* Download PDF — available for all non-draft proposals */}
+          {proposal.status !== "draft" && (
+            <a
+              href={`/api/proposals/${proposal.id}/pdf`}
+              download
+              className="w-full flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Download Agreement PDF
+            </a>
           )}
         </div>
       </div>
