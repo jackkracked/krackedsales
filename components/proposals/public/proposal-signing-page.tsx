@@ -374,7 +374,7 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
       const res = await fetch(`/api/proposals/${proposal.id}/sign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ signature: signatureDataUrl }),
+        body: JSON.stringify({ signature: signatureDataUrl, signerName: signerName.trim() || proposal.contactName }),
       });
       if (!res.ok) throw new Error("Failed to sign");
       return res.json() as Promise<{ hostedUrl: string | null }>;
@@ -446,6 +446,7 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
   const isPreview = preview || ("preview" in data && data.preview === true);
   const { proposal } = data as { proposal: ProposalData };
   const isManagement = proposal.type === "management";
+  const [signerName, setSignerName] = useState(proposal.contactName);
 
   return (
     <div className="min-h-screen bg-[#f5f5f0]">
@@ -635,7 +636,17 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
               <div>
                 <p className="text-xs font-bold text-foreground mb-3">Client</p>
                 <div className="space-y-2 text-sm text-foreground/80">
-                  <p><span className="font-semibold">Full Name:</span> {proposal.contactName}</p>
+                  <div className="flex items-baseline gap-2">
+                    <span className="font-semibold shrink-0">Full Name:</span>
+                    <input
+                      type="text"
+                      value={signerName}
+                      onChange={(e) => setSignerName(e.target.value)}
+                      disabled={isPreview || signed}
+                      className="flex-1 min-w-0 border-0 border-b border-foreground/20 focus:border-foreground/60 bg-transparent text-sm text-foreground outline-none pb-0.5 transition-colors disabled:opacity-70 disabled:cursor-default"
+                      placeholder="Full name"
+                    />
+                  </div>
                 </div>
                 <div className="mt-4">
                   <p className="text-xs text-foreground/60 mb-1">Signature:</p>

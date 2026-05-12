@@ -72,7 +72,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   try {
     const { id } = await params;
     const body = await req.json();
-    const { signature } = body;
+    const { signature, signerName } = body;
 
     if (!signature) {
       return NextResponse.json({ error: "Signature required" }, { status: 400 });
@@ -83,6 +83,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (proposal.status !== "sent") {
       return NextResponse.json({ error: "Proposal is not in sent status" }, { status: 400 });
     }
+
+    // Use signerName if provided and different, otherwise keep the original contactName
+    const resolvedSignerName: string = (signerName && signerName.trim()) ? signerName.trim() : proposal.contactName;
 
     // Get client IP
     const ip =
@@ -206,7 +209,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           id: proposal.id,
           title: proposal.title,
           type: proposal.type,
-          contactName: proposal.contactName,
+          contactName: resolvedSignerName,
           contactEmail: proposal.contactEmail,
           totalAmount: proposal.totalAmount,
           currency: proposal.currency,
@@ -224,7 +227,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
         await sendSignedAgreementEmail(
           {
-            contactName: proposal.contactName,
+            contactName: resolvedSignerName,
             contactEmail: proposal.contactEmail,
             title: proposal.title,
             totalAmount: proposal.totalAmount,
