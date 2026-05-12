@@ -336,7 +336,8 @@ export function ProposalSigningPage({ token }: { token: string }) {
       setSigned(true);
       if (hostedUrl) {
         setRedirecting(true);
-        setTimeout(() => { window.location.href = hostedUrl; }, 1800);
+        // Small delay so the user sees the confirmation before redirect
+        setTimeout(() => { window.location.href = hostedUrl; }, 1200);
       }
     },
   });
@@ -374,11 +375,22 @@ export function ProposalSigningPage({ token }: { token: string }) {
   }
 
   if (signed) {
+    if (redirecting) {
+      return (
+        <StatusScreen
+          icon={Check}
+          title="Taking you to payment..."
+          message="Your proposal is signed. Redirecting to your invoice now."
+          color="green"
+        />
+      );
+    }
+    // Signed but no Stripe redirect — payment link will be sent manually
     return (
       <StatusScreen
         icon={Check}
-        title={redirecting ? "Redirecting to payment..." : "Proposal signed!"}
-        message={redirecting ? "Taking you to the invoice now." : "Your proposal has been signed. You'll receive a copy by email."}
+        title="Proposal signed!"
+        message="Thank you — your signed agreement has been received. You'll receive a payment link by email shortly."
         color="green"
       />
     );

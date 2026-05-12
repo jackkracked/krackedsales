@@ -28,28 +28,61 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       req.headers.get("x-real-ip") ??
       "unknown";
 
+    const origin = req.headers.get("origin") ?? "";
     let hostedUrl: string | null = null;
 
-    // Get or generate Stripe hosted URL
     if (hasStripe()) {
       if (proposal.paymentStructure === "single" && proposal.stripeInvoiceId) {
+        // Invoice was finalized on send — retrieve the hosted URL
         const inv = await stripe().invoices.retrieve(proposal.stripeInvoiceId);
         hostedUrl = inv.hosted_invoice_url ?? null;
+
       } else if (proposal.paymentStructure === "instalment") {
+        // Point to first instalment's hosted invoice
         const instalments = await db()
           .select()
           .from(proposalInstalments)
           .where(eq(proposalInstalments.proposalId, id))
+          .orderBy(proposalInstalments.instalmentNumber)
           .limit(1);
+
         if (instalments.length > 0 && instalments[0].stripeInvoiceId) {
           const inv = await stripe().invoices.retrieve(instalments[0].stripeInvoiceId);
           hostedUrl = inv.hosted_invoice_url ?? null;
-          // Store on first instalment
           await db()
             .update(proposalInstalments)
             .set({ stripeHostedUrl: hostedUrl ?? undefined })
             .where(eq(proposalInstalments.id, instalments[0].id));
         }
+
+      } else if (proposal.paymentStructure === "subscription" && proposal.stripeCustomerId) {
+        // Create a Stripe Checkout Session for recurring subscription
+        const interval = (proposal.billingInterval ?? "month") as "day" | "week" | "month" | "year";
+        const intervalCount = proposal.billingIntervalCount ?? 1;
+
+        const price = await stripe().prices.create({
+          currency: proposal.currency,
+          unit_amount: Math.round(proposal.totalAmount * 100),
+          recurring: { interval, interval_count: intervalCount },
+          product_data: {
+            name: proposal.title,
+            metadata: { proposal_id: proposal.id },
+          },
+        });
+
+        const session = await stripe().checkout.sessions.create({
+          customer: proposal.stripeCustomerId,
+          mode: "subscription",
+          line_items: [{ price: price.id, quantity: 1 }],
+          success_url: `${origin}/p/${proposal.token}?payment=success`,
+          cancel_url: `${origin}/p/${proposal.token}`,
+          metadata: { proposal_id: proposal.id },
+          subscription_data: {
+            metadata: { proposal_id: proposal.id },
+          },
+        });
+
+        hostedUrl = session.url;
       }
     }
 
