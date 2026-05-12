@@ -1,0 +1,301 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getSessionUser } from "@/lib/auth/session";
+import { GoogleGenerativeAI, SchemaType, type Tool, type Part } from "@google/generative-ai";
+import { ghl, locationId } from "@/lib/ghl/client";
+import { clickup, demoListId } from "@/lib/clickup/client";
+import { mapStageToBucket } from "@/lib/utils/demo-stage";
+import type { ClickUpTasksResponse } from "@/lib/clickup/types";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+// ── Tool implementations ───────────────────────────────────────────────────────
+
+async function searchContacts(query: string) {
+  try {
+    const data = await ghl.get<{
+      contacts: Array<{ id: string; firstName?: string; lastName?: string; email?: string; phone?: string }>;
+    }>(`/contacts/search?locationId=${locationId()}&query=${encodeURIComponent(query)}&limit=5`);
+    const contacts = data.contacts ?? [];
+    if (contacts.length === 0) return { found: 0, contacts: [] };
+    return {
+      found: contacts.length,
+      contacts: contacts.map((c) => ({
+        id: c.id,
+        name: [c.firstName, c.lastName].filter(Boolean).join(" ") || "Unknown",
+        email: c.email ?? null,
+        phone: c.phone ?? null,
+        url: `/contacts/${c.id}`,
+      })),
+    };
+  } catch {
+    return { found: 0, error: "Could not search contacts" };
+  }
+}
+
+async function getPipeline() {
+  try {
+    const pipelinesData = await ghl.get<{
+      pipelines: Array<{ id: string; name: string; stages?: Array<{ id: string; name: string }> }>;
+    }>(`/opportunities/pipelines?locationId=${locationId()}`);
+    const pipelines = pipelinesData.pipelines ?? [];
+    if (pipelines.length === 0) return { pipelines: [] };
+
+    const results = await Promise.all(
+      pipelines.slice(0, 3).map(async (p) => {
+        try {
+          const oppsData = await ghl.get<{
+            opportunities: Array<{ pipelineStageId: string; status: string; monetaryValue?: number }>;
+          }>(`/opportunities/search?location_id=${locationId()}&pipeline_id=${p.id}&limit=100`);
+          const open = (oppsData.opportunities ?? []).filter((o) => o.status === "open");
+          const stageCounts = new Map<string, number>();
+          let totalValue = 0;
+          for (const o of open) {
+            stageCounts.set(o.pipelineStageId, (stageCounts.get(o.pipelineStageId) ?? 0) + 1);
+            totalValue += o.monetaryValue ?? 0;
+          }
+          const stages = (p.stages ?? [])
+            .filter((s) => stageCounts.has(s.id))
+            .map((s) => ({ name: s.name, count: stageCounts.get(s.id)! }));
+          return { name: p.name, openDeals: open.length, totalValue, stages };
+        } catch {
+          return { name: p.name, openDeals: 0, totalValue: 0, stages: [] };
+        }
+      })
+    );
+    return { pipelines: results };
+  } catch {
+    return { pipelines: [], error: "Could not fetch pipeline" };
+  }
+}
+
+async function getDemoTracker() {
+  try {
+    const listId = demoListId();
+    const data = await clickup.get<ClickUpTasksResponse>(
+      `/list/${listId}/task?include_closed=false&subtasks=false&order_by=created&reverse=true&page=0`
+    );
+    const tasks = (data.tasks ?? []).filter((t) => !t.parent);
+
+    const counts = { IN_PROGRESS: 0, WAITING_TO_SEND: 0, DEMO_SENT: 0 };
+    const byBucket: Record<string, Array<{ name: string; status: string; assignee: string | null; url: string }>> = {
+      IN_PROGRESS: [],
+      WAITING_TO_SEND: [],
+      DEMO_SENT: [],
+    };
+
+    for (const task of tasks) {
+      const bucket = mapStageToBucket(task.status.status);
+      counts[bucket]++;
+      byBucket[bucket].push({
+        name: task.name,
+        status: task.status.status,
+        assignee: task.assignees[0]?.username ?? null,
+        url: task.url,
+      });
+    }
+
+    return {
+      total: tasks.length,
+      inProgress: counts.IN_PROGRESS,
+      waitingToSend: counts.WAITING_TO_SEND,
+      demoSent: counts.DEMO_SENT,
+      tasks: {
+        inProgress: byBucket.IN_PROGRESS.slice(0, 10),
+        waitingToSend: byBucket.WAITING_TO_SEND.slice(0, 10),
+        demoSent: byBucket.DEMO_SENT.slice(0, 10),
+      },
+    };
+  } catch {
+    return { error: "Could not fetch demo tracker data" };
+  }
+}
+
+async function executeTool(name: string, args: Record<string, unknown>) {
+  switch (name) {
+    case "search_contacts":
+      return searchContacts(String(args.query ?? ""));
+    case "get_pipeline":
+      return getPipeline();
+    case "get_demo_tracker":
+      return getDemoTracker();
+    case "navigate_to":
+      return { url: String(args.path ?? "/dashboard"), action: "navigate" };
+    default:
+      return { error: `Unknown tool: ${name}` };
+  }
+}
+
+// ── Tool declarations ──────────────────────────────────────────────────────────
+
+const TOOLS: Tool[] = [
+  {
+    functionDeclarations: [
+      {
+        name: "search_contacts",
+        description: "Search for contacts/leads by name, email, or phone. Use when the user asks about a specific person.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            query: { type: SchemaType.STRING, description: "Name, email, or phone to search for" },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "get_pipeline",
+        description: "Get the current state of all sales pipelines — open deals per stage, total value, deal counts.",
+        parameters: { type: SchemaType.OBJECT, properties: {} },
+      },
+      {
+        name: "get_demo_tracker",
+        description: "Get the current state of the Demo Tracker — how many demos are in progress, waiting to send, or already sent. Use for any question about demos, demo status, demo counts, or what's being worked on.",
+        parameters: { type: SchemaType.OBJECT, properties: {} },
+      },
+      {
+        name: "navigate_to",
+        description: "Return a navigation link when the user asks to go somewhere or view a page.",
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            path: { type: SchemaType.STRING, description: "App path e.g. /contacts, /pipeline, /inbox" },
+          },
+          required: ["path"],
+        },
+      },
+    ],
+  },
+];
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function makeFunctionResponseParts(
+  responses: Array<{ name: string; result: unknown }>
+): Part[] {
+  return responses.map((r) => ({
+    functionResponse: {
+      name: r.name,
+      response: { result: JSON.stringify(r.result) },
+    },
+  }));
+}
+
+// ── Route ──────────────────────────────────────────────────────────────────────
+
+interface ChatMessage { role: "user" | "assistant"; content: string; }
+interface CopilotPageContext { page: string; pageTitle: string; entityType?: string; entityId?: string; entityName?: string; }
+
+export async function POST(req: NextRequest) {
+  const user = await getSessionUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return NextResponse.json({ error: "AI not configured" }, { status: 503 });
+
+  const body = await req.json() as { messages: ChatMessage[]; context: CopilotPageContext };
+  const { messages, context } = body;
+  if (!messages?.length) return NextResponse.json({ error: "messages required" }, { status: 400 });
+
+  const today = new Date().toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const pageCtx = context?.entityName
+    ? `${context.pageTitle} — viewing ${context.entityType ?? "item"}: ${context.entityName}`
+    : context?.pageTitle ?? "Dashboard";
+
+  const systemPrompt = `You are K — the AI co-pilot embedded in Kracked Sales CRM for Kracked Retention, an email design agency.
+Today is ${today}. The user is on: ${pageCtx}.
+
+CAPABILITIES:
+- Search contacts and leads by name, email, phone
+- Fetch pipeline data (stages, deal counts, values)
+- Fetch Demo Tracker data (in-progress demos, waiting to send, demos sent — from ClickUp)
+- Navigate the user to any page
+- Answer questions about the business, sales process, and data
+
+RESPONSE FORMAT:
+- Markdown. **Bold** key values. Bullet lists for multiple items.
+- For contacts/deals, include links: [Name](/contacts/ID)
+- Sharp and direct. One paragraph for simple answers, structured lists for complex ones.
+
+BUSINESS CONTEXT:
+Kracked Retention sells email design services to DTC ecommerce brands.
+Sales flow: Instagram/FB DM → demo call → proposal → close.
+Key metrics: demos booked, calls made, deals closed, revenue.`;
+
+  try {
+    const client = new GoogleGenerativeAI(key);
+    const model = client.getGenerativeModel({
+      model: "gemini-2.5-flash",
+      tools: TOOLS,
+      systemInstruction: systemPrompt,
+    });
+
+    const history = messages.slice(0, -1).map((m) => ({
+      role: m.role === "user" ? "user" as const : "model" as const,
+      parts: [{ text: m.content }],
+    }));
+    const lastMessage = messages[messages.length - 1];
+    const chat = model.startChat({ history });
+
+    // Resolve tool calls with non-streaming calls (up to 3 rounds)
+    let currentInput: string | Part[] = lastMessage.content;
+    for (let round = 0; round < 3; round++) {
+      const result = await chat.sendMessage(currentInput);
+      const parts = result.response.candidates?.[0]?.content?.parts ?? [];
+      const fnCalls = parts.filter((p) => p.functionCall);
+
+      if (fnCalls.length === 0) {
+        // No tool calls — stream the text we already have back to the client
+        const text = result.response.text();
+        const encoder = new TextEncoder();
+        const readable = new ReadableStream({
+          async start(controller) {
+            // Send in small chunks so the client renders progressively
+            const CHUNK = 6;
+            for (let i = 0; i < text.length; i += CHUNK) {
+              controller.enqueue(encoder.encode(text.slice(i, i + CHUNK)));
+              // Yield to allow the runtime to flush each chunk
+              await Promise.resolve();
+            }
+            controller.close();
+          },
+        });
+        return new NextResponse(readable, {
+          headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-cache" },
+        });
+      }
+
+      // Execute tools in parallel
+      const fnResults = await Promise.all(
+        fnCalls.map(async (part) => {
+          const { name, args } = part.functionCall!;
+          const output = await executeTool(name, args as Record<string, unknown>);
+          return { name, result: output };
+        })
+      );
+      currentInput = makeFunctionResponseParts(fnResults);
+    }
+
+    // After tool rounds, get a streaming final response
+    const encoder = new TextEncoder();
+    const streamResult = await chat.sendMessageStream(currentInput);
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const chunk of streamResult.stream) {
+            const text = chunk.text();
+            if (text) controller.enqueue(encoder.encode(text));
+          }
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new NextResponse(readable, {
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-cache" },
+    });
+  } catch (err) {
+    console.error("[POST /api/copilot/chat]", err);
+    return NextResponse.json({ error: "Failed to generate response" }, { status: 500 });
+  }
+}

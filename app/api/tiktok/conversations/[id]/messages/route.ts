@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { openGet, openPost, getTiktokSettings } from "@/lib/tiktok/client";
+import { db } from "@/lib/db";
+import { platformReplies } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -114,6 +117,24 @@ export async function POST(
     })) as TikTokSendMessageResponse;
 
     const messageId = res.data?.message_id ?? "";
+
+    // Track reply time for the reply queue
+    const client = db();
+    const existing = await client
+      .select({ id: platformReplies.id })
+      .from(platformReplies)
+      .where(and(eq(platformReplies.platform, "tiktok"), eq(platformReplies.externalId, id)))
+      .limit(1);
+    if (existing.length > 0) {
+      await client
+        .update(platformReplies)
+        .set({ repliedAt: new Date() })
+        .where(eq(platformReplies.id, existing[0].id));
+    } else {
+      await client
+        .insert(platformReplies)
+        .values({ platform: "tiktok", externalId: id, repliedAt: new Date() });
+    }
 
     return NextResponse.json({ messageId });
   } catch (err) {

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { meta, pageId } from "@/lib/meta/client";
+import { db } from "@/lib/db";
+import { platformReplies } from "@/lib/db/schema";
+import { eq, and, desc } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -71,8 +74,9 @@ export async function GET(
 
 export async function POST(
   req: NextRequest,
-  { params: _params }: { params: Promise<{ conversationId: string }> }
+  { params }: { params: Promise<{ conversationId: string }> }
 ) {
+  const { conversationId } = await params;
   let body: SendMessageBody;
   try {
     body = await req.json();
@@ -80,7 +84,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { recipientId, text } = body;
+  const { recipientId, text, platform } = body;
 
   if (!recipientId || !text) {
     return NextResponse.json(
@@ -94,6 +98,26 @@ export async function POST(
       recipient: { id: recipientId },
       message: { text },
     });
+
+    // Track reply time so the queue knows we've responded
+    // (table has no unique constraint — delete stale row then insert fresh)
+    const client = db();
+    const platformName = platform ?? "facebook";
+    const existing = await client
+      .select({ id: platformReplies.id })
+      .from(platformReplies)
+      .where(and(eq(platformReplies.platform, platformName), eq(platformReplies.externalId, conversationId)))
+      .limit(1);
+    if (existing.length > 0) {
+      await client
+        .update(platformReplies)
+        .set({ repliedAt: new Date() })
+        .where(eq(platformReplies.id, existing[0].id));
+    } else {
+      await client
+        .insert(platformReplies)
+        .values({ platform: platformName, externalId: conversationId, repliedAt: new Date() });
+    }
 
     return NextResponse.json({ messageId: res.message_id });
   } catch (err) {

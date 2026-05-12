@@ -10,11 +10,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { db } from "@/lib/db";
-import { followupSends, followupRecommendations } from "@/lib/db/schema";
-import { and, eq, inArray, desc } from "drizzle-orm";
+import { followupSends, followupRecommendations, callInsights, calls } from "@/lib/db/schema";
+import { and, eq, inArray, desc, isNotNull } from "drizzle-orm";
 import type { GHLOpportunity, GHLPipeline, GHLConversation } from "@/lib/ghl/types";
 import { generateFollowUpRecommendation } from "@/lib/ai/followup-engine";
 import type { FollowUpZone } from "@/lib/ai/followup-engine";
+import { notifyAdmins } from "@/lib/notifications";
+import { quickHealthTier } from "@/lib/deal-health";
+import { detectAndPersistWinners } from "@/lib/ab-testing";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -187,6 +190,32 @@ export async function POST(req: NextRequest) {
       const hasEverReplied = sends.some((s) => s.resultedInResponse);
       const channel = convMap.get(contactId) ?? sends[0]?.channel ?? "EMAIL";
 
+      // Fetch latest call insight for this contact
+      let latestInsight: { wantsText: string | null; objectionsText: string | null; nextStepsText: string | null; redFlagsText: string | null } | null = null;
+      try {
+        const [lastCall] = await client
+          .select({ id: calls.id })
+          .from(calls)
+          .where(and(eq(calls.contactId, contactId), isNotNull(calls.transcriptText)))
+          .orderBy(desc(calls.startedAt))
+          .limit(1);
+        if (lastCall) {
+          const [insight] = await client
+            .select({
+              wantsText: callInsights.wantsText,
+              objectionsText: callInsights.objectionsText,
+              nextStepsText: callInsights.nextStepsText,
+              redFlagsText: callInsights.redFlagsText,
+            })
+            .from(callInsights)
+            .where(eq(callInsights.callId, lastCall.id))
+            .limit(1);
+          latestInsight = insight ?? null;
+        }
+      } catch {
+        // non-fatal
+      }
+
       try {
         const ctx = {
           contact: {
@@ -213,6 +242,7 @@ export async function POST(req: NextRequest) {
               preview: s.messageText.slice(0, 80),
             })),
           },
+          callInsights: latestInsight,
         };
 
         const aiRec = await generateFollowUpRecommendation(ctx);
@@ -227,6 +257,16 @@ export async function POST(req: NextRequest) {
           status: "pending",
         });
 
+        // Notify about overdue follow-up — dedup by contactId so daily cron doesn't spam
+        const contactName = opp.contact?.name ?? "A contact";
+        notifyAdmins(
+          "followup_overdue",
+          `Follow-up overdue: ${contactName}`,
+          `${daysSince}d in ${stageName} — AI recommendation ready`,
+          `/follow-ups`,
+          contactId
+        ).catch(() => {/* non-fatal */});
+
         analysed++;
       } catch (e) {
         console.error(`[follow-ups/analyse] Failed for contact=${contactId}:`, e);
@@ -234,14 +274,51 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── 8. Notify for cold deals (no activity ≥14d) ───────────────────────────
+    // Dedup via entityId (oppId) — skips if an unread deal_cold already exists for this opp.
+    const coldNotifications = allOpps
+      .filter((o) => o.status === "open" && quickHealthTier(o.updatedAt) === "cold")
+      .slice(0, 20); // cap to avoid thundering-herd on first run
+
+    await Promise.allSettled(
+      coldNotifications.map((opp) => {
+        const name = opp.contact?.name ?? opp.name ?? "A deal";
+        const stageName = stageMap[opp.pipelineStageId] ?? "Unknown stage";
+        return notifyAdmins(
+          "deal_cold",
+          `Deal going cold: ${name}`,
+          `No activity in ${stageName}`,
+          `/pipeline`,
+          opp.id
+        );
+      })
+    );
+
+    // ── 9. A/B winner detection ────────────────────────────────────────────────
+    let newWinners = 0;
+    try {
+      newWinners = await detectAndPersistWinners();
+      if (newWinners > 0) {
+        await notifyAdmins(
+          "ab_winner",
+          `A/B test winner detected`,
+          `${newWinners} group${newWinners > 1 ? "s" : ""} reached statistical significance`,
+          `/templates`
+        );
+      }
+    } catch (err) {
+      console.error("[follow-ups/analyse] A/B detection failed:", err);
+    }
+
     console.log(
-      `[follow-ups/analyse] Done. candidates=${candidates.length} analysed=${analysed} skipped=${skipped} already_had_rec=${existingOppIds.size}`
+      `[follow-ups/analyse] Done. candidates=${candidates.length} analysed=${analysed} skipped=${skipped} already_had_rec=${existingOppIds.size} cold_notified=${coldNotifications.length} ab_winners=${newWinners}`
     );
 
     return NextResponse.json({
       analysed,
       skipped,
       alreadyHadRecommendation: existingOppIds.size,
+      abWinners: newWinners,
     });
   } catch (err) {
     console.error("[POST /api/follow-ups/analyse]", err);

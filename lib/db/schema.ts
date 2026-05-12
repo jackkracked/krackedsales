@@ -426,6 +426,8 @@ export const calls = pgTable("calls", {
   meetConferenceId: text("meet_conference_id").unique(), // dedup key
   meetSpaceId: text("meet_space_id"),
   transcriptAvailable: boolean("transcript_available").default(false).notNull(),
+  transcriptText: text("transcript_text"),
+  transcriptStoredAt: timestamp("transcript_stored_at"),
   smartNotesUrl: text("smart_notes_url"),
   // Dialer-specific
   ghlMessageId: text("ghl_message_id").unique(),         // dedup key
@@ -449,9 +451,150 @@ export const userCalendars = pgTable("user_calendars", {
 });
 
 /**
+ * Tracks when we last replied to a Meta/TikTok conversation.
+ * Used by the reply queue to detect which conversations still need a response,
+ * since those APIs don't return message direction.
+ */
+export const platformReplies = pgTable("platform_replies", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  platform: text("platform").notNull(),    // "facebook" | "instagram" | "tiktok"
+  externalId: text("external_id").notNull(), // recipientId or conversationId
+  repliedAt: timestamp("replied_at").defaultNow().notNull(),
+});
+
+/**
+ * Per-user in-app notifications — bell icon feed.
+ * entityId is used for deduplication (same type + entityId won't fire twice while unread).
+ */
+export const notifications = pgTable("notifications", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: text("type").notNull(), // 'new_lead' | 'call_soon' | 'deal_cold' | 'followup_overdue' | 'ab_winner'
+  title: text("title").notNull(),
+  body: text("body"),
+  href: text("href"),
+  entityId: text("entity_id"), // dedup key: lead ID, event ID, etc.
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/**
+ * A/B test winner log — written by the followup-analyse cron when a test concludes.
+ * Referenced by the A/B leaderboard for historical records.
+ */
+export const abTestResults = pgTable("ab_test_results", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  abGroup: text("ab_group").notNull(),
+  winnerTemplateId: uuid("winner_template_id").references(() => replyTemplates.id),
+  loserTemplateId: uuid("loser_template_id").references(() => replyTemplates.id),
+  winnerSends: integer("winner_sends").notNull(),
+  winnerResponses: integer("winner_responses").notNull(),
+  loserSends: integer("loser_sends").notNull(),
+  loserResponses: integer("loser_responses").notNull(),
+  winnerRate: numeric("winner_rate", { precision: 5, scale: 4 }),
+  loserRate: numeric("loser_rate", { precision: 5, scale: 4 }),
+  chiSquare: numeric("chi_square", { precision: 8, scale: 4 }),
+  detectedAt: timestamp("detected_at").defaultNow().notNull(),
+});
+
+/**
+ * AI-extracted insights from Google Meet call transcripts.
+ * Written by the calls sync job after storing transcript text.
+ * Surfaced in opportunity modals and injected into follow-up AI prompts.
+ */
+export const callInsights = pgTable("call_insights", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  callId: uuid("call_id").notNull().references(() => calls.id, { onDelete: "cascade" }),
+  contactId: text("contact_id"),
+  wantsText: text("wants_text"),
+  objectionsText: text("objections_text"),
+  nextStepsText: text("next_steps_text"),
+  redFlagsText: text("red_flags_text"),
+  sentimentScore: integer("sentiment_score"), // 1–5
+  sentimentLabel: text("sentiment_label"),    // "positive" | "neutral" | "negative"
+  analyzedAt: timestamp("analyzed_at").defaultNow().notNull(),
+});
+
+/**
  * Per-calendar booking automation rules — when a call is booked or confirmed
  * on a specific calendar, automatically move the linked opportunity to a stage.
  */
+// ─── Proposals ────────────────────────────────────────────────────────────────
+
+export const proposals = pgTable("proposals", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  token: text("token").notNull().unique(),
+  title: text("title").notNull(),
+  type: text("type").notNull(), // "management" | "project"
+  ghlContactId: text("ghl_contact_id").notNull(),
+  contactName: text("contact_name").notNull(),
+  contactEmail: text("contact_email"),
+  opportunityId: text("opportunity_id"),
+  createdBy: uuid("created_by").references(() => users.id),
+  status: text("status").notNull().default("draft"),
+    // "draft" | "sent" | "signed" | "paid" | "failed" | "void" | "overdue"
+  totalAmount: doublePrecision("total_amount").notNull(),
+  currency: text("currency").notNull().default("usd"),
+  serviceDescription: text("service_description"),
+  notes: text("notes"),
+  paymentStructure: text("payment_structure").notNull(),
+    // "subscription" | "single" | "instalment"
+  billingInterval: text("billing_interval"),
+  billingIntervalCount: integer("billing_interval_count"),
+  startDate: timestamp("start_date"),
+  endDate: timestamp("end_date"),
+  expiresAt: timestamp("expires_at"),
+  stripeInvoiceId: text("stripe_invoice_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeHostedUrl: text("stripe_hosted_url"),
+  signedAt: timestamp("signed_at"),
+  signedIp: text("signed_ip"),
+  signatureData: text("signature_data"),
+  sentAt: timestamp("sent_at"),
+  paidAt: timestamp("paid_at"),
+  cancelledAt: timestamp("cancelled_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const proposalInstalments = pgTable("proposal_instalments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  proposalId: uuid("proposal_id").notNull().references(() => proposals.id, { onDelete: "cascade" }),
+  instalmentNumber: integer("instalment_number").notNull(),
+  stripeInvoiceId: text("stripe_invoice_id"),
+  stripeHostedUrl: text("stripe_hosted_url"),
+  amount: doublePrecision("amount").notNull(),
+  dueDate: timestamp("due_date").notNull(),
+  status: text("status").notNull().default("pending"),
+  paidAt: timestamp("paid_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const stripeCustomers = pgTable("stripe_customers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  ghlContactId: text("ghl_contact_id").notNull().unique(),
+  stripeCustomerId: text("stripe_customer_id").notNull().unique(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const stripeEvents = pgTable("stripe_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  stripeEventId: text("stripe_event_id").notNull().unique(),
+  type: text("type").notNull(),
+  payload: jsonb("payload").notNull(),
+  processedAt: timestamp("processed_at").defaultNow().notNull(),
+});
+
+export const agreementTemplates = pgTable("agreement_templates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  type: text("type").notNull().unique(), // "management" | "project"
+  body: text("body").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ─── Booking automation ───────────────────────────────────────────────────────
+
 export const bookingAutomationRules = pgTable("booking_automation_rules", {
   id: uuid("id").primaryKey().defaultRandom(),
   ghlCalendarId: text("ghl_calendar_id").notNull(),

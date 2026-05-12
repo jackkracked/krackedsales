@@ -55,12 +55,28 @@ function StatusDot({ active }: { active: boolean }) {
   );
 }
 
+const TEAM_CACHE_KEY = "team-grid-cache-v1";
+
+function readTeamCache(): { users: TeamUser[] } | undefined {
+  try { return JSON.parse(localStorage.getItem(TEAM_CACHE_KEY) ?? "null") ?? undefined; } catch { return undefined; }
+}
+
 export function TeamPerformanceGrid() {
-  const { data, isLoading } = useQuery<{ users: TeamUser[] }>({
+  const { data, isPending } = useQuery<{ users: TeamUser[] }>({
     queryKey: ["team-settings"],
-    queryFn: () => fetch("/api/settings/team").then((r) => r.json()),
+    queryFn: async () => {
+      const d = await fetch("/api/settings/team").then((r) => r.json());
+      try { localStorage.setItem(TEAM_CACHE_KEY, JSON.stringify(d)); } catch {}
+      return d;
+    },
     staleTime: 60 * 1000,
+    initialData: readTeamCache,
+    initialDataUpdatedAt: () => {
+      try { return parseInt(localStorage.getItem(TEAM_CACHE_KEY + "-ts") ?? "0", 10); } catch { return 0; }
+    },
+    placeholderData: (prev) => prev,
   });
+  const isLoading = isPending && !data;
 
   const users = data?.users ?? [];
 
@@ -126,10 +142,10 @@ export function TeamPerformanceGrid() {
                     <RoleBadge role={u.role} />
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-sm text-foreground/80">
-                    {u.targets?.dealsPerMonth ?? "—"}
+                    {u.targets?.dealsPerMonth ?? 0}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-sm text-foreground/80">
-                    {u.targets?.callsPerDay ?? "—"}
+                    {u.targets?.callsPerDay ?? 0}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <StatusDot active={u.isActive} />

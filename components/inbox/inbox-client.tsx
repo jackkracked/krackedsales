@@ -10,12 +10,13 @@ import type { ChannelFilter } from "./channel-filter-pills";
 import { MetaConversations } from "./meta-conversations";
 import { TikTokConversations } from "./tiktok-conversations";
 import { LeadDetailsSidebar } from "./lead-details-sidebar";
-import { RefreshCw, ArrowLeft, Move } from "lucide-react";
+import { RefreshCw, ArrowLeft, Move, Inbox } from "lucide-react";
 import { TikTokIcon } from "@/components/shared/channel-icon";
 import { MessageSquare, Mail } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { ReplyQueue } from "./reply-queue";
 
-type InboxTab = "GHL" | "Meta" | "SMS" | "Email" | "TikTok";
+type InboxTab = "Queue" | "GHL" | "Meta" | "SMS" | "Email" | "TikTok";
 
 const TAB_TO_CHANNEL: Partial<Record<InboxTab, ChannelFilter>> = {
   GHL: "ALL",
@@ -24,6 +25,7 @@ const TAB_TO_CHANNEL: Partial<Record<InboxTab, ChannelFilter>> = {
 };
 
 const INBOX_TABS: Array<{ key: InboxTab; label: string; icon?: React.ElementType }> = [
+  { key: "Queue", label: "Queue", icon: Inbox },
   { key: "GHL", label: "GHL" },
   { key: "Meta", label: "Meta" },
   { key: "SMS", label: "SMS", icon: MessageSquare },
@@ -43,7 +45,11 @@ export function InboxClient() {
   const { data, isLoading, isFetching, error } = useConversations(channel, unreadOnly);
   const { data: messagesData, isLoading: messagesLoading } = useMessages(selectedConversationId);
 
-  const conversations = data?.conversations ?? [];
+  // Instagram DMs are routed to the Meta tab — exclude them from GHL/SMS/Email views
+  const rawConversations = data?.conversations ?? [];
+  const conversations = inboxTab === "GHL"
+    ? rawConversations.filter((c) => c.type !== "TYPE_INSTAGRAM" && c.lastMessageType !== "TYPE_INSTAGRAM")
+    : rawConversations;
   const messages = messagesData?.messages ?? [];
   const selectedConversation = conversations.find((c) => c.id === selectedConversationId);
 
@@ -74,6 +80,13 @@ export function InboxClient() {
           ))}
         </div>
       </div>
+
+      {/* ── Reply Queue ── */}
+      {inboxTab === "Queue" && (
+        <div className="flex-1 overflow-hidden">
+          <ReplyQueue />
+        </div>
+      )}
 
       {/* ── Meta inbox ── */}
       {inboxTab === "Meta" && (

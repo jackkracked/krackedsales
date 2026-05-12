@@ -204,7 +204,7 @@ function SlideOver({ user, onClose }: SlideOverProps) {
       role,
       isActive,
       ghlUserId,
-      targets: role === "rep" ? { dealsPerMonth, callsPerDay, revenueTarget } : undefined,
+      targets: { dealsPerMonth, callsPerDay, revenueTarget },
       permissionOverrides: overrides,
     });
   }
@@ -346,11 +346,11 @@ function SlideOver({ user, onClose }: SlideOverProps) {
             </p>
           </section>
 
-          {/* Targets — rep only */}
-          {role === "rep" && (
+          {/* Targets */}
+          {true && (
             <section>
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
-                Monthly Targets
+                Targets
               </p>
               <div className="space-y-3">
                 <NumberInput

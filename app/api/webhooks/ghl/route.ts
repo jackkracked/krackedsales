@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { pipelineStageEvents, followupSends, bookingAutomationRules } from "@/lib/db/schema";
 import { and, eq, gte, desc } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
+import { notifyAdmins } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,20 @@ export async function POST(req: NextRequest) {
         eventType === "OpportunityCreate" ? "opportunity.created" : "opportunity.updated",
         { opportunityId: body?.opportunityId ?? body?.id }
       ).catch((err) => console.error("[GHL Webhook] Pusher error:", err));
+
+      // New lead notification — dedup by opportunityId so duplicate webhooks don't spam
+      if (eventType === "OpportunityCreate") {
+        const oppId = body?.id ?? body?.opportunityId;
+        const contactName = body?.contactName ?? body?.fullName ?? body?.name ?? "New lead";
+        const monetaryValue = body?.monetaryValue ? ` — $${Number(body.monetaryValue).toLocaleString("en-US")}` : "";
+        notifyAdmins(
+          "new_lead",
+          `New lead: ${contactName}${monetaryValue}`,
+          body?.pipelineStageName ? `Stage: ${body.pipelineStageName}` : undefined,
+          oppId ? `/pipeline` : undefined,
+          oppId
+        ).catch((err) => console.error("[GHL Webhook] notify error:", err));
+      }
     }
 
     if (

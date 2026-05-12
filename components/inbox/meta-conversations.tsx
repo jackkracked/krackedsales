@@ -5,6 +5,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { RefreshCw, Send } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { useMessages, useConversations } from "@/lib/hooks/use-conversations";
+import { MessageThread as GHLMessageThread } from "./message-thread";
+import { ReplyComposer } from "./reply-composer";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,7 +37,18 @@ type CommentConversation = {
   postId: string | null;
 };
 
-type UnifiedConversation = DmConversation | CommentConversation;
+type GHLInstagramConversation = {
+  source: "ghl_instagram";
+  id: string;
+  platform: "instagram";
+  participantName: string;
+  participantId: string;
+  contactId: string;
+  lastMessage: string;
+  updatedAt: string;
+};
+
+type UnifiedConversation = DmConversation | CommentConversation | GHLInstagramConversation;
 
 interface MetaMessage {
   id: string;
@@ -671,6 +685,46 @@ function CommentLeadThread({ conversation }: { conversation: CommentConversation
 }
 
 // ---------------------------------------------------------------------------
+// GHLInstagramThread — GHL-sourced Instagram DMs in the Meta tab
+// ---------------------------------------------------------------------------
+
+function GHLInstagramThread({ conversation }: { conversation: GHLInstagramConversation }) {
+  const { data: messagesData, isLoading } = useMessages(conversation.id);
+  const messages = messagesData?.messages ?? [];
+
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex items-center gap-2.5 px-5 py-3 border-b border-border bg-card shrink-0">
+        <InstagramIcon className="w-4 h-4 shrink-0" />
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">{conversation.participantName}</h3>
+          <p className="text-xs text-muted-foreground">Instagram · via GHL</p>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground gap-2">
+          <RefreshCw className="w-4 h-4 animate-spin" />
+          Loading messages…
+        </div>
+      ) : (
+        <div className="flex-1 overflow-y-auto min-h-0">
+          <GHLMessageThread messages={messages} />
+        </div>
+      )}
+
+      <div className="shrink-0 border-t border-border">
+        <ReplyComposer
+          conversationId={conversation.id}
+          contactId={conversation.contactId}
+          defaultChannelType="TYPE_INSTAGRAM"
+        />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // MetaConversations — main export
 // ---------------------------------------------------------------------------
 
@@ -689,7 +743,7 @@ export function MetaConversations() {
   const initializedRef = useRef(false);
   const queryClient = useQueryClient();
 
-  // Fetch DM conversations
+  // Fetch DM conversations (Meta Graph API)
   const { data: dmData, isLoading: dmLoading, isFetching, error: dmError } = useQuery({
     queryKey: ["meta-conversations"],
     queryFn: fetchDmConversations,
@@ -707,7 +761,10 @@ export function MetaConversations() {
     staleTime: 0,
   });
 
-  // Merge DMs and comment leads, sort newest first
+  // Fetch GHL Instagram conversations — these come in via GHL's own IG integration
+  const { data: ghlIgData } = useConversations("TYPE_INSTAGRAM");
+
+  // Merge all sources: Meta DMs + comment leads + GHL Instagram, sort newest first
   const allConversations: UnifiedConversation[] = React.useMemo(() => {
     const dms: DmConversation[] = dmData?.conversations ?? [];
     const comments: CommentConversation[] = (leadsData?.leads ?? []).map(
@@ -725,11 +782,33 @@ export function MetaConversations() {
         postId: lead.postId,
       })
     );
+    const ghlIg: GHLInstagramConversation[] = (ghlIgData?.conversations ?? []).map(
+      (c): GHLInstagramConversation => ({
+        source: "ghl_instagram",
+        id: c.id,
+        platform: "instagram",
+        participantName: c.fullName ?? c.contact?.name ?? "Unknown",
+        participantId: c.contactId,
+        contactId: c.contactId,
+        lastMessage: c.lastMessageBody ?? "",
+        updatedAt: c.lastMessageDate ?? new Date().toISOString(),
+      })
+    );
 
-    return [...dms, ...comments].sort(
+    // Deduplicate by ID (a conversation shouldn't appear from both sources, but just in case)
+    const seen = new Set<string>();
+    const merged: UnifiedConversation[] = [];
+    for (const conv of [...dms, ...ghlIg, ...comments]) {
+      if (!seen.has(conv.id)) {
+        seen.add(conv.id);
+        merged.push(conv);
+      }
+    }
+
+    return merged.sort(
       (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     );
-  }, [dmData, leadsData]);
+  }, [dmData, leadsData, ghlIgData]);
 
   // On first data load, initialise existing DM conversations as "seen" so
   // we don't show dots on old threads. We wait until DMs have actually loaded
@@ -893,6 +972,8 @@ export function MetaConversations() {
         {selectedConversation ? (
           selectedConversation.source === "comment" ? (
             <CommentLeadThread conversation={selectedConversation} />
+          ) : selectedConversation.source === "ghl_instagram" ? (
+            <GHLInstagramThread conversation={selectedConversation} />
           ) : (
             <MessageThread
               conversationId={selectedConversation.id}

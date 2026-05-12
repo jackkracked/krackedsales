@@ -54,6 +54,12 @@ export interface FollowUpContext {
     }>;
   };
   notes?: string;
+  callInsights?: {
+    wantsText: string | null;
+    objectionsText: string | null;
+    nextStepsText: string | null;
+    redFlagsText: string | null;
+  } | null;
 }
 
 const ZONE_GOALS: Record<FollowUpZone, string> = {
@@ -122,6 +128,7 @@ ${JSON.stringify(
     },
     history: ctx.history,
     notes: ctx.notes ?? "",
+    ...(ctx.callInsights ? { callInsights: ctx.callInsights } : {}),
   },
   null,
   2

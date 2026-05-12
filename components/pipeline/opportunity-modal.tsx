@@ -10,8 +10,10 @@ import {
   X, Mail, Phone, Tag, Calendar, User, TrendingUp,
   FileText, RefreshCw, Clock, ExternalLink, Edit2, Check, MessageSquare,
   Send, DollarSign, MessageCircle, ListTodo, Layers, ClipboardCheck, Zap,
-  ChevronDown, ChevronLeft, ChevronRight,
+  ChevronDown, ChevronLeft, ChevronRight, Activity, PhoneCall,
 } from "lucide-react";
+import { TIER_COLORS } from "@/lib/deal-health";
+import type { DealHealthResult } from "@/lib/deal-health";
 import { formatDateTime, relativeTime } from "@/lib/utils/date";
 import { cn } from "@/lib/utils/cn";
 import { cleanUrl, parseQualificationNote, isQualificationNote } from "@/lib/utils/url";
@@ -543,6 +545,44 @@ export function OpportunityModal({
   const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? "overview");
   const inQueue = queue && queue.length >= 2 && queueIndex !== undefined;
 
+  const contactId = opportunity.contact?.id ?? "";
+
+  // Last call + AI insights — fetched lazily on overview tab
+  const { data: lastCallData } = useQuery<{
+    call: { id: string; startedAt: string; durationSeconds: number | null; transcriptAvailable: boolean } | null;
+    insights: {
+      wantsText: string | null;
+      objectionsText: string | null;
+      nextStepsText: string | null;
+      redFlagsText: string | null;
+      sentimentScore: number | null;
+      sentimentLabel: string | null;
+    } | null;
+  }>({
+    queryKey: ["last-call", contactId],
+    queryFn: () => fetch(`/api/ghl/contacts/${contactId}/last-call`).then((r) => r.json()),
+    enabled: activeTab === "overview" && !!contactId,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Deal health score — fetched lazily on overview tab
+  const { data: healthData } = useQuery<DealHealthResult>({
+    queryKey: ["health-score", opportunity.id],
+    queryFn: async () => {
+      const p = new URLSearchParams({
+        contactId,
+        stageName: stageName,
+        updatedAt: opportunity.updatedAt,
+        status: opportunity.status,
+      });
+      const res = await fetch(`/api/ghl/opportunities/${opportunity.id}/health-score?${p}`);
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    enabled: activeTab === "overview" && opportunity.status === "open",
+    staleTime: 5 * 60 * 1000,
+  });
+
   // Keyboard navigation for queue
   React.useEffect(() => {
     const fn = (e: KeyboardEvent) => {
@@ -561,6 +601,7 @@ export function OpportunityModal({
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [showCreateDemo, setShowCreateDemo] = useState(false);
   const [showCreateAudit, setShowCreateAudit] = useState(false);
+  const [healthExpanded, setHealthExpanded] = useState(false);
   const [editingValue, setEditingValue] = useState(false);
   const [valueInput, setValueInput] = useState(
     String(opportunity.monetaryValue && opportunity.monetaryValue > 0 ? opportunity.monetaryValue : 1000)
@@ -613,7 +654,6 @@ export function OpportunityModal({
   }
 
   const name = opportunity.contact?.name ?? opportunity.name ?? "Unknown";
-  const contactId = opportunity.contact?.id ?? "";
 
   const displayValue = opportunity.monetaryValue && opportunity.monetaryValue > 0
     ? opportunity.monetaryValue
@@ -750,7 +790,7 @@ export function OpportunityModal({
                 </button>
               ))}
             </div>
-            <div className="flex-1 overflow-y-auto px-5 py-5 min-h-0">
+            <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0">
           {activeTab === "overview" && (
             <div className="space-y-5">
               {/* Contact */}
@@ -889,36 +929,111 @@ export function OpportunityModal({
                 </div>
               </section>
 
-              {/* Quick actions */}
-              <section>
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                  <Zap className="w-3.5 h-3.5" />
-                  Quick Actions
-                </h3>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    onClick={() => setShowCreateTask(true)}
-                    className="flex flex-col items-center gap-1.5 py-3 text-xs font-medium text-foreground border border-border rounded-[7px] hover:bg-muted hover:border-primary/20 transition-colors"
-                  >
-                    <ListTodo className="w-4 h-4 text-muted-foreground" />
-                    Create Task
-                  </button>
-                  <button
-                    onClick={() => setShowCreateDemo(true)}
-                    className="flex flex-col items-center gap-1.5 py-3 text-xs font-medium text-foreground border border-border rounded-[7px] hover:bg-muted hover:border-primary/20 transition-colors"
-                  >
-                    <Layers className="w-4 h-4 text-muted-foreground" />
-                    Create Demo
-                  </button>
-                  <button
-                    onClick={() => setShowCreateAudit(true)}
-                    className="flex flex-col items-center gap-1.5 py-3 text-xs font-medium text-foreground border border-border rounded-[7px] hover:bg-muted hover:border-primary/20 transition-colors"
-                  >
-                    <ClipboardCheck className="w-4 h-4 text-muted-foreground" />
-                    Create Audit
-                  </button>
-                </div>
-              </section>
+              {/* Deal Health — compact inline, factors expand on click */}
+              {opportunity.status === "open" && (
+                <section>
+                  {!healthData ? (
+                    <div className="flex items-center gap-3 px-3 py-2 rounded-[8px] bg-muted/30 border border-border/60">
+                      <div className="h-2.5 bg-muted/60 rounded animate-pulse w-16" />
+                      <div className="flex-1 h-1.5 bg-muted/40 rounded animate-pulse" />
+                      <div className="h-2.5 bg-muted/40 rounded animate-pulse w-10" />
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setHealthExpanded((v) => !v)}
+                      className="w-full text-left"
+                    >
+                      {/* Single-row summary */}
+                      <div className="flex items-center gap-2.5 px-3 py-2 rounded-[8px] bg-muted/30 border border-border/60 hover:border-border transition-colors">
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${TIER_COLORS[healthData.tier].dot}`} />
+                        <span className={`text-xs font-semibold shrink-0 ${TIER_COLORS[healthData.tier].text}`}>
+                          {TIER_COLORS[healthData.tier].label}
+                        </span>
+                        <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${TIER_COLORS[healthData.tier].dot}`}
+                            style={{ width: `${healthData.score}%` }}
+                          />
+                        </div>
+                        <span className="text-xs font-bold tabular-nums text-foreground shrink-0">
+                          {healthData.score}<span className="font-normal text-muted-foreground">/100</span>
+                        </span>
+                        <ChevronDown className={cn("w-3 h-3 text-muted-foreground shrink-0 transition-transform", healthExpanded && "rotate-180")} />
+                      </div>
+                      {/* Expandable factors */}
+                      {healthExpanded && healthData.factors.length > 0 && (
+                        <div className="mt-1.5 px-3 py-2 rounded-[7px] bg-muted/20 border border-border/40 space-y-1.5">
+                          {healthData.factors.map((f, i) => (
+                            <div key={i} className="flex items-center justify-between gap-2">
+                              <span className="text-xs text-muted-foreground">{f.label}</span>
+                              {f.delta !== 0 && (
+                                <span className={`text-xs font-semibold tabular-nums ${f.positive ? "text-emerald-600" : "text-red-500"}`}>
+                                  {f.delta > 0 ? `+${f.delta}` : f.delta}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </button>
+                  )}
+                </section>
+              )}
+
+              {/* Last Call */}
+              {lastCallData?.call && (
+                <section>
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                    <PhoneCall className="w-3.5 h-3.5" />
+                    Last Call
+                  </h3>
+                  <div className="bg-muted/30 rounded-[8px] p-3 border border-border/60 space-y-2.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">
+                        {relativeTime(lastCallData.call.startedAt)}
+                      </span>
+                      {lastCallData.call.durationSeconds && (
+                        <span className="text-muted-foreground tabular-nums">
+                          {Math.floor(lastCallData.call.durationSeconds / 60)}m {lastCallData.call.durationSeconds % 60}s
+                        </span>
+                      )}
+                    </div>
+                    {lastCallData.insights ? (
+                      <div className="space-y-2 text-xs">
+                        {lastCallData.insights.wantsText && (
+                          <div>
+                            <p className="font-semibold text-foreground/70 uppercase tracking-wide text-[10px] mb-0.5">Wants</p>
+                            <p className="text-foreground">{lastCallData.insights.wantsText}</p>
+                          </div>
+                        )}
+                        {lastCallData.insights.objectionsText && (
+                          <div>
+                            <p className="font-semibold text-amber-600/80 uppercase tracking-wide text-[10px] mb-0.5">Objections</p>
+                            <p className="text-foreground">{lastCallData.insights.objectionsText}</p>
+                          </div>
+                        )}
+                        {lastCallData.insights.nextStepsText && (
+                          <div>
+                            <p className="font-semibold text-emerald-600/80 uppercase tracking-wide text-[10px] mb-0.5">Next Steps</p>
+                            <p className="text-foreground">{lastCallData.insights.nextStepsText}</p>
+                          </div>
+                        )}
+                        {lastCallData.insights.redFlagsText && (
+                          <div>
+                            <p className="font-semibold text-red-500/80 uppercase tracking-wide text-[10px] mb-0.5">Red Flags</p>
+                            <p className="text-foreground">{lastCallData.insights.redFlagsText}</p>
+                          </div>
+                        )}
+                      </div>
+                    ) : lastCallData.call.transcriptAvailable ? (
+                      <p className="text-xs text-muted-foreground italic">Transcript available — insights generating…</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic">No transcript available</p>
+                    )}
+                  </div>
+                </section>
+              )}
+
             </div>
           )}
 
@@ -930,6 +1045,33 @@ export function OpportunityModal({
             <NotesTab contactId={contactId} notes={notes} isLoading={isLoading} />
           )}
 
+            </div>
+
+            {/* Quick actions — sticky footer, always visible */}
+            <div className="shrink-0 border-t border-border px-4 py-3 bg-card">
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => setShowCreateTask(true)}
+                  className="flex flex-col items-center gap-1 py-2.5 text-xs font-medium text-foreground border border-border rounded-[7px] hover:bg-muted hover:border-primary/20 transition-colors"
+                >
+                  <ListTodo className="w-3.5 h-3.5 text-muted-foreground" />
+                  Task
+                </button>
+                <button
+                  onClick={() => setShowCreateDemo(true)}
+                  className="flex flex-col items-center gap-1 py-2.5 text-xs font-medium text-foreground border border-border rounded-[7px] hover:bg-muted hover:border-primary/20 transition-colors"
+                >
+                  <Layers className="w-3.5 h-3.5 text-muted-foreground" />
+                  Demo
+                </button>
+                <button
+                  onClick={() => setShowCreateAudit(true)}
+                  className="flex flex-col items-center gap-1 py-2.5 text-xs font-medium text-foreground border border-border rounded-[7px] hover:bg-muted hover:border-primary/20 transition-colors"
+                >
+                  <ClipboardCheck className="w-3.5 h-3.5 text-muted-foreground" />
+                  Audit
+                </button>
+              </div>
             </div>
           </div>
 

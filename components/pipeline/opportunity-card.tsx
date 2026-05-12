@@ -8,6 +8,7 @@ import { relativeTime } from "@/lib/utils/date";
 import { cleanUrl, looksLikeUrl, parseQualificationNote, isQualificationNote } from "@/lib/utils/url";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 import { useBrandCategoryStore, normalizeDomain, type BrandCategory } from "@/store/brand-category-store";
+import { quickHealthTier, TIER_COLORS } from "@/lib/deal-health";
 
 // Global stagger counter — spaces out concurrent categorize-brand requests to avoid
 // hammering the Gemini rate limit when many cards mount simultaneously.
@@ -228,6 +229,19 @@ export function OpportunityCard({
           {relativeTime(opportunity.createdAt)}
         </span>
 
+        <div className="flex items-center gap-2">
+          {/* Deal health dot — computed from updatedAt, no API call */}
+          {opportunity.status === "open" && (() => {
+            const tier = quickHealthTier(opportunity.updatedAt);
+            const colors = TIER_COLORS[tier];
+            return (
+              <span
+                className={cn("w-2 h-2 rounded-full shrink-0", colors.dot)}
+                title={`Deal health: ${colors.label}`}
+              />
+            );
+          })()}
+
         {hasUnread && (
           <button
             onClick={(e) => { e.stopPropagation(); onMessageClick?.(); }}
@@ -238,6 +252,7 @@ export function OpportunityCard({
             <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 border-2 border-card animate-pulse" />
           </button>
         )}
+        </div>
       </div>
     </div>
   );

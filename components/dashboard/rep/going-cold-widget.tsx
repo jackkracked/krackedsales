@@ -6,6 +6,7 @@ import { differenceInDays } from "date-fns";
 import { Flame, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { OpportunityModal } from "@/components/pipeline/opportunity-modal";
+import { quickHealthTier, TIER_COLORS } from "@/lib/deal-health";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 
 export interface PipelineOpp {
@@ -23,19 +24,17 @@ interface GoingColdWidgetProps {
   isLoading: boolean;
 }
 
-function DaysBadge({ days }: { days: number }) {
-  const label = days === 1 ? "1d" : `${days}d`;
-  const cls =
-    days >= 14
-      ? "text-red-500"
-      : days >= 7
-      ? "text-orange-500"
-      : "text-amber-500";
-
+function HealthChip({ updatedAt, days }: { updatedAt: string; days: number }) {
+  const tier = quickHealthTier(updatedAt);
+  const colors = TIER_COLORS[tier];
+  const daysLabel = days === 1 ? "1d" : `${days}d`;
   return (
-    <span className={cn("text-xs font-bold tabular-nums shrink-0", cls)}>
-      {label}
-    </span>
+    <div className="flex items-center gap-1.5 shrink-0">
+      <span className={cn("w-1.5 h-1.5 rounded-full", colors.dot)} />
+      <span className={cn("text-xs font-semibold tabular-nums", colors.text)}>
+        {daysLabel}
+      </span>
+    </div>
   );
 }
 
@@ -125,7 +124,7 @@ export function GoingColdWidget({ opps, isLoading }: GoingColdWidgetProps) {
                       {formatCurrency(opp.monetaryValue)}
                     </span>
                   )}
-                  <DaysBadge days={opp.days} />
+                  <HealthChip updatedAt={opp.updatedAt} days={opp.days} />
                 </div>
               </button>
             ))

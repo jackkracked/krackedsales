@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { calls, userCalendars } from "@/lib/db/schema";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { isGoogleConfigured, meetClient } from "@/lib/google/client";
+import { generateAndStoreInsights } from "@/lib/ai/call-insights";
 
 export const dynamic = "force-dynamic";
 
@@ -250,8 +251,9 @@ export async function runSync(): Promise<{ meet: number; dialer: number }> {
               )
             : null;
 
-        // Check whether any transcripts exist for this conference
+        // Check whether any transcripts exist and fetch the text if so
         let transcriptAvailable = false;
+        let transcriptText: string | null = null;
         try {
           const txRes = await (meet as any).conferenceRecords.transcripts.list({
             parent: record.name,
@@ -260,13 +262,32 @@ export async function runSync(): Promise<{ meet: number; dialer: number }> {
           const transcripts =
             (txRes.data?.transcripts as MeetTranscript[]) ?? [];
           transcriptAvailable = transcripts.length > 0;
+
+          if (transcriptAvailable && transcripts[0]?.name) {
+            // Fetch transcript entries and concatenate into plain text
+            const entriesRes = await (meet as any).conferenceRecords.transcripts.entries.list({
+              parent: transcripts[0].name,
+              pageSize: 500,
+            });
+            const entries: Array<{ text?: string; participant?: { signedinUser?: { displayName?: string } } }> =
+              entriesRes.data?.transcriptEntries ?? [];
+            if (entries.length > 0) {
+              transcriptText = entries
+                .map((e) => {
+                  const speaker = e.participant?.signedinUser?.displayName ?? "Speaker";
+                  return `${speaker}: ${e.text ?? ""}`;
+                })
+                .join("\n");
+            }
+          }
         } catch {
           // Non-fatal — transcript check failure just means we mark it false
           transcriptAvailable = false;
         }
 
+        let insertedCallId: string | null = null;
         try {
-          await client
+          const [inserted] = await client
             .insert(calls)
             .values({
               callType:            "meet",
@@ -278,14 +299,25 @@ export async function runSync(): Promise<{ meet: number; dialer: number }> {
               meetConferenceId:    record.name,
               meetSpaceId:         record.space ?? null,
               transcriptAvailable,
+              transcriptText,
+              transcriptStoredAt:  transcriptText ? new Date() : null,
               recordingAvailable:  false,
             })
-            .onConflictDoNothing();
+            .onConflictDoNothing()
+            .returning({ id: calls.id });
+          insertedCallId = inserted?.id ?? null;
           meetCount++;
         } catch (err) {
           console.error(
             `[calls/sync] Failed upserting Meet record ${record.name}:`,
             err
+          );
+        }
+
+        // Generate AI insights for new calls with transcripts (non-blocking)
+        if (insertedCallId && transcriptText) {
+          generateAndStoreInsights(insertedCallId, null, transcriptText).catch(
+            (err) => console.error("[calls/sync] Insight generation failed:", err)
           );
         }
       }

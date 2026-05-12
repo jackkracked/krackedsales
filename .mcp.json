@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "n8n": {
+      "command": "npx",
+      "args": ["-y", "n8n-mcp"],
+      "env": {
+        "N8N_API_URL": "https://aiposnow.app.n8n.cloud/api/v1",
+        "N8N_API_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMGQ2NjBlNi00M2RhLTQ1ZTYtOTEwZi1jNDEyNjIyMWQ3NTkiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzc4Mjk5OTU1fQ.P0nN0m809wzJ-M_kL_7Z_wAk-FWpxmWUdtKZYbCTK-g",
+        "MCP_MODE": "stdio"
+      }
+    }
+  }
+}

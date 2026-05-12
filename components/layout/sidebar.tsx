@@ -20,7 +20,9 @@ import {
   Users,
   Phone,
   CalendarDays,
+  FileText,
 } from "lucide-react";
+import { NotificationBell } from "@/components/layout/notification-bell";
 
 const NAV_SECTIONS = [
   {
@@ -29,6 +31,7 @@ const NAV_SECTIONS = [
       { href: "/dashboard",  label: "Dashboard", icon: LayoutDashboard },
       { href: "/pipeline",   label: "Pipeline",  icon: GitMerge },
       { href: "/contacts",   label: "Contacts",  icon: Users },
+      { href: "/proposals",  label: "Proposals", icon: FileText },
       { href: "/calls",      label: "Calls",     icon: Phone },
       { href: "/calendar",   label: "Calendar",  icon: CalendarDays },
       { href: "/inbox",      label: "Inbox",     icon: MessageSquare },
@@ -105,13 +108,16 @@ export function Sidebar() {
             >
               Kracked Sales
             </span>
-            <button
-              onClick={toggleSidebarCollapsed}
-              className="p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors ml-auto"
-              aria-label="Collapse sidebar"
-            >
-              <PanelLeftClose className="w-3.5 h-3.5" />
-            </button>
+            <div className="flex items-center gap-0.5 ml-auto">
+              <NotificationBell />
+              <button
+                onClick={toggleSidebarCollapsed}
+                className="p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Collapse sidebar"
+              >
+                <PanelLeftClose className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </>
         )}
       </div>

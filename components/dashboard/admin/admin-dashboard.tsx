@@ -68,7 +68,7 @@ export function AdminDashboard({ userName, ghlUserId }: AdminDashboardProps) {
       </div>
 
       {/* Third row: Team grid + Pipeline health */}
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_280px] gap-5">
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-5">
         <TeamPerformanceGrid />
         <PipelineHealthPanel />
       </div>

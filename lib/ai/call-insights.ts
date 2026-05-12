@@ -1,0 +1,95 @@
+/**
+ * AI extraction of structured insights from Google Meet call transcripts.
+ * Uses Gemini flash to keep cost low — transcripts are typically short.
+ */
+
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { db } from "@/lib/db";
+import { callInsights } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+
+const MODEL = "gemini-2.5-flash";
+
+export interface CallInsightResult {
+  wantsText: string | null;
+  objectionsText: string | null;
+  nextStepsText: string | null;
+  redFlagsText: string | null;
+  sentimentScore: number | null;  // 1–5
+  sentimentLabel: string | null;  // "positive" | "neutral" | "negative"
+}
+
+function getClient() {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error("GEMINI_API_KEY is not set");
+  return new GoogleGenerativeAI(key);
+}
+
+/** Extract structured insights from a raw transcript string */
+export async function analyzeTranscript(
+  transcriptText: string
+): Promise<CallInsightResult> {
+  const client = getClient();
+  const model = client.getGenerativeModel({ model: MODEL });
+
+  const prompt = `You are analysing a sales call transcript for an email design agency called Kracked Sales.
+Extract the following from the transcript and return ONLY valid JSON. Use null for fields where there is not enough information.
+
+{
+  "wantsText": "What the prospect wants / their goals (1-2 sentences)",
+  "objectionsText": "Objections or hesitations raised (1-2 sentences, null if none)",
+  "nextStepsText": "Agreed next steps from the call (1-2 sentences)",
+  "redFlagsText": "Any red flags: budget concerns, competitor mentions, disinterest (1-2 sentences, null if none)",
+  "sentimentScore": <integer 1–5 where 1=very negative, 3=neutral, 5=very positive>,
+  "sentimentLabel": <"positive" | "neutral" | "negative">
+}
+
+Transcript:
+${transcriptText.slice(0, 12000)}`;
+
+  const result = await model.generateContent(prompt);
+  const text = result.response.text().trim();
+
+  // Strip markdown code fences if present
+  const json = text.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+
+  const parsed = JSON.parse(json) as CallInsightResult;
+  return parsed;
+}
+
+/** Generate insights for a call and persist to callInsights table. Idempotent. */
+export async function generateAndStoreInsights(
+  callId: string,
+  contactId: string | null,
+  transcriptText: string
+): Promise<CallInsightResult | null> {
+  const client = db();
+
+  // Skip if already analysed
+  const existing = await client
+    .select({ id: callInsights.id })
+    .from(callInsights)
+    .where(eq(callInsights.callId, callId))
+    .limit(1);
+  if (existing.length > 0) return null;
+
+  try {
+    const insights = await analyzeTranscript(transcriptText);
+
+    await client.insert(callInsights).values({
+      callId,
+      contactId,
+      wantsText: insights.wantsText,
+      objectionsText: insights.objectionsText,
+      nextStepsText: insights.nextStepsText,
+      redFlagsText: insights.redFlagsText,
+      sentimentScore: insights.sentimentScore,
+      sentimentLabel: insights.sentimentLabel,
+    });
+
+    return insights;
+  } catch (err) {
+    console.error("[call-insights] Analysis failed for call", callId, err);
+    return null;
+  }
+}

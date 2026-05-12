@@ -53,9 +53,13 @@ export function useConversations(channel: ChannelFilter, unreadOnly = false) {
     queryKey: ["conversations", channel, unreadOnly],
     queryFn: async () => {
       const params = new URLSearchParams();
-      if (channel !== "ALL") params.set("type", channel);
-      // Email and TikTok convs often live under TYPE_PHONE in GHL — fetch more to catch them
-      const needsBigFetch = unreadOnly || channel === "TYPE_EMAIL" || channel === "TYPE_TIKTOK";
+      // SMS conversations in GHL are stored with type=TYPE_PHONE (not TYPE_SMS) —
+      // GHL's server-side type filter returns nothing for TYPE_SMS.
+      // For SMS we skip the server filter entirely and rely on client-side lastMessageType filtering.
+      const skipServerTypeFilter = channel === "TYPE_SMS";
+      if (channel !== "ALL" && !skipServerTypeFilter) params.set("type", channel);
+      // SMS, Email and TikTok convs often live under TYPE_PHONE in GHL — fetch more to catch them
+      const needsBigFetch = unreadOnly || channel === "TYPE_EMAIL" || channel === "TYPE_TIKTOK" || channel === "TYPE_SMS";
       params.set("limit", needsBigFetch ? "100" : "25");
       const res = await fetch(`/api/ghl/conversations?${params}`);
       if (!res.ok) {
