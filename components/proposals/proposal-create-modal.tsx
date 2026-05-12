@@ -76,9 +76,11 @@ function StepIndicator({ step, total }: { step: number; total: number }) {
 function ContactSearch({
   value,
   onChange,
+  onClear,
 }: {
   value: GHLContact | null;
   onChange: (c: GHLContact) => void;
+  onClear: () => void;
 }) {
   const [query, setQuery] = useState(value?.name ?? "");
   const [results, setResults] = useState<GHLContact[]>([]);
@@ -151,7 +153,14 @@ function ContactSearch({
         <div className="mt-2 flex items-center gap-2 px-2.5 py-1.5 bg-primary/5 border border-primary/20 rounded-[6px]">
           <Check className="w-3 h-3 text-primary shrink-0" />
           <span className="text-xs text-primary font-medium">{value.name}</span>
-          {value.email && <span className="text-xs text-muted-foreground ml-auto">{value.email}</span>}
+          {value.email && <span className="text-xs text-muted-foreground">{value.email}</span>}
+          <button
+            type="button"
+            onClick={() => { onClear(); setQuery(""); }}
+            className="ml-auto p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <X className="w-3 h-3" />
+          </button>
         </div>
       )}
     </div>
@@ -340,6 +349,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
                 <ContactSearch
                   value={form.contact}
                   onChange={(c) => set("contact", c)}
+                  onClear={() => set("contact", null)}
                 />
               </div>
 
