@@ -122,12 +122,16 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated }: Propos
   const queryClient = useQueryClient();
 
   const sendMutation = useMutation({
-    mutationFn: (recipientEmail?: string) =>
-      fetch(`/api/proposals/${proposal.id}/send`, {
+    mutationFn: async (recipientEmail?: string) => {
+      const r = await fetch(`/api/proposals/${proposal.id}/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ recipientEmail: recipientEmail || undefined }),
-      }).then((r) => r.json()),
+      });
+      const json = await r.json();
+      if (!r.ok || json.error) throw new Error(json.error ?? "Failed to send");
+      return json;
+    },
     onSuccess: () => {
       setSendStep("idle");
       queryClient.invalidateQueries({ queryKey: ["proposals"] });
@@ -422,9 +426,14 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated }: Propos
                       className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
                     />
                   </div>
+                  {sendMutation.isError && (
+                    <p className="text-[11px] text-red-600 px-1">
+                      {(sendMutation.error as Error)?.message ?? "Send failed"}
+                    </p>
+                  )}
                   <div className="flex gap-2">
                     <button
-                      onClick={() => setSendStep("idle")}
+                      onClick={() => { setSendStep("idle"); sendMutation.reset(); }}
                       className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
                     >
                       Cancel
