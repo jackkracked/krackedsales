@@ -178,6 +178,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [customInterval, setCustomInterval] = useState(false);
 
   const [form, setForm] = useState<FormState>({
     contact: null,
@@ -458,36 +459,41 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
                       Billing Frequency
                     </label>
                     <div className="grid grid-cols-2 gap-2">
-                      {INTERVAL_OPTIONS.filter((o) => o.label !== "Custom").map((o) => {
-                        const active =
-                          form.billingInterval === o.value &&
-                          form.billingIntervalCount === o.count;
-                        return (
-                          <button
-                            key={o.label}
-                            type="button"
-                            onClick={() => {
-                              set("billingInterval", o.value as FormState["billingInterval"]);
-                              set("billingIntervalCount", o.count);
-                            }}
-                            className={cn(
-                              "px-3 py-2.5 rounded-[8px] border text-sm font-medium transition-all",
-                              active
-                                ? "border-primary bg-primary/8 text-primary"
-                                : "border-border bg-background text-muted-foreground hover:text-foreground"
-                            )}
-                          >
-                            {o.label}
-                          </button>
-                        );
-                      })}
+                      {INTERVAL_OPTIONS.filter((o) => o.label !== "Custom").map((o) => (
+                        <button
+                          key={o.label}
+                          type="button"
+                          onClick={() => {
+                            set("billingInterval", o.value as FormState["billingInterval"]);
+                            set("billingIntervalCount", o.count);
+                            setCustomInterval(false);
+                          }}
+                          className={cn(
+                            "px-3 py-2.5 rounded-[8px] border text-sm font-medium transition-all",
+                            !customInterval && form.billingInterval === o.value && form.billingIntervalCount === o.count
+                              ? "border-primary bg-primary/8 text-primary"
+                              : "border-border bg-background text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          {o.label}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setCustomInterval(true)}
+                        className={cn(
+                          "col-span-2 px-3 py-2.5 rounded-[8px] border text-sm font-medium transition-all",
+                          customInterval
+                            ? "border-primary bg-primary/8 text-primary"
+                            : "border-border bg-background text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        Custom
+                      </button>
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-foreground mb-1.5">
-                      Custom Interval
-                    </label>
+                  {customInterval && (
                     <div className="flex gap-2">
                       <input
                         type="number"
@@ -508,10 +514,11 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
                         <option value="year">Year(s)</option>
                       </select>
                     </div>
-                    <p className="mt-1.5 text-[11px] text-muted-foreground">
-                      Bills every {form.billingIntervalCount || "1"} {form.billingInterval}(s) — {form.currency} {parseFloat(form.totalAmount || "0").toLocaleString()} per cycle
-                    </p>
-                  </div>
+                  )}
+
+                  <p className="text-[11px] text-muted-foreground">
+                    Bills every {form.billingIntervalCount || "1"} {form.billingInterval}(s) — {form.currency} {parseFloat(form.totalAmount || "0").toLocaleString()} per cycle
+                  </p>
                 </>
               ) : (
                 <>
