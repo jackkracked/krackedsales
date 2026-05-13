@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { PipelineClient } from "@/components/pipeline/pipeline-client";
 
 export const metadata = { title: "Pipeline — Kracked Sales" };
@@ -17,7 +18,9 @@ export default function PipelinePage() {
         </p>
       </div>
 
-      <PipelineClient />
+      <Suspense>
+        <PipelineClient />
+      </Suspense>
     </div>
   );
 }
