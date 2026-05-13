@@ -23,6 +23,7 @@ interface Proposal {
   type: string;
   contactName: string;
   contactEmail: string | null;
+  ghlContactId: string;
   status: string;
   totalAmount: number;
   currency: string;
@@ -192,6 +193,15 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated }: Propos
             {proposal.contactEmail && (
               <p className="text-xs text-muted-foreground">{proposal.contactEmail}</p>
             )}
+            <a
+              href={`https://app.gohighlevel.com/v2/location/qg7S6Yx9XxcRKUYZpjsi/contacts/detail/${proposal.ghlContactId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 mt-1 text-[11px] text-primary/70 hover:text-primary transition-colors"
+            >
+              <ExternalLink className="w-3 h-3" />
+              View in GHL
+            </a>
           </div>
           <button
             onClick={onClose}

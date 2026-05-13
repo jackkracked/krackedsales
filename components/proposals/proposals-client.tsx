@@ -25,6 +25,7 @@ interface Proposal {
   type: string;
   contactName: string;
   contactEmail: string | null;
+  ghlContactId: string;
   status: string;
   totalAmount: number;
   currency: string;
@@ -209,7 +210,6 @@ export function ProposalsClient() {
                 <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Signed</th>
                 <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Paid</th>
                 <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Amount</th>
-                <th className="px-4 py-2.5" />
               </tr>
             </thead>
             <tbody>
@@ -217,7 +217,7 @@ export function ProposalsClient() {
                 Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} />)
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-16 text-center">
+                  <td colSpan={7} className="px-4 py-16 text-center">
                     <FileText className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
                     <p className="text-sm text-muted-foreground">
                       {filter === "All"
@@ -273,22 +273,24 @@ export function ProposalsClient() {
                     <td className="px-4 py-3 text-sm text-muted-foreground tabular-nums">
                       {fmtDate(proposal.paidAt) ?? <span className="text-muted-foreground/40">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums font-medium text-foreground/80">
-                      {fmtAmount(proposal.totalAmount, proposal.currency)}
-                    </td>
                     <td className="px-4 py-3">
-                      {proposal.status === "draft" && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            sendMutation.mutate(proposal.id);
-                          }}
-                          disabled={sendMutation.isPending}
-                          className="text-xs font-medium px-2.5 py-1 rounded-[5px] bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
-                        >
-                          Send
-                        </button>
-                      )}
+                      <div className="flex items-center justify-end gap-3">
+                        <span className="tabular-nums font-medium text-foreground/80">
+                          {fmtAmount(proposal.totalAmount, proposal.currency)}
+                        </span>
+                        {proposal.status === "draft" && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              sendMutation.mutate(proposal.id);
+                            }}
+                            disabled={sendMutation.isPending}
+                            className="text-xs font-medium px-2.5 py-1 rounded-[5px] bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50 shrink-0"
+                          >
+                            Send
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
