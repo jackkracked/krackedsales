@@ -13,16 +13,20 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const pipelineId = searchParams.get("pipelineId");
   const page = parseInt(searchParams.get("page") ?? "1", 10);
+  const since = searchParams.get("since");
+  const until = searchParams.get("until");
 
   if (!pipelineId) {
     return NextResponse.json({ opportunities: [], meta: { total: 0 } });
   }
 
   try {
+    let oppsUrl = `/opportunities/search?location_id=${locationId()}&pipeline_id=${pipelineId}&limit=100&page=${page}`;
+    if (since) oppsUrl += `&startDate=${encodeURIComponent(since)}`;
+    if (until) oppsUrl += `&endDate=${encodeURIComponent(until)}`;
+
     const [oppsData, pipelinesData] = await Promise.all([
-      ghl.get<GHLOpportunitiesResponse>(
-        `/opportunities/search?location_id=${locationId()}&pipeline_id=${pipelineId}&limit=100&page=${page}`
-      ),
+      ghl.get<GHLOpportunitiesResponse>(oppsUrl),
       ghl.get<{ pipelines: GHLPipeline[] }>(
         `/opportunities/pipelines?locationId=${locationId()}`
       ),

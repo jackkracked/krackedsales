@@ -96,12 +96,14 @@ const TOOLS: FunctionDeclaration[] = [
   },
   {
     name: "get_pipeline_leads",
-    description: "Get all leads/opportunities in a specific pipeline, with a count per stage. Use this after the user has told you which pipeline they want to check.",
+    description: "Get leads/opportunities in a specific pipeline, with a count per stage. Use this after the user has told you which pipeline they want to check. Supports date filtering — use since/until to get leads added in a specific date range (e.g. yesterday, last 7 days).",
     parameters: {
       type: SchemaType.OBJECT,
       properties: {
         pipelineId: { type: SchemaType.STRING, description: "The pipeline ID to query" },
         stageName:  { type: SchemaType.STRING, description: "Optional: filter by a specific stage name" },
+        since:      { type: SchemaType.STRING, description: "Optional: only return leads created on or after this date (YYYY-MM-DD)" },
+        until:      { type: SchemaType.STRING, description: "Optional: only return leads created on or before this date (YYYY-MM-DD)" },
       },
       required: ["pipelineId"],
     },
@@ -283,7 +285,12 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<unk
       case "get_pipeline_leads": {
         const pipelineId = args.pipelineId as string;
         const stageFilter = args.stageName as string | undefined;
-        const data = await get(`/api/ghl/opportunities?pipelineId=${encodeURIComponent(pipelineId)}`) as { opportunities?: Array<{ name?: string; pipelineStageId_name?: string; status?: string; monetaryValue?: number; contactName?: string }> };
+        const sinceFilter = args.since as string | undefined;
+        const untilFilter = args.until as string | undefined;
+        let oppsUrl = `/api/ghl/opportunities?pipelineId=${encodeURIComponent(pipelineId)}`;
+        if (sinceFilter) oppsUrl += `&since=${encodeURIComponent(sinceFilter)}`;
+        if (untilFilter) oppsUrl += `&until=${encodeURIComponent(untilFilter)}`;
+        const data = await get(oppsUrl) as { opportunities?: Array<{ name?: string; pipelineStageId_name?: string; status?: string; monetaryValue?: number; contactName?: string }> };
         if ("error" in data) return data;
         const opps = data.opportunities ?? [];
         // Group by stage
@@ -425,7 +432,8 @@ DATE RANGES — YOU CAN QUERY ANY DATE RANGE:
 - "This month" → use period="month"
 - "Last month" → use period="last_month"
 - "Today" → since=today's YYYY-MM-DD, until=today's YYYY-MM-DD
-- "Yesterday" → since/until = yesterday's date
+- "Yesterday" → since=yesterday's date, until=yesterday's date (pass both to get_pipeline_leads too)
+- "New leads from yesterday / today / last X days" → always pass since/until to get_pipeline_leads so it filters by creation date
 - "Last 7 days" → since=7 days ago, until=today (use explicit since/until, NOT period="week")
 - "April 1-15" or any custom range → use explicit since/until in YYYY-MM-DD format
 - For "this week" and "this month" always use the period shorthand — never compute the dates yourself.
