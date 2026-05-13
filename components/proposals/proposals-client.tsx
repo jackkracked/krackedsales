@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { FileText, Plus, Send, MessageSquare, Phone } from "lucide-react";
+import { FileText, Plus, Send, MessageSquare, Eye } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { ProposalStatusBadge } from "./proposal-status-badge";
 import { ProposalCreateModal } from "./proposal-create-modal";
@@ -291,17 +291,17 @@ export function ProposalsClient() {
                         )}
                         <button
                           title="Message contact"
-                          onClick={(e) => { e.stopPropagation(); window.location.href = `/inbox`; }}
+                          onClick={(e) => { e.stopPropagation(); window.location.href = `/pipeline?contact=${proposal.ghlContactId}`; }}
                           className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                         >
                           <MessageSquare className="w-3.5 h-3.5" />
                         </button>
                         <button
-                          title="View calls"
-                          onClick={(e) => { e.stopPropagation(); window.location.href = `/calls`; }}
+                          title="View opportunity"
+                          onClick={(e) => { e.stopPropagation(); window.location.href = `/pipeline?contact=${proposal.ghlContactId}`; }}
                           className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                         >
-                          <Phone className="w-3.5 h-3.5" />
+                          <Eye className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </td>
