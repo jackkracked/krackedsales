@@ -112,7 +112,7 @@ export function ProposalsClient() {
   const allProposals = data?.proposals ?? [];
 
   const filtered = filter === "All"
-    ? allProposals
+    ? allProposals.filter((p) => p.status !== "draft")
     : allProposals.filter((p) => p.status.toLowerCase() === filter.toLowerCase());
 
   // Stats
@@ -208,10 +208,12 @@ export function ProposalsClient() {
                     <FileText className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
                     <p className="text-sm text-muted-foreground">
                       {filter === "All"
-                        ? "No proposals yet. Create your first proposal to get started."
+                        ? allProposals.some((p) => p.status === "draft")
+                          ? "No active proposals — check the Draft tab to finish and send."
+                          : "No proposals yet. Create your first proposal to get started."
                         : `No ${filter.toLowerCase()} proposals.`}
                     </p>
-                    {filter === "All" && (
+                    {filter === "All" && !allProposals.some((p) => p.status === "draft") && (
                       <button
                         onClick={() => setShowCreate(true)}
                         className="mt-3 text-sm font-medium text-primary hover:text-primary/80 transition-colors"
