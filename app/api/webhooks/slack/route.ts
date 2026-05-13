@@ -405,14 +405,19 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<unk
   }
 }
 
-// ── System prompt ─────────────────────────────────────────────────────────────
-function buildSystemPrompt(): string {
-  const today = new Date();
-  // All dates expressed in CST (UTC-6) — Jack's working timezone
-  const cstOffset = -6 * 60;
-  const cstNow = new Date(today.getTime() + (cstOffset - today.getTimezoneOffset()) * 60_000);
+// ── CST date helpers ──────────────────────────────────────────────────────────
+function getCSTDates() {
+  const now = new Date();
+  // Vercel runs UTC; shift to CST (UTC-6)
+  const cstNow = new Date(now.getTime() - 6 * 60 * 60 * 1000);
   const todayCST = cstNow.toISOString().slice(0, 10);
   const yesterdayCST = new Date(cstNow.getTime() - 86_400_000).toISOString().slice(0, 10);
+  return { todayCST, yesterdayCST, cstNow };
+}
+
+// ── System prompt ─────────────────────────────────────────────────────────────
+function buildSystemPrompt(): string {
+  const { todayCST, yesterdayCST, cstNow } = getCSTDates();
   const dateStr = cstNow.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const thisMonth = cstNow.toLocaleString("en-GB", { month: "long", year: "numeric" });
   const lastMonthStr = new Date(cstNow.getFullYear(), cstNow.getMonth() - 1, 1).toLocaleString("en-GB", { month: "long", year: "numeric" });
@@ -591,7 +596,11 @@ export async function POST(req: NextRequest) {
         const cleaned = text.replace(new RegExp(`<@${botUserId}>\\s*`, "g"), "").trim();
         if (!cleaned) return;
 
-        await processMessage(cleaned, _channelId, _threadTs, settings.botToken, botUserId, preloadedHistory);
+        // Prepend current CST dates to every message so thread history can't override them
+        const { todayCST, yesterdayCST } = getCSTDates();
+        const withDate = `[CST date context — today: ${todayCST}, yesterday: ${yesterdayCST}]\n${cleaned}`;
+
+        await processMessage(withDate, _channelId, _threadTs, settings.botToken, botUserId, preloadedHistory);
       } catch (err) {
         console.error("[Slack agent] error:", err);
         // Notify the user in Slack so failures aren't invisible
