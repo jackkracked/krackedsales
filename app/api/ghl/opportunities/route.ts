@@ -21,12 +21,10 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    let oppsUrl = `/opportunities/search?location_id=${locationId()}&pipeline_id=${pipelineId}&limit=100&page=${page}`;
-    if (since) oppsUrl += `&startDate=${encodeURIComponent(since)}`;
-    if (until) oppsUrl += `&endDate=${encodeURIComponent(until)}`;
-
     const [oppsData, pipelinesData] = await Promise.all([
-      ghl.get<GHLOpportunitiesResponse>(oppsUrl),
+      ghl.get<GHLOpportunitiesResponse>(
+        `/opportunities/search?location_id=${locationId()}&pipeline_id=${pipelineId}&limit=100&page=${page}`
+      ),
       ghl.get<{ pipelines: GHLPipeline[] }>(
         `/opportunities/pipelines?locationId=${locationId()}`
       ),
@@ -40,12 +38,22 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const enriched = (oppsData.opportunities ?? []).map((opp) => ({
+    let opps = (oppsData.opportunities ?? []).map((opp) => ({
       ...opp,
       pipelineStageId_name: stageMap[opp.pipelineStageId] ?? "Unknown Stage",
     }));
 
-    return NextResponse.json({ opportunities: enriched, meta: oppsData.meta });
+    // Filter by createdAt date range if requested
+    if (since || until) {
+      const sinceMs = since ? new Date(since).getTime() : 0;
+      const untilMs = until ? new Date(`${until}T23:59:59Z`).getTime() : Infinity;
+      opps = opps.filter((opp) => {
+        const t = new Date(opp.createdAt).getTime();
+        return t >= sinceMs && t <= untilMs;
+      });
+    }
+
+    return NextResponse.json({ opportunities: opps, meta: oppsData.meta });
   } catch (err) {
     console.error("[GET /api/ghl/opportunities]", err);
     return NextResponse.json({ error: "Failed to fetch opportunities" }, { status: 500 });

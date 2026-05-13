@@ -408,13 +408,19 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<unk
 // ── System prompt ─────────────────────────────────────────────────────────────
 function buildSystemPrompt(): string {
   const today = new Date();
-  const dateStr = today.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-  const thisMonth = today.toLocaleString("en-GB", { month: "long", year: "numeric" });
-  const lastMonthStr = new Date(today.getFullYear(), today.getMonth() - 1, 1).toLocaleString("en-GB", { month: "long", year: "numeric" });
+  // All dates expressed in CST (UTC-6) — Jack's working timezone
+  const cstOffset = -6 * 60;
+  const cstNow = new Date(today.getTime() + (cstOffset - today.getTimezoneOffset()) * 60_000);
+  const todayCST = cstNow.toISOString().slice(0, 10);
+  const yesterdayCST = new Date(cstNow.getTime() - 86_400_000).toISOString().slice(0, 10);
+  const dateStr = cstNow.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  const thisMonth = cstNow.toLocaleString("en-GB", { month: "long", year: "numeric" });
+  const lastMonthStr = new Date(cstNow.getFullYear(), cstNow.getMonth() - 1, 1).toLocaleString("en-GB", { month: "long", year: "numeric" });
 
   return `You are the Kracked Sales AI — a smart, helpful assistant built into Slack for the Kracked Sales team. You have full access to every part of the system.
 
-Today is ${dateStr}. Current month: ${thisMonth}. Last month: ${lastMonthStr}.
+Today is ${dateStr} (CST). Today's date: ${todayCST}. Yesterday's date: ${yesterdayCST}. Current month: ${thisMonth}. Last month: ${lastMonthStr}.
+The user is in Central Standard Time (CST, UTC-6). Always use these exact date strings when the user says "today" or "yesterday".
 
 PERSONALITY & TONE:
 - Talk like a knowledgeable colleague, not a chatbot. Short, natural sentences. No bullet points, no markdown, no asterisks, no numbered lists unless explicitly listing options for the user to choose from.
