@@ -5,6 +5,10 @@ import { X, ChevronRight, ChevronLeft, Search, Plus, Trash2, Check } from "lucid
 import { cn } from "@/lib/utils/cn";
 import { format } from "date-fns";
 
+function toTitleCase(str: string): string {
+  return str.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface GHLContact {
@@ -178,13 +182,13 @@ function ContactSearch({ value, onChange, onClear }: {
         />
       </div>
       {open && (loading || results.length > 0) && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-[8px] shadow-lg z-50 overflow-hidden">
+        <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-[8px] shadow-lg z-50 max-h-48 overflow-y-auto">
           {loading ? (
             <div className="px-3 py-2.5 text-xs text-muted-foreground">Searching…</div>
           ) : results.map(c => (
-            <button key={c.id} type="button" onMouseDown={() => { onChange(c); setQuery(c.name); setOpen(false); }}
+            <button key={c.id} type="button" onMouseDown={() => { onChange({ ...c, name: toTitleCase(c.name) }); setQuery(toTitleCase(c.name)); setOpen(false); }}
               className="w-full text-left px-3 py-2.5 hover:bg-muted/50 transition-colors">
-              <p className="text-sm font-medium text-foreground">{c.name}</p>
+              <p className="text-sm font-medium text-foreground">{toTitleCase(c.name)}</p>
               {c.email && <p className="text-xs text-muted-foreground">{c.email}</p>}
             </button>
           ))}
@@ -193,7 +197,7 @@ function ContactSearch({ value, onChange, onClear }: {
       {value && (
         <div className="mt-2 flex items-center gap-2 px-2.5 py-1.5 bg-primary/5 border border-primary/20 rounded-[6px]">
           <Check className="w-3 h-3 text-primary shrink-0" />
-          <span className="text-xs text-primary font-medium">{value.name}</span>
+          <span className="text-xs text-primary font-medium">{toTitleCase(value.name)}</span>
           {value.email && <span className="text-xs text-muted-foreground">{value.email}</span>}
           <button type="button" onClick={() => { onClear(); setQuery(""); }}
             className="ml-auto p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors">
@@ -381,7 +385,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
       const payload: Record<string, unknown> = {
         type: form.type,
         ghlContactId: form.contact.id,
-        contactName: form.contact.name,
+        contactName: toTitleCase(form.contact.name),
         contactEmail: form.contact.email,
         serviceDescription,
         totalAmount: parseFloat(form.totalAmount),

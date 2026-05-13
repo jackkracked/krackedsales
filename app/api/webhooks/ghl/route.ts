@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pusherTrigger } from "@/lib/pusher/server";
 import { db } from "@/lib/db";
-import { pipelineStageEvents, followupSends, bookingAutomationRules } from "@/lib/db/schema";
+import { pipelineStageEvents, followupSends, bookingAutomationRules, messageIndex } from "@/lib/db/schema";
 import { and, eq, gte, desc } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { notifyAdmins } from "@/lib/notifications";
@@ -117,7 +117,39 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── 3. Track inbound replies for follow-up contacts ───────────────────────
+    // ── 3. Index message content for inbox search ─────────────────────────────
+    if (eventType === "InboundMessage" || eventType === "OutboundMessage") {
+      const msgId = body?.messageId ?? body?.id;
+      const msgBody: string | undefined = body?.message ?? body?.body;
+      const conversationId: string | undefined = body?.conversationId;
+      const contactId: string | undefined = body?.contactId;
+      const contactName: string | undefined = body?.contactName ?? body?.fullName;
+
+      if (msgId && msgBody && conversationId) {
+        const channelTypeMap: Record<string, string> = {
+          TYPE_SMS: "sms", TYPE_PHONE: "sms",
+          TYPE_EMAIL: "email", TYPE_TIKTOK: "tiktok",
+          TYPE_INSTAGRAM: "meta", TYPE_FB: "meta",
+        };
+        const rawType: string = body?.messageType ?? body?.type ?? "";
+        const channel = channelTypeMap[rawType] ?? "ghl";
+
+        db().insert(messageIndex).values({
+          id: msgId,
+          conversationId,
+          contactId: contactId ?? null,
+          contactName: contactName ?? null,
+          body: msgBody.trim(),
+          channel,
+          direction: eventType === "InboundMessage" ? "inbound" : "outbound",
+          dateAdded: body?.dateAdded ? new Date(body.dateAdded) : new Date(),
+        }).onConflictDoNothing().catch((e) =>
+          console.error("[GHL Webhook] Failed to index message:", e)
+        );
+      }
+    }
+
+    // ── 4. Track inbound replies for follow-up contacts ───────────────────────
     // When a contact we've followed up with replies, mark the most recent send
     // as resultedInResponse so the UI knows they're warm.
 

@@ -606,3 +606,16 @@ export const bookingAutomationRules = pgTable("booking_automation_rules", {
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+/** Full-text message index — powers inbox search across all channels */
+export const messageIndex = pgTable("message_index", {
+  id: text("id").primaryKey(), // GHL/Meta message ID
+  conversationId: text("conversation_id").notNull(),
+  contactId: text("contact_id"),
+  contactName: text("contact_name"),
+  body: text("body").notNull(),
+  channel: text("channel").notNull(), // 'ghl' | 'sms' | 'email' | 'tiktok' | 'meta'
+  direction: text("direction"), // 'inbound' | 'outbound'
+  dateAdded: timestamp("date_added"),
+  indexedAt: timestamp("indexed_at").defaultNow(),
+});
