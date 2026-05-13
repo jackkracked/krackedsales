@@ -76,9 +76,14 @@ async function getThreadHistory(token: string, channel: string, threadTs: string
   });
   const data = await res.json();
   if (!data.ok || !data.messages) return [];
-  return (data.messages as Array<{ bot_id?: string; text?: string }>)
+  const history = (data.messages as Array<{ bot_id?: string; text?: string }>)
     .slice(0, -1) // exclude current message
     .map(m => ({ role: (m.bot_id ? "model" : "user") as "user" | "model", text: m.text ?? "" }));
+
+  // Gemini requires history to start with a 'user' turn.
+  // Threads that begin with the bot's daily summary start with 'model' — drop those.
+  const firstUserIdx = history.findIndex(m => m.role === "user");
+  return firstUserIdx >= 0 ? history.slice(firstUserIdx) : [];
 }
 
 // ── Tool definitions ──────────────────────────────────────────────────────────
