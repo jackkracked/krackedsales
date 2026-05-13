@@ -168,20 +168,33 @@ export function ProposalsClient() {
 
         {/* Filter tabs */}
         <div className="flex items-center gap-1 border-b border-border">
-          {STATUS_FILTERS.map((f) => (
+          {STATUS_FILTERS.map((f) => {
+            const draftCount = f === "Draft" ? allProposals.filter((p) => p.status === "draft").length : 0;
+            return (
             <button
               key={f}
               onClick={() => setFilter(f)}
               className={cn(
-                "px-3 py-2 text-sm font-medium transition-colors -mb-px border-b-2",
+                "flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors -mb-px border-b-2",
                 filter === f
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               )}
             >
               {f}
+              {draftCount > 0 && (
+                <span className={cn(
+                  "text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none tabular-nums",
+                  filter === f
+                    ? "bg-primary text-white"
+                    : "bg-muted text-muted-foreground"
+                )}>
+                  {draftCount}
+                </span>
+              )}
             </button>
-          ))}
+            );
+          })}
         </div>
 
         {/* Table */}
