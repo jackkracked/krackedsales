@@ -3,8 +3,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { Pen, RefreshCw, Check, AlertTriangle, Clock, Shield, Download } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
@@ -342,12 +340,295 @@ function PricingTable({ proposal }: { proposal: ProposalData }) {
               {proposal.startDate ? fmtDateShort(proposal.startDate) : format(new Date(), "MM/dd/yyyy")}
             </td>
             <td className="border border-foreground/20 px-3 py-2 text-foreground/80">
-              Invoice via Stripe
+              Invoice via Stripe, Bank Transfer, or Zelle
             </td>
           </tr>
         </tbody>
       </table>
     </div>
+  );
+}
+
+// ─── Legal section heading ─────────────────────────────────────────────────────
+
+function LegalHeading({ children }: { children: React.ReactNode }) {
+  return <p className="text-sm font-bold text-foreground mt-5 mb-2">{children}</p>;
+}
+
+// ─── Additional scope pricing table ───────────────────────────────────────────
+
+function AdditionalScopePricing({ isManagement }: { isManagement: boolean }) {
+  const rows = isManagement
+    ? [
+        ["Campaign Emails", "$300 per email"],
+        ["Flow Emails", "$300 per email"],
+        ["Flow Email Edits", "$100 per email"],
+        ["SMS", "$100 per SMS/MMS"],
+        ["Pop-Up", "$150 per Pop-Up"],
+      ]
+    : [
+        ["Flow Emails", "$300 per email"],
+        ["SMS", "$100 per SMS/MMS"],
+        ["Pop-Up", "$150 per Pop-Up"],
+      ];
+
+  return (
+    <div className="my-4">
+      <p className="text-sm text-foreground/80 leading-relaxed mb-3">
+        {isManagement
+          ? "If additional services are requested (e.g., extra campaigns, flow build-outs, or any other additional support), Kracked Retention will pro-rate based on the below table. If a service is not listed, a proposal via Slack or email will be sent upon request outlining the additional scope and cost. Upon written acceptance, work will be completed and prorated at the end of the month."
+          : "Any services outside the agreed scope (e.g., Monthly Management, extra flows, or campaigns) will require a separate agreement mutually approved by both parties. If additional items are requested after the kick-off call, they will be pro-rated and invoiced separately per the pricing table below."}
+      </p>
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr>
+            <th className="border border-foreground/20 bg-foreground/8 px-3 py-2 text-left font-bold text-foreground">Additional Scope Pricing</th>
+            <th className="border border-foreground/20 bg-foreground/8 px-3 py-2 text-right font-bold text-foreground w-40">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([label, cost]) => (
+            <tr key={label}>
+              <td className="border border-foreground/20 px-3 py-2 font-medium text-foreground">{label}</td>
+              <td className="border border-foreground/20 px-3 py-2 text-right text-foreground/80">{cost}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── Management legal terms ────────────────────────────────────────────────────
+
+function ManagementTerms() {
+  return (
+    <div className="text-sm text-foreground/80 leading-relaxed">
+      <p className="mb-3">
+        Invoices will be issued monthly via Stripe, ACH, or Zelle, and payment is due upon receipt.
+        Failure to complete payment within the agreed timeframe may result in a temporary pause of
+        services until payment is received.
+      </p>
+
+      <AdditionalScopePricing isManagement={true} />
+
+      <LegalHeading>Clarifications</LegalHeading>
+      <p className="mb-2">
+        <strong className="text-foreground">Flow Email Edit</strong> — A modification to an existing
+        flow email that does not change the core strategy or structure. This includes copy revisions,
+        minor design adjustments, formatting updates, or small content swaps where the original email
+        framework remains intact.
+      </p>
+      <p className="mb-2">
+        <strong className="text-foreground">New Flow Email</strong> — A newly created flow email that
+        requires new strategy, messaging, or layout. This includes net new emails added to an existing
+        flow, replacement emails built from scratch, or any email where the copy, design, or structure
+        is materially different from an existing asset.
+      </p>
+      <p className="mb-4 text-foreground/60 italic">
+        *If a request does not fit any of the above definitions, both parties will agree on a mutual rate.
+      </p>
+
+      <LegalHeading>Service Collaboration &amp; Cooperation</LegalHeading>
+      <p className="mb-2">
+        To maintain a fair and healthy long-term relationship, Kracked Retention reserves the right to
+        temporarily pause services if cooperation or communication from the Client prevents effective
+        service delivery. This pause will remain in effect until both parties reach a mutual resolution
+        on how to proceed. Additionally, if payment for services is not made, Kracked Retention may
+        suspend all active services until the agreed-upon payment is completed.
+      </p>
+      <p>
+        Our goal is to maintain a positive, collaborative, and results-driven partnership to ensure
+        successful outcomes across all managed brands.
+      </p>
+
+      <LegalHeading>Term &amp; Renewal</LegalHeading>
+      <p className="mb-2">
+        This Agreement operates on a month-to-month basis and will automatically renew unless terminated
+        in accordance with the Pause &amp; Termination Policy. Services and billing will automatically
+        renew monthly (every 30 Days) per the terms of this agreement.
+      </p>
+      <p>
+        If the Client wishes to initiate any additional services during a billing month, a separate
+        invoice will be issued based on the additional scope pricing as mutually agreed upon by both
+        parties. This ensures seamless continuity across all planning, scheduling, and delivery efforts
+        for the Client.
+      </p>
+
+      <LegalHeading>Pause &amp; Termination Policy</LegalHeading>
+      <p className="mb-3">
+        Kracked Retention&apos;s production cycle requires strategic planning, copywriting, and design to
+        be completed up to 30 days ahead of implementation. Given that Kracked Retention operates on a
+        proactive schedule and plans all campaigns and deliverables in advance, the Client agrees to the
+        following terms regarding pauses or cancellations:
+      </p>
+      <ul className="list-disc pl-5 space-y-2 mb-3">
+        <li>
+          <strong className="text-foreground">Notice Requirement:</strong> If the Client wishes to pause
+          or suspend services, a minimum of 30 days&apos; written notice must be provided to
+          admin@krackedretention.com. This allows Kracked Retention to adjust campaign schedules,
+          production timelines, and resources accordingly.
+        </li>
+        <li>
+          <strong className="text-foreground">Work Completed in Advance:</strong> Because Kracked
+          Retention begins preparing campaigns and creative assets ahead of schedule, any work that has
+          already been completed or is in progress at the time of notice, as documented in internal
+          project management tools, Figma files, or Slack communications, will remain billable and will
+          be invoiced in full. These deliverables will be completed, implemented, or provided to the
+          Client as part of the final closeout.
+        </li>
+        <li>
+          <strong className="text-foreground">Final Closeout:</strong> Once all in-progress work has
+          been completed and implemented, Kracked Retention will consider the client&apos;s account closed
+          and inactive until a written request to resume services is made and mutually agreed upon.
+        </li>
+        <li>
+          <strong className="text-foreground">No Immediate Termination:</strong> Pausing or canceling
+          services without providing the required notice may result in outstanding invoices for work
+          already planned or completed under the 30-day lookahead schedule.
+        </li>
+      </ul>
+      <p>
+        This policy ensures clarity and fairness regarding scheduling, deliverables, and billing for
+        all parties involved.
+      </p>
+
+      <LegalHeading>Privacy &amp; Confidentiality</LegalHeading>
+      <p className="mb-2">
+        Both parties agree to maintain the confidentiality of all business information, data, and
+        assets shared throughout the partnership.
+      </p>
+      <ul className="list-disc pl-5 space-y-2 mb-2">
+        <li>Kracked Retention and Client agree to keep all confidential business information private and not disclose it to any third party.</li>
+        <li>The final email assets, including copy and design, will be owned by the Client upon full payment.</li>
+        <li>Kracked Retention will maintain necessary access to each brand&apos;s ESP and SMS platforms in addition to Shopify until all deliverables and payments are completed.</li>
+        <li>If either party violates or shows intent to violate any agreements within this section, the non-violating party shall be entitled to injunctive relief to prevent further harm.</li>
+        <li>You further agree that your participation is subject to our Privacy Policy and Terms of Use.</li>
+      </ul>
+
+      <LegalHeading>Terms of Sale</LegalHeading>
+      <ul className="list-disc pl-5 space-y-2 mb-2">
+        <li>You acknowledge that all sales are final and non-refundable. You waive any rights to charge back your purchase with your credit card processor, provided that the project is completed in a timely manner as agreed upon by both parties.</li>
+        <li>If the Client wishes to cancel the services, they must provide written notice via email to admin@krackedretention.com or via Slack. Any outstanding balance for work completed up to the cancellation date remains due, unless the cancellation is due to an agreed-upon cause of incompletion, such as the Service Provider&apos;s inability to fulfill the agreed scope of work.</li>
+        <li>Deliverables are measured by work planned and created, not by final deployment. Any campaign, message, or asset that is strategized, written, designed, or prepared during the billing period will be counted toward deliverable limits and billed accordingly, regardless of whether the Client elects to send, delay, or cancel deployment.</li>
+        <li>This agreement applies only to the baseline services outlined in the scope of work. Any additional services, including extra email campaigns, SMS campaigns, or flows, will require mutual written agreement and will be invoiced separately.</li>
+        <li>The Client retains sole ownership of all Customer Materials, including final assets created under this agreement, upon full payment.</li>
+      </ul>
+
+      <LegalHeading>Governing Law</LegalHeading>
+      <ul className="list-disc pl-5 space-y-2">
+        <li>This Agreement is governed by the laws of the State of Tennessee. All parties consent to the jurisdiction of Tennessee courts for dispute resolution and waive the right to a jury trial to the full extent allowable.</li>
+        <li>This Agreement constitutes the entire understanding between the parties and supersedes all prior agreements, whether written or verbal. In the event any provision of this Agreement is held invalid or unenforceable, the remaining provisions shall remain in full force and effect. Time is of the essence in fulfilling all obligations under this Agreement.</li>
+      </ul>
+    </div>
+  );
+}
+
+// ─── Project legal terms ───────────────────────────────────────────────────────
+
+function ProjectTerms() {
+  return (
+    <div className="text-sm text-foreground/80 leading-relaxed">
+      <AdditionalScopePricing isManagement={false} />
+
+      <LegalHeading>Service Collaboration &amp; Cooperation</LegalHeading>
+      <p className="mb-2">
+        To fully experience and gain the most benefit from our services, you agree: In order to
+        maintain a fair and healthy long-term relationship, we reserve the right to temporarily pause
+        our services if you become uncooperative to the extent that it hampers our ability to provide
+        effective service. This pause will remain in effect until we reach a mutual agreement on how to
+        proceed. Additionally, if payment for our services is not made, we may also suspend all services
+        until the agreed-upon payment is completed.
+      </p>
+      <p>
+        Our goal is to maintain a positive, collaborative, and results-driven partnership to ensure a
+        successful outcome for both parties.
+      </p>
+
+      <LegalHeading>Privacy &amp; Confidentiality</LegalHeading>
+      <p className="mb-2">
+        We respect your privacy and must insist that you respect the privacy of team members involved.
+        Video calls and phone calls may be recorded for quality and training purposes. We respect your
+        confidential and proprietary information, ideas, and plans.
+      </p>
+      <ul className="list-disc pl-5 space-y-2 mb-2">
+        <li>Kracked Retention and Client agree to keep all confidential business information private and not disclose it to any third party.</li>
+        <li>The final email assets, including copy and design, will be owned by the Client upon full payment.</li>
+        <li>Kracked Retention must be granted access to the ESP (e.g., Klaviyo) until the project is completed and all outstanding payments are settled.</li>
+        <li>If either party violates or shows intent to violate any agreements within this section, the non-violating party shall be entitled to injunctive relief to prevent further harm.</li>
+        <li>If the Client chooses to cancel services, both parties must return all documents and materials containing Confidential Information, delete all such information from digital systems, and provide written certification of compliance.</li>
+        <li>You further agree that your participation is subject to our Privacy Policy and Terms of Use.</li>
+      </ul>
+
+      <LegalHeading>Terms of Sale</LegalHeading>
+      <ul className="list-disc pl-5 space-y-2 mb-2">
+        <li>You acknowledge that all sales are final and non-refundable. You waive any rights to charge back your purchase with your credit card processor, provided that the project is completed in a timely manner as deemed by Kracked Retention.</li>
+        <li>If the Client wishes to cancel the project before completion, they must provide written notice via email to admin@krackedretention.com. Any outstanding balance for work completed up to the cancellation date remains due, unless the cancellation is due to an agreed-upon cause of project incompletion, such as the Service Provider&apos;s inability to fulfill the agreed scope of work.</li>
+        <li>Unlimited revisions apply only to refinements within the brand direction and strategy approved at kickoff. Any request that requires reworking or recreating email assets due to a material change in branding, positioning, tone, or creative direction is considered out of scope and will be billed separately, with fees and timelines agreed upon in writing before work begins.</li>
+        <li><strong className="text-foreground">Revision:</strong> A minor adjustment to an existing email that does not alter the approved strategy, structure, or creative direction. Revisions include small copy edits, light visual tweaks, formatting adjustments, or clarification requests that build upon the originally approved concept without requiring rework of the email.</li>
+        <li><strong className="text-foreground">Substantive Revision:</strong> Any change that materially alters the approved strategy, messaging, structure, or creative direction of an email. This includes requests driven by shifts in branding, tone, positioning, layout, or campaign objective, and any change that requires partial or full re-creation of copy, design, or implementation. Substantive revisions are treated as new scope and billed at $100 per email.</li>
+        <li>This agreement applies only to the one-time setup project outlined in the scope of work. Any additional services, including ongoing monthly management, require a separate agreement.</li>
+        <li>The Client retains sole ownership of all Customer Materials, including final email assets created under this agreement, upon full payment.</li>
+        <li>This Agreement is governed by the laws of the State of Tennessee. All parties consent to the jurisdiction of Tennessee courts for dispute resolution and waive the right to a jury trial to the full extent allowable.</li>
+        <li>This Agreement constitutes the entire understanding between the parties and supersedes all prior agreements, whether written or verbal. Time is of the essence in fulfilling all obligations under this Agreement.</li>
+      </ul>
+    </div>
+  );
+}
+
+// ─── Acceptance body text (type-specific) ─────────────────────────────────────
+
+function AcceptanceText({ isManagement }: { isManagement: boolean }) {
+  if (isManagement) {
+    return (
+      <>
+        <p className="text-sm text-foreground/80 leading-relaxed mb-2">
+          The Client named below acknowledges and agrees to all terms outlined in this Statement of
+          Work. Both parties confirm they have the authority to enter into this Agreement on behalf of
+          their respective companies.
+        </p>
+        <p className="text-sm text-foreground/80 leading-relaxed mb-2">
+          The Client authorizes Kracked Retention to issue invoices and collect payments for all
+          services rendered under this Agreement, including any approved additional work or prorated
+          amounts. The Client certifies that they are an authorized user of the provided payment method
+          and agrees not to dispute charges that align with the terms of this Agreement.
+        </p>
+        <p className="text-sm text-foreground/80 leading-relaxed mb-2">
+          In the event of a failed or delayed payment, Kracked Retention reserves the right to adjust
+          the payment schedule, suspend services, or modify invoice amounts as necessary to recover any
+          outstanding balance.
+        </p>
+        <p className="text-sm text-foreground/80 leading-relaxed mb-6">
+          The Client represents and warrants that they are authorized to execute this Agreement and
+          payment authorization and agrees to indemnify and hold harmless Kracked Retention, its
+          affiliates, the bank, and any payment processors from all claims, damages, or losses arising
+          from authorized transactions made pursuant to this Agreement.
+        </p>
+      </>
+    );
+  }
+  return (
+    <>
+      <p className="text-sm text-foreground/80 leading-relaxed mb-2">
+        The Client named below acknowledges and agrees to the terms outlined in this Statement of
+        Work. Both parties confirm they have the proper authority to enter into this agreement on
+        behalf of their respective companies.
+      </p>
+      <p className="text-sm text-foreground/80 leading-relaxed mb-2">
+        The Client authorizes Kracked Retention to invoice for the agreed-upon purchase and payment
+        plan. The Client certifies that they are an authorized user of the provided payment method
+        and will not dispute the payment, provided it aligns with the terms of this agreement.
+      </p>
+      <p className="text-sm text-foreground/80 leading-relaxed mb-2">
+        In the event of a failed payment, the payment schedule and/or amounts may be adjusted to
+        recover any outstanding balance.
+      </p>
+      <p className="text-sm text-foreground/80 leading-relaxed mb-6">
+        The Client represents and warrants that they are authorized to execute this payment
+        authorization and indemnifies Kracked Retention, the bank, and the payment processor from
+        any claims, damages, or losses arising from authorized transactions under this agreement.
+      </p>
+    </>
   );
 }
 
@@ -536,18 +817,18 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
               <ul className="text-sm text-foreground/80 leading-relaxed list-disc pl-6 mb-2 space-y-1">
                 {isManagement ? (
                   <>
-                    <li><strong>Email + SMS Marketing Management</strong> — Strategy, copywriting, design, and implementation of all campaigns</li>
-                    <li><strong>Campaign Calendar Planning</strong> — Monthly planning, ideation, strategy, scheduling, and execution</li>
-                    <li><strong>Optimization &amp; Reporting</strong> — Monthly reporting and quarterly flow deep dives</li>
-                    <li><strong>Creative Delivery</strong> — All designs delivered in Miro for review</li>
-                    <li><strong>Communication</strong> — Dedicated Slack channel and bi-weekly/monthly check-in calls</li>
+                    <li><strong>Email + SMS Marketing Management</strong> — Strategy, copywriting, design, and implementation of all campaigns, including campaign calendar planning, ideation, scheduling, and execution</li>
+                    <li><strong>Optimization &amp; Reporting</strong> — Monthly reporting and quarterly flow deep dive presenting opportunities within your account</li>
+                    <li><strong>Creative Delivery</strong> — All designs delivered within Miro for review</li>
+                    <li><strong>Creative Assets</strong> — All designs available in Figma for future use</li>
+                    <li><strong>Communication</strong> — Dedicated Slack channel and bi-weekly or monthly check-in calls with account strategist</li>
                   </>
                 ) : (
                   <>
+                    <li>Kick-off call &amp; project completion call</li>
                     <li>Strategy, copy, design, and implementation included</li>
                     <li>All designs delivered in Miro for review</li>
                     <li>All designs available in Figma for future use</li>
-                    <li>Kick-off call &amp; project completion call</li>
                   </>
                 )}
               </ul>
@@ -560,60 +841,14 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
 
             <DocDivider />
 
-            {/* Agreement terms (legal sections) */}
-            <div className="text-sm text-foreground/80 leading-relaxed">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  h2: ({ children }) => (
-                    <h2 className="text-sm font-bold text-foreground mt-5 mb-1.5">{children}</h2>
-                  ),
-                  p: ({ children }) => <p className="mb-3 leading-relaxed">{children}</p>,
-                  strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
-                  ul: ({ children }) => <ul className="list-disc pl-5 space-y-1.5 mb-3">{children}</ul>,
-                  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-                  hr: () => <hr className="my-5 border-foreground/15" />,
-                  table: ({ children }) => (
-                    <table className="w-full border-collapse text-sm mb-4">{children}</table>
-                  ),
-                  thead: ({ children }) => <thead>{children}</thead>,
-                  tbody: ({ children }) => <tbody>{children}</tbody>,
-                  tr: ({ children }) => <tr>{children}</tr>,
-                  th: ({ children }) => (
-                    <th className="border border-foreground/20 bg-foreground/8 px-3 py-2 text-left font-bold text-foreground">
-                      {children}
-                    </th>
-                  ),
-                  td: ({ children }) => (
-                    <td className="border border-foreground/20 px-3 py-2 text-foreground/80">
-                      {children}
-                    </td>
-                  ),
-                }}
-              >
-                {proposal.agreementTerms}
-              </ReactMarkdown>
-            </div>
+            {/* Agreement terms (legal sections — hardcoded per type to match PDF agreements) */}
+            {isManagement ? <ManagementTerms /> : <ProjectTerms />}
 
             <DocDivider />
 
             {/* Acceptance section */}
             <p className="text-sm font-bold text-foreground mb-3">Acceptance</p>
-            <p className="text-sm text-foreground/80 leading-relaxed mb-2">
-              The Client named below acknowledges and agrees to the terms outlined in this Statement of
-              Work. Both parties confirm they have the proper authority to enter into this agreement on
-              behalf of their respective companies.
-            </p>
-            <p className="text-sm text-foreground/80 leading-relaxed mb-2">
-              The Client authorizes Kracked Retention to invoice for the agreed-upon purchase and payment
-              plan. The Client certifies that they are an authorized user of the provided payment method
-              and will not dispute the payment, provided it aligns with the terms of this agreement.
-            </p>
-            <p className="text-sm text-foreground/80 leading-relaxed mb-6">
-              The Client represents and warrants that they are authorized to execute this payment
-              authorization and indemnifies Kracked Retention, the bank, and the payment processor from
-              any claims, damages, or losses arising from authorized transactions under this agreement.
-            </p>
+            <AcceptanceText isManagement={isManagement} />
 
             {/* Signature block */}
             <div className="grid grid-cols-2 gap-8 mt-6">
