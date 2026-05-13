@@ -265,7 +265,14 @@ function PricingTable({ proposal }: { proposal: ProposalData }) {
 
   const serviceLabel = isManagement
     ? "Kracked Retention Email + SMS Marketing Management"
-    : (proposal.serviceDescription ?? "Project Services");
+    : "Project Services";
+
+  // For project proposals with structured scope text, render it as formatted bullets
+  const serviceCellContent = !isManagement && proposal.serviceDescription ? (
+    <ScopeDisplay text={proposal.serviceDescription} />
+  ) : (
+    <span className="font-medium">{serviceLabel}</span>
+  );
 
   return (
     <div className="my-6">
@@ -292,23 +299,23 @@ function PricingTable({ proposal }: { proposal: ProposalData }) {
               .sort((a, b) => a.instalmentNumber - b.instalmentNumber)
               .map((inst) => (
                 <tr key={inst.id}>
-                  <td className="border border-foreground/20 px-3 py-2 font-medium text-foreground">
-                    {serviceLabel} — Instalment {inst.instalmentNumber} of {proposal.instalments.length}
-                    <span className="text-foreground/60 font-normal ml-2">
-                      (due {fmtDateShort(inst.dueDate)})
+                  <td className="border border-foreground/20 px-3 py-2 text-foreground">
+                    {serviceCellContent}
+                    <span className="text-foreground/60 text-xs block mt-1">
+                      Instalment {inst.instalmentNumber} of {proposal.instalments.length} — due {fmtDateShort(inst.dueDate)}
                     </span>
                   </td>
-                  <td className="border border-foreground/20 px-3 py-2 text-right font-bold text-foreground">
+                  <td className="border border-foreground/20 px-3 py-2 text-right font-bold text-foreground align-top">
                     {fmtAmount(inst.amount, proposal.currency)}
                   </td>
                 </tr>
               ))
           ) : (
             <tr>
-              <td className="border border-foreground/20 px-3 py-2 font-medium text-foreground">
-                {serviceLabel}
+              <td className="border border-foreground/20 px-3 py-2 text-foreground">
+                {serviceCellContent}
               </td>
-              <td className="border border-foreground/20 px-3 py-2 text-right font-bold text-foreground">
+              <td className="border border-foreground/20 px-3 py-2 text-right font-bold text-foreground align-top">
                 {totalLabel}
               </td>
             </tr>
