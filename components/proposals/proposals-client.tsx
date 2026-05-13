@@ -191,11 +191,11 @@ export function ProposalsClient() {
               <tr className="border-b border-border">
                 <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Client</th>
                 <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Type</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Amount</th>
                 <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
                 <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sent</th>
                 <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Signed</th>
                 <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Paid</th>
+                <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Amount</th>
                 <th className="px-4 py-2.5" />
               </tr>
             </thead>
@@ -246,9 +246,6 @@ export function ProposalsClient() {
                     <td className="px-4 py-3">
                       <TypeBadge type={proposal.type} />
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums font-medium text-foreground/80">
-                      {fmtAmount(proposal.totalAmount, proposal.currency)}
-                    </td>
                     <td className="px-4 py-3">
                       <ProposalStatusBadge status={proposal.status} />
                     </td>
@@ -260,6 +257,9 @@ export function ProposalsClient() {
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground tabular-nums">
                       {fmtDate(proposal.paidAt) ?? <span className="text-muted-foreground/40">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-medium text-foreground/80">
+                      {fmtAmount(proposal.totalAmount, proposal.currency)}
                     </td>
                     <td className="px-4 py-3">
                       {proposal.status === "draft" && (
