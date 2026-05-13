@@ -43,14 +43,18 @@ export async function GET(req: NextRequest) {
       pipelineStageId_name: stageMap[opp.pipelineStageId] ?? "Unknown Stage",
     }));
 
-    // Filter by createdAt date range if requested
+    // Filter by createdAt date range if requested.
+    // Dates are treated as CST (UTC-6) day boundaries so a "today" query
+    // covers the full calendar day in Jack's timezone, not UTC.
     if (since || until) {
-      const sinceMs = since ? new Date(since).getTime() : 0;
-      const untilMs = until ? new Date(`${until}T23:59:59Z`).getTime() : Infinity;
+      const sinceMs = since ? new Date(`${since}T00:00:00-06:00`).getTime() : 0;
+      const untilMs = until ? new Date(`${until}T23:59:59-06:00`).getTime() : Infinity;
+      const before = opps.length;
       opps = opps.filter((opp) => {
         const t = new Date(opp.createdAt).getTime();
         return t >= sinceMs && t <= untilMs;
       });
+      console.log(`[opportunities] date filter ${since}→${until} (CST): ${before} total → ${opps.length} matched`);
     }
 
     return NextResponse.json({ opportunities: opps, meta: oppsData.meta });
