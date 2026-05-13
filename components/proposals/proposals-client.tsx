@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { FileText, Plus } from "lucide-react";
+import { FileText, Plus, Send, MessageSquare, Phone } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { ProposalStatusBadge } from "./proposal-status-badge";
 import { ProposalCreateModal } from "./proposal-create-modal";
@@ -210,6 +210,7 @@ export function ProposalsClient() {
                 <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Signed</th>
                 <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Paid</th>
                 <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Amount</th>
+                <th className="px-4 py-2.5" />
               </tr>
             </thead>
             <tbody>
@@ -217,7 +218,7 @@ export function ProposalsClient() {
                 Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} />)
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center">
+                  <td colSpan={8} className="px-4 py-16 text-center">
                     <FileText className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
                     <p className="text-sm text-muted-foreground">
                       {filter === "All"
@@ -273,23 +274,35 @@ export function ProposalsClient() {
                     <td className="px-4 py-3 text-sm text-muted-foreground tabular-nums">
                       {fmtDate(proposal.paidAt) ?? <span className="text-muted-foreground/40">—</span>}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-3">
-                        <span className="tabular-nums font-medium text-foreground/80">
-                          {fmtAmount(proposal.totalAmount, proposal.currency)}
-                        </span>
+                    <td className="px-4 py-3 text-right tabular-nums font-medium text-foreground/80">
+                      {fmtAmount(proposal.totalAmount, proposal.currency)}
+                    </td>
+                    <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-1">
                         {proposal.status === "draft" && (
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              sendMutation.mutate(proposal.id);
-                            }}
+                            title="Send proposal"
+                            onClick={(e) => { e.stopPropagation(); sendMutation.mutate(proposal.id); }}
                             disabled={sendMutation.isPending}
-                            className="text-xs font-medium px-2.5 py-1 rounded-[5px] bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50 shrink-0"
+                            className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/8 transition-colors disabled:opacity-40"
                           >
-                            Send
+                            <Send className="w-3.5 h-3.5" />
                           </button>
                         )}
+                        <button
+                          title="Message contact"
+                          onClick={(e) => { e.stopPropagation(); window.location.href = `/inbox`; }}
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          title="View calls"
+                          onClick={(e) => { e.stopPropagation(); window.location.href = `/calls`; }}
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </td>
                   </tr>

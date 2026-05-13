@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -195,9 +195,10 @@ interface KanbanBoardProps {
   opportunities: GHLOpportunity[];
   commentLeads?: CommentLead[];
   unreadContactIds?: Set<string>;
+  autoOpenContactId?: string;
 }
 
-export function KanbanBoard({ pipeline, opportunities, commentLeads = [], unreadContactIds = new Set() }: KanbanBoardProps) {
+export function KanbanBoard({ pipeline, opportunities, commentLeads = [], unreadContactIds = new Set(), autoOpenContactId }: KanbanBoardProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [selectedOpp, setSelectedOpp] = useState<GHLOpportunity | null>(null);
@@ -207,6 +208,16 @@ export function KanbanBoard({ pipeline, opportunities, commentLeads = [], unread
   const [selectedOppIds, setSelectedOppIds] = useState<Set<string>>(new Set());
   const updateStage = useUpdateOpportunityStage();
   const recordChange = useStageHistoryStore((s) => s.recordChange);
+
+  // Auto-open opportunity modal when navigated from another page with ?contact=
+  useEffect(() => {
+    if (!autoOpenContactId || opportunities.length === 0) return;
+    const match = opportunities.find((o) => o.contact?.id === autoOpenContactId);
+    if (match) {
+      setSelectedOpp(match);
+      setSelectedOppTab("overview");
+    }
+  }, [autoOpenContactId, opportunities]);
 
   function toggleSelectOpp(id: string) {
     setSelectedOppIds((prev) => {

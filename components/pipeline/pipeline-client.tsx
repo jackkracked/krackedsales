@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { usePipelines, useOpportunities } from "@/lib/hooks/use-pipeline";
 import { useQuery } from "@tanstack/react-query";
 import { useBrandCategoryStore } from "@/store/brand-category-store";
@@ -14,6 +15,8 @@ import { cn } from "@/lib/utils/cn";
 type ViewMode = "kanban" | "list";
 
 export function PipelineClient() {
+  const searchParams = useSearchParams();
+  const autoOpenContactId = searchParams.get("contact");
   const [viewMode, setViewMode] = useState<ViewMode>("kanban");
   const [showAddLead, setShowAddLead] = useState(false);
   const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null);
@@ -241,7 +244,7 @@ export function PipelineClient() {
             Loading opportunities…
           </div>
         ) : viewMode === "kanban" ? (
-          <KanbanBoard pipeline={pipeline} opportunities={opportunities} commentLeads={filteredCommentLeads} unreadContactIds={unreadContactIds} />
+          <KanbanBoard pipeline={pipeline} opportunities={opportunities} commentLeads={filteredCommentLeads} unreadContactIds={unreadContactIds} autoOpenContactId={autoOpenContactId ?? undefined} />
         ) : (
           <PipelineListView pipeline={pipeline} opportunities={opportunities} />
         )}
