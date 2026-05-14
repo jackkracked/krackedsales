@@ -138,39 +138,55 @@ export async function GET(req: NextRequest) {
         .filter((inv) => !isSubscriptionInvoice(inv))
         .reduce((sum, inv) => sum + (inv.amount_paid ?? 0), 0) / 100;
 
-      // 2. All active subscriptions → MRR, management client count
-      const activeSubscriptions = await paginateAll<Stripe.Subscription>((after) =>
-        stripeClient.subscriptions.list({
-          status: "active",
-          limit: 100,
-          ...(after ? { starting_after: after } : {}),
-        })
-      );
+      // 2. Active subscriptions (current state) + cancelled subs → historical MRR
+      // Active subs = current management client count (always present)
+      // For MRR at a point in time: subs created before period end AND not cancelled before period start
+      const [activeSubscriptions, allCancelledSubs] = await Promise.all([
+        paginateAll<Stripe.Subscription>((after) =>
+          stripeClient.subscriptions.list({
+            status: "active",
+            limit: 100,
+            ...(after ? { starting_after: after } : {}),
+          })
+        ),
+        paginateAll<Stripe.Subscription>((after) =>
+          stripeClient.subscriptions.list({
+            status: "canceled",
+            limit: 100,
+            ...(after ? { starting_after: after } : {}),
+          })
+        ),
+      ]);
 
-      mrr = activeSubscriptions.reduce((sum, sub) => {
-        const item = sub.items.data[0];
-        if (!item) return sum;
-        return sum + toMonthlyCents(item);
-      }, 0) / 100;
-
+      // Management client count = currently active subscriptions
       managementClients = new Set(
         activeSubscriptions.map((sub) =>
           typeof sub.customer === "string" ? sub.customer : sub.customer.id
         )
       ).size;
 
+      // Historical MRR = subs that were active at any point during the period
+      // Active subs: created before period end
+      // Cancelled subs: created before period end AND cancelled_at >= period start
+      const activeDuringPeriod = [
+        ...activeSubscriptions.filter((sub) => sub.created < endUnix),
+        ...allCancelledSubs.filter(
+          (sub) => sub.created < endUnix && (sub.canceled_at ?? 0) >= startUnix
+        ),
+      ];
+
+      mrr = activeDuringPeriod.reduce((sum, sub) => {
+        const item = sub.items.data[0];
+        if (!item) return sum;
+        return sum + toMonthlyCents(item);
+      }, 0) / 100;
+
       // 3. New subscriptions created in period → new management clients
       const newSubscriptions = activeSubscriptions.filter(
         (sub) => sub.created >= startUnix && sub.created < endUnix
       );
-      // Also check canceled subscriptions created in the period
-      const newCanceledSubs = await paginateAll<Stripe.Subscription>((after) =>
-        stripeClient.subscriptions.list({
-          status: "canceled",
-          created: { gte: startUnix, lt: endUnix },
-          limit: 100,
-          ...(after ? { starting_after: after } : {}),
-        })
+      const newCanceledSubs = allCancelledSubs.filter(
+        (sub) => sub.created >= startUnix && sub.created < endUnix
       );
       const allNewSubs = [...newSubscriptions, ...newCanceledSubs];
 
