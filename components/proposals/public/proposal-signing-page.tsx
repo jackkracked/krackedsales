@@ -783,17 +783,11 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
 
             {/* Logo */}
             <div className="text-center mb-8">
-              <div
-                className="text-4xl font-black text-foreground leading-none tracking-tight"
-                style={{ fontFamily: "var(--font-heading)", letterSpacing: "-0.03em" }}
-              >
-                Kracked
-              </div>
-              <div
-                className="text-[11px] font-bold tracking-[0.35em] text-foreground mt-0.5"
-              >
-                RETENTION
-              </div>
+              <img
+                src="/kracked-logo.png"
+                alt="Kracked Retention"
+                className="h-12 w-auto mx-auto object-contain"
+              />
             </div>
 
             {/* Document title */}
