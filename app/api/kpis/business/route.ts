@@ -101,6 +101,7 @@ export async function GET(req: NextRequest) {
     let newProjectValue = 0;
     let clientChurnCount = 0;
     let clientChurnValue = 0;
+    let failedPayments = 0;
     let processingFees = 0;
     let refunds = 0;
 
