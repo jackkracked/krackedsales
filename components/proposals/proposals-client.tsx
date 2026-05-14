@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils/cn";
 import { ProposalStatusBadge } from "./proposal-status-badge";
 import { ProposalCreateModal } from "./proposal-create-modal";
 import { ProposalDetailSlideOver } from "./proposal-detail-slide-over";
+import { OpportunityModal } from "@/components/pipeline/opportunity-modal";
+import type { GHLOpportunity } from "@/lib/ghl/types";
 
 interface Instalment {
   id: string;
@@ -96,6 +98,8 @@ export function ProposalsClient() {
   const [filter, setFilter] = useState<string>("All");
   const [showCreate, setShowCreate] = useState(false);
   const [selected, setSelected] = useState<Proposal | null>(null);
+  const [oppModal, setOppModal] = useState<{ opp: GHLOpportunity; stageName: string } | null>(null);
+  const [oppLoading, setOppLoading] = useState<string | null>(null); // contactId being fetched
   const queryClient = useQueryClient();
 
   const { data, isPending } = useQuery<{ proposals: Proposal[] }>({
@@ -298,10 +302,25 @@ export function ProposalsClient() {
                         </button>
                         <button
                           title="View opportunity"
-                          onClick={(e) => { e.stopPropagation(); window.location.href = `/pipeline?contact=${proposal.ghlContactId}`; }}
-                          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                          disabled={oppLoading === proposal.ghlContactId}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            setOppLoading(proposal.ghlContactId);
+                            try {
+                              const res = await fetch(
+                                `/api/ghl/contacts/${proposal.ghlContactId}/opportunity?name=${encodeURIComponent(proposal.contactName)}`
+                              );
+                              const json = await res.json();
+                              if (json.opportunity) {
+                                setOppModal({ opp: json.opportunity, stageName: json.stageName ?? "Unknown" });
+                              }
+                            } finally {
+                              setOppLoading(null);
+                            }
+                          }}
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
                         >
-                          <Eye className="w-3.5 h-3.5" />
+                          <Eye className={cn("w-3.5 h-3.5", oppLoading === proposal.ghlContactId && "animate-pulse")} />
                         </button>
                       </div>
                     </td>
@@ -328,6 +347,14 @@ export function ProposalsClient() {
           proposal={allProposals.find((p) => p.id === selected.id) ?? selected}
           onClose={() => setSelected(null)}
           onUpdated={() => queryClient.invalidateQueries({ queryKey: ["proposals"] })}
+        />
+      )}
+
+      {oppModal && (
+        <OpportunityModal
+          opportunity={oppModal.opp}
+          stageName={oppModal.stageName}
+          onClose={() => setOppModal(null)}
         />
       )}
     </>
