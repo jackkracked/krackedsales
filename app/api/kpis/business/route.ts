@@ -202,27 +202,21 @@ export async function GET(req: NextRequest) {
         return sum + (item.price.unit_amount ?? 0);
       }, 0) / 100;
 
-      // 4. Subscriptions cancelled in period → client churn
-      // Use events API to find cancellations that happened in the period
-      const cancelEvents = await paginateAll<Stripe.Event>((after) =>
-        stripeClient.events.list({
-          type: "customer.subscription.deleted",
-          created: { gte: startUnix, lt: endUnix },
-          limit: 100,
-          ...(after ? { starting_after: after } : {}),
-        })
+      // 4. Client churn — filter allCancelledSubs by canceled_at in period
+      // Using canceled_at (actual cancellation date) is more accurate than filtering
+      // by event.created, which can lag the real cancellation by days.
+      const churnedSubs = allCancelledSubs.filter(
+        (sub) => sub.canceled_at != null && sub.canceled_at >= startUnix && sub.canceled_at < endUnix
       );
 
       const churnedCustomerIds = new Set(
-        cancelEvents.map((evt) => {
-          const sub = evt.data.object as Stripe.Subscription;
-          return typeof sub.customer === "string" ? sub.customer : sub.customer.id;
-        })
+        churnedSubs.map((sub) =>
+          typeof sub.customer === "string" ? sub.customer : sub.customer.id
+        )
       );
       clientChurnCount = churnedCustomerIds.size;
-      clientChurnValue = cancelEvents.reduce((sum, evt) => {
-        const sub = evt.data.object as Stripe.Subscription;
-        const item = sub.items?.data?.[0];
+      clientChurnValue = churnedSubs.reduce((sum, sub) => {
+        const item = sub.items.data[0];
         if (!item) return sum;
         return sum + toMonthlyCents(item);
       }, 0) / 100;
