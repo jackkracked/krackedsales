@@ -126,15 +126,19 @@ export async function GET(req: NextRequest) {
       cashCollected = paidInvoices.reduce((sum, inv) => sum + (inv.amount_paid ?? 0), 0) / 100;
 
       // New project clients = distinct customers on one-time (non-subscription) paid invoices
+      // In Stripe API 2026-04-22.dahlia, subscription invoices have parent.type = "subscription_details"
+      const isSubscriptionInvoice = (inv: Stripe.Invoice) =>
+        inv.parent?.type === "subscription_details";
+
       const projectCustomerIds = new Set(
         paidInvoices
-          .filter((inv) => !inv.subscription)
-          .map((inv) => (typeof inv.customer === "string" ? inv.customer : inv.customer?.id ?? ""))
+          .filter((inv) => !isSubscriptionInvoice(inv))
+          .map((inv) => (typeof inv.customer === "string" ? inv.customer : (inv.customer as Stripe.Customer)?.id ?? ""))
           .filter(Boolean)
       );
       newProjectCount = projectCustomerIds.size;
       newProjectValue = paidInvoices
-        .filter((inv) => !inv.subscription)
+        .filter((inv) => !isSubscriptionInvoice(inv))
         .reduce((sum, inv) => sum + (inv.amount_paid ?? 0), 0) / 100;
 
       // 2. All active subscriptions → MRR, management client count
