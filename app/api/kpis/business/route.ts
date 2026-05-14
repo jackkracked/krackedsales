@@ -211,46 +211,26 @@ export async function GET(req: NextRequest) {
         return sum + toMonthlyCents(item);
       }, 0) / 100;
 
-      // 5. Failed charges in period → failed payments
+      // 5. Charges in period → failed payments + processing fees
+      // Expand balance_transaction so we get the Stripe fee on each charge directly,
+      // avoiding the unreliable balanceTransactions.list({ type }) filter.
       try {
-        const allChargesInPeriod = await paginateAll<Stripe.Charge>((after) =>
+        const allCharges = await paginateAll<Stripe.Charge & { balance_transaction: Stripe.BalanceTransaction | null }>((after) =>
           stripeClient.charges.list({
             created: { gte: startUnix, lt: endUnix },
+            expand: ["data.balance_transaction"],
             limit: 100,
             ...(after ? { starting_after: after } : {}),
-          })
+          }) as Promise<{ data: (Stripe.Charge & { balance_transaction: Stripe.BalanceTransaction | null })[]; has_more: boolean }>
         );
-        failedPayments = allChargesInPeriod
+        failedPayments = allCharges
           .filter((c) => c.status === "failed")
           .reduce((sum, c) => sum + c.amount, 0) / 100;
+        processingFees = allCharges
+          .filter((c) => c.status === "succeeded" && c.balance_transaction)
+          .reduce((sum, c) => sum + (c.balance_transaction?.fee ?? 0), 0) / 100;
       } catch (e) {
         console.error("[kpis/business] Charges fetch failed:", e);
-      }
-
-      // 6. Processing fees — sum fees from "payment" and "charge" balance transactions
-      // Subscription charges use PaymentIntents (type="payment"); direct charges use type="charge"
-      try {
-        const [paymentTxns, chargeTxns] = await Promise.all([
-          paginateAll<Stripe.BalanceTransaction>((after) =>
-            stripeClient.balanceTransactions.list({
-              type: "payment",
-              created: { gte: startUnix, lt: endUnix },
-              limit: 100,
-              ...(after ? { starting_after: after } : {}),
-            })
-          ),
-          paginateAll<Stripe.BalanceTransaction>((after) =>
-            stripeClient.balanceTransactions.list({
-              type: "charge",
-              created: { gte: startUnix, lt: endUnix },
-              limit: 100,
-              ...(after ? { starting_after: after } : {}),
-            })
-          ),
-        ]);
-        processingFees = [...paymentTxns, ...chargeTxns].reduce((sum, t) => sum + t.fee, 0) / 100;
-      } catch (e) {
-        console.error("[kpis/business] Balance transactions failed:", e);
       }
 
       // 6. Refunds
