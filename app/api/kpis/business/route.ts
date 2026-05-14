@@ -74,13 +74,10 @@ export async function GET(req: NextRequest) {
     const { start, end } = range;
     const now = new Date();
 
-    // ─── Proposals-only metrics (outstanding, failed, overdue, sent value) ────
-    const [outstandingRows, failedRows, overdueInstalments, proposalsSentInPeriod] = await Promise.all([
+    // ─── Proposals-only metrics (outstanding, overdue, sent value) ───────────
+    const [outstandingRows, overdueInstalments, proposalsSentInPeriod] = await Promise.all([
       db().select({ totalAmount: proposals.totalAmount }).from(proposals).where(
         inArray(proposals.status, ["sent", "signed"])
-      ),
-      db().select({ totalAmount: proposals.totalAmount }).from(proposals).where(
-        eq(proposals.status, "failed")
       ),
       db().select({ amount: proposalInstalments.amount }).from(proposalInstalments).where(
         and(eq(proposalInstalments.status, "pending"), lt(proposalInstalments.dueDate, now))
@@ -92,7 +89,6 @@ export async function GET(req: NextRequest) {
 
     const outstanding = outstandingRows.reduce((sum, r) => sum + r.totalAmount, 0);
     const outstandingOverdue = overdueInstalments.reduce((sum, r) => sum + r.amount, 0);
-    const failedPayments = failedRows.reduce((sum, r) => sum + r.totalAmount, 0);
     const valueOfProposalsSent = proposalsSentInPeriod.reduce((sum, r) => sum + r.totalAmount, 0);
 
     // ─── All Stripe-sourced metrics ───────────────────────────────────────────
@@ -214,17 +210,44 @@ export async function GET(req: NextRequest) {
         return sum + toMonthlyCents(item);
       }, 0) / 100;
 
-      // 5. Processing fees from balance transactions
+      // 5. Failed charges in period → failed payments
       try {
-        const txns = await paginateAll<Stripe.BalanceTransaction>((after) =>
-          stripeClient.balanceTransactions.list({
-            type: "charge",
+        const allChargesInPeriod = await paginateAll<Stripe.Charge>((after) =>
+          stripeClient.charges.list({
             created: { gte: startUnix, lt: endUnix },
             limit: 100,
             ...(after ? { starting_after: after } : {}),
           })
         );
-        processingFees = txns.reduce((sum, t) => sum + t.fee, 0) / 100;
+        failedPayments = allChargesInPeriod
+          .filter((c) => c.status === "failed")
+          .reduce((sum, c) => sum + c.amount, 0) / 100;
+      } catch (e) {
+        console.error("[kpis/business] Charges fetch failed:", e);
+      }
+
+      // 6. Processing fees — sum fees from "payment" and "charge" balance transactions
+      // Subscription charges use PaymentIntents (type="payment"); direct charges use type="charge"
+      try {
+        const [paymentTxns, chargeTxns] = await Promise.all([
+          paginateAll<Stripe.BalanceTransaction>((after) =>
+            stripeClient.balanceTransactions.list({
+              type: "payment",
+              created: { gte: startUnix, lt: endUnix },
+              limit: 100,
+              ...(after ? { starting_after: after } : {}),
+            })
+          ),
+          paginateAll<Stripe.BalanceTransaction>((after) =>
+            stripeClient.balanceTransactions.list({
+              type: "charge",
+              created: { gte: startUnix, lt: endUnix },
+              limit: 100,
+              ...(after ? { starting_after: after } : {}),
+            })
+          ),
+        ]);
+        processingFees = [...paymentTxns, ...chargeTxns].reduce((sum, t) => sum + t.fee, 0) / 100;
       } catch (e) {
         console.error("[kpis/business] Balance transactions failed:", e);
       }
