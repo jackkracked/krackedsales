@@ -10,6 +10,7 @@ import { TasksStrip } from "@/components/dashboard/tasks-strip/tasks-strip";
 import { CallsStrip } from "@/components/dashboard/calls-strip/calls-strip";
 import { AiCopilotPanel } from "@/components/dashboard/ai-copilot-panel";
 import { ConversationsStrip } from "@/components/dashboard/conversations-strip/conversations-strip";
+import { KpiWidget } from "@/components/dashboard/kpi-widget/kpi-widget";
 import { ScrollToTop } from "@/components/layout/scroll-to-top";
 
 function getGreeting(): string {
@@ -100,6 +101,14 @@ export function RepDashboard({ userId, userName, email, ghlUserId }: RepDashboar
 
       {/* Conversations strip — awaiting reply */}
       <ConversationsStrip />
+
+      {/* KPI widget — 3 pinned metrics with period toggle */}
+      <KpiWidget
+        role="rep"
+        userId={userId}
+        ghlUserId={ghlUserId}
+        email={email}
+      />
 
       {/* Commission row — only shown when a commission % is set */}
       {(metrics?.commissionPct ?? 0) > 0 && (

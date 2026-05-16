@@ -671,3 +671,11 @@ export const activityEvents = pgTable("activity_events", {
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+/** Per-user dashboard KPI selections — which 3 metrics each user has pinned */
+export const dashboardKpiPrefs = pgTable("dashboard_kpi_prefs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  selectedKeys: text("selected_keys").array().notNull().default([]),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});

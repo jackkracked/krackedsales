@@ -10,6 +10,7 @@ import { CallsStrip } from "@/components/dashboard/calls-strip/calls-strip";
 import { FollowUpQueue } from "@/components/dashboard/follow-up-queue";
 import { AiCopilotPanel } from "@/components/dashboard/ai-copilot-panel";
 import { ConversationsStrip } from "@/components/dashboard/conversations-strip/conversations-strip";
+import { KpiWidget } from "@/components/dashboard/kpi-widget/kpi-widget";
 import { ScrollToTop } from "@/components/layout/scroll-to-top";
 
 function getGreeting(): string {
@@ -24,11 +25,12 @@ function Skeleton({ className }: { className?: string }) {
 }
 
 interface AdminDashboardProps {
+  userId: string;
   userName: string;
   ghlUserId: string | null;
 }
 
-export function AdminDashboard({ userName }: AdminDashboardProps) {
+export function AdminDashboard({ userId, userName }: AdminDashboardProps) {
   const today = format(new Date(), "EEEE, d MMMM yyyy");
   const firstName = userName.split(" ")[0] || "";
 
@@ -59,6 +61,9 @@ export function AdminDashboard({ userName }: AdminDashboardProps) {
 
       {/* Conversations strip — awaiting reply */}
       <ConversationsStrip />
+
+      {/* KPI widget — 3 pinned metrics with period toggle */}
+      <KpiWidget role="admin" userId={userId} />
 
       {/* Second row: Follow-up queue — full width */}
       <Suspense fallback={<Skeleton className="h-40" />}>

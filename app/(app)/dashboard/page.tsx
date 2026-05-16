@@ -26,6 +26,7 @@ export default async function DashboardPage() {
 
   return (
     <AdminDashboard
+      userId={user?.id ?? ""}
       userName={user?.name ?? ""}
       ghlUserId={user?.ghlUserId ?? null}
     />
