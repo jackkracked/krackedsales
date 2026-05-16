@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { calls, softwareCosts, proposals } from "@/lib/db/schema";
-import { and, eq, gte, lte, count } from "drizzle-orm";
+import {
+  calls, softwareCosts, proposals, proposalInstalments,
+  repTargets, users, commissionSettings,
+} from "@/lib/db/schema";
+import { and, eq, gte, lte, count, isNotNull } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 import {
@@ -9,6 +12,7 @@ import {
   startOfWeek, endOfWeek,
   startOfMonth, endOfMonth,
   subMonths, subWeeks, subDays,
+  format,
 } from "date-fns";
 import { getKpiDef } from "@/lib/dashboard-kpis";
 
@@ -35,11 +39,126 @@ function getPrevRange(period: Period, now: Date): { start: Date; end: Date } {
   return { start: startOfMonth(prev), end: endOfMonth(prev) };
 }
 
+/**
+ * Fetch ALL GHL opportunities for a query base, paginating past the 100-item limit.
+ */
+async function fetchAllGhlOpps(queryBase: string): Promise<GHLOpportunity[]> {
+  const all: GHLOpportunity[] = [];
+  try {
+    const first = await ghl.get<{
+      opportunities: GHLOpportunity[];
+      meta?: { total?: number };
+    }>(`${queryBase}&limit=100&page=1`);
+
+    all.push(...(first.opportunities ?? []));
+
+    const total = first.meta?.total ?? first.opportunities?.length ?? 0;
+    const pages = Math.ceil(total / 100);
+
+    if (pages > 1) {
+      const rest = await Promise.all(
+        Array.from({ length: pages - 1 }, (_, i) =>
+          ghl.get<{ opportunities: GHLOpportunity[] }>(`${queryBase}&limit=100&page=${i + 2}`)
+        )
+      );
+      for (const page of rest) all.push(...(page.opportunities ?? []));
+    }
+  } catch (err) {
+    console.error("[dashboard/kpis] GHL fetch failed:", err);
+  }
+  return all;
+}
+
+/**
+ * Compute commission earned by a rep for a specific date range.
+ * Uses the same logic as /api/kpi/rep-metrics.
+ */
+async function computeCommission(
+  userId: string,
+  commissionPct: number,
+  payoutTiming: string,
+  periodStart: Date,
+  periodEnd: Date
+): Promise<number> {
+  if (!userId || commissionPct <= 0) return 0;
+  let total = 0;
+
+  try {
+    if (payoutTiming === "split") {
+      const rows = await db()
+        .select({ amount: proposalInstalments.amount })
+        .from(proposalInstalments)
+        .innerJoin(proposals, eq(proposalInstalments.proposalId, proposals.id))
+        .where(and(
+          eq(proposals.createdBy, userId),
+          isNotNull(proposalInstalments.paidAt),
+          gte(proposalInstalments.paidAt, periodStart),
+          lte(proposalInstalments.paidAt, periodEnd)
+        ));
+      for (const r of rows) total += r.amount * commissionPct / 100;
+
+      const singles = await db()
+        .select({ totalAmount: proposals.totalAmount })
+        .from(proposals)
+        .where(and(
+          eq(proposals.createdBy, userId),
+          eq(proposals.paymentStructure, "single"),
+          isNotNull(proposals.paidAt),
+          gte(proposals.paidAt, periodStart),
+          lte(proposals.paidAt, periodEnd)
+        ));
+      for (const p of singles) total += p.totalAmount * commissionPct / 100;
+
+    } else if (payoutTiming === "first_instalment") {
+      const rows = await db()
+        .select({ totalAmount: proposals.totalAmount })
+        .from(proposalInstalments)
+        .innerJoin(proposals, eq(proposalInstalments.proposalId, proposals.id))
+        .where(and(
+          eq(proposals.createdBy, userId),
+          eq(proposalInstalments.instalmentNumber, 1),
+          isNotNull(proposalInstalments.paidAt),
+          gte(proposalInstalments.paidAt, periodStart),
+          lte(proposalInstalments.paidAt, periodEnd)
+        ));
+      for (const r of rows) total += r.totalAmount * commissionPct / 100;
+
+      const singles = await db()
+        .select({ totalAmount: proposals.totalAmount })
+        .from(proposals)
+        .where(and(
+          eq(proposals.createdBy, userId),
+          eq(proposals.paymentStructure, "single"),
+          isNotNull(proposals.paidAt),
+          gte(proposals.paidAt, periodStart),
+          lte(proposals.paidAt, periodEnd)
+        ));
+      for (const p of singles) total += p.totalAmount * commissionPct / 100;
+
+    } else {
+      // full_paid
+      const rows = await db()
+        .select({ totalAmount: proposals.totalAmount })
+        .from(proposals)
+        .where(and(
+          eq(proposals.createdBy, userId),
+          isNotNull(proposals.paidAt),
+          gte(proposals.paidAt, periodStart),
+          lte(proposals.paidAt, periodEnd)
+        ));
+      for (const p of rows) total += p.totalAmount * commissionPct / 100;
+    }
+  } catch (err) {
+    console.error("[dashboard/kpis] Commission calculation failed:", err);
+  }
+
+  return Math.round(total * 100) / 100;
+}
+
 export interface KpiMetricResult {
   value: number;
   prev: number;
   target?: number;
-  /** When the metric is not period-aware, we show the monthly period note */
   periodNote?: string;
 }
 
@@ -56,6 +175,7 @@ export interface KpiMetricResult {
  */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
+  const origin = new URL(req.url).origin;
   const period = (searchParams.get("period") ?? "month") as Period;
   const keys = searchParams.getAll("keys[]");
   const userId = searchParams.get("userId") ?? "";
@@ -73,36 +193,69 @@ export async function GET(req: NextRequest) {
   const prevMonthStart = startOfMonth(subMonths(now, 1));
   const prevMonthEnd = endOfMonth(subMonths(now, 1));
 
-  // Fetch GHL opportunities once (shared across multiple metric computations)
-  const needsGhl = keys.some((k) =>
-    ["cash", "leads", "deals_won", "revenue_won", "pipeline_count", "pipeline_value", "pipeline_value_admin"].includes(k)
-  );
+  const thisMonth = format(now, "yyyy-MM");
+  const prevMonth = format(subMonths(now, 1), "yyyy-MM");
 
-  const [oppsResult, allAdminOppsResult] = await Promise.allSettled([
-    needsGhl && ghlUserId
-      ? ghl.get<{ opportunities: GHLOpportunity[] }>(
-          `/opportunities/search?location_id=${locationId()}&assigned_to=${ghlUserId}&limit=100`
-        )
-      : Promise.resolve({ opportunities: [] }),
-    needsGhl && role === "admin"
-      ? ghl.get<{ opportunities: GHLOpportunity[] }>(
-          `/opportunities/search?location_id=${locationId()}&limit=100`
-        )
-      : Promise.resolve({ opportunities: [] }),
+  // ── Prefetch GHL opportunities (paginated) ───────────────────────────────
+  const needsAdminOpps = role === "admin" && keys.some((k) => ["cash", "leads", "pipeline_value_admin"].includes(k));
+  const needsRepOpps = keys.some((k) => ["deals_won", "revenue_won", "pipeline_count", "pipeline_value"].includes(k));
+  const locId = locationId();
+
+  const [adminOpps, repOpps] = await Promise.all([
+    needsAdminOpps
+      ? fetchAllGhlOpps(`/opportunities/search?location_id=${locId}`)
+      : Promise.resolve([] as GHLOpportunity[]),
+    needsRepOpps && ghlUserId
+      ? fetchAllGhlOpps(`/opportunities/search?location_id=${locId}&assigned_to=${ghlUserId}`)
+      : Promise.resolve([] as GHLOpportunity[]),
   ]);
 
-  const repOpps: GHLOpportunity[] =
-    oppsResult.status === "fulfilled" ? oppsResult.value.opportunities ?? [] : [];
-  const adminOpps: GHLOpportunity[] =
-    allAdminOppsResult.status === "fulfilled" ? allAdminOppsResult.value.opportunities ?? [] : [];
+  // ── Prefetch rep targets + commission settings ───────────────────────────
+  const needsRepTargets = keys.some((k) => ["deals_won", "calls_rep"].includes(k));
+  const needsCommission = keys.includes("commission");
 
+  const [repTargetRows, commissionRows, repUserRows] = await Promise.all([
+    needsRepTargets && userId
+      ? db().select().from(repTargets).where(eq(repTargets.userId, userId)).limit(1)
+      : Promise.resolve([]),
+    needsCommission
+      ? db().select({ payoutTiming: commissionSettings.payoutTiming }).from(commissionSettings).limit(1)
+      : Promise.resolve([]),
+    needsCommission && userId
+      ? db().select({ commissionPct: users.commissionPct }).from(users).where(eq(users.id, userId)).limit(1)
+      : Promise.resolve([]),
+  ]);
+
+  const repTarget = repTargetRows[0] ?? null;
+  const payoutTiming = commissionRows[0]?.payoutTiming ?? "full_paid";
+  const commissionPct = repUserRows[0]?.commissionPct ?? 0;
+
+  // ── Prefetch offer + business data once if needed ────────────────────────
+  // These reuse the existing /api/kpis/* routes which already have correct logic.
+  // We use the request's own origin — guaranteed correct in all environments.
+  const needsOffer = keys.some((k) => ["roas", "ad_spend"].includes(k));
+  const needsMrr = keys.includes("mrr");
+
+  type OfferData = { roas?: number; adSpend?: number };
+  type BizData = { mrr?: number };
+
+  const fetchJson = <T>(url: string): Promise<T> =>
+    fetch(url, { cache: "no-store" }).then((r) => r.ok ? r.json() as Promise<T> : ({} as T)).catch(() => ({} as T));
+
+  const [offerData, prevOfferData, bizData, prevBizData] = await Promise.all([
+    needsOffer  ? fetchJson<OfferData>(`${origin}/api/kpis/offer?period=${thisMonth}`)    : Promise.resolve({} as OfferData),
+    needsOffer  ? fetchJson<OfferData>(`${origin}/api/kpis/offer?period=${prevMonth}`)    : Promise.resolve({} as OfferData),
+    needsMrr    ? fetchJson<BizData>(`${origin}/api/kpis/business?period=${thisMonth}`)   : Promise.resolve({} as BizData),
+    needsMrr    ? fetchJson<BizData>(`${origin}/api/kpis/business?period=${prevMonth}`)   : Promise.resolve({} as BizData),
+  ]);
+
+  // ── Compute each metric ──────────────────────────────────────────────────
   const metrics: Record<string, KpiMetricResult> = {};
 
   for (const key of keys) {
     const def = getKpiDef(key);
     if (!def) continue;
 
-    // For non-period-aware metrics, use monthly ranges regardless of toggle
     const effectiveStart = def.periodAware ? start : monthStart;
     const effectiveEnd = def.periodAware ? end : monthEnd;
     const effectivePrevStart = def.periodAware ? prevStart : prevMonthStart;
@@ -111,260 +264,160 @@ export async function GET(req: NextRequest) {
 
     try {
       switch (key) {
-        // ── Admin: Cash Collected ──────────────────────────────────────────
+
+        // ── Admin: Cash Collected (GHL won deals) ────────────────────────────
         case "cash": {
-          const wonInPeriod = adminOpps.filter((o) => {
-            if (o.status !== "won") return false;
-            const d = new Date(o.updatedAt);
-            return d >= effectiveStart && d <= effectiveEnd;
-          });
-          const wonInPrev = adminOpps.filter((o) => {
-            if (o.status !== "won") return false;
-            const d = new Date(o.updatedAt);
-            return d >= effectivePrevStart && d <= effectivePrevEnd;
-          });
+          const filter = (o: GHLOpportunity, s: Date, e: Date) =>
+            o.status === "won" && new Date(o.updatedAt) >= s && new Date(o.updatedAt) <= e;
+          const sum = (opps: GHLOpportunity[]) => opps.reduce((t, o) => t + (o.monetaryValue ?? 0), 0);
           metrics[key] = {
-            value: wonInPeriod.reduce((s, o) => s + (o.monetaryValue ?? 0), 0),
-            prev: wonInPrev.reduce((s, o) => s + (o.monetaryValue ?? 0), 0),
+            value: sum(adminOpps.filter((o) => filter(o, effectiveStart, effectiveEnd))),
+            prev: sum(adminOpps.filter((o) => filter(o, effectivePrevStart, effectivePrevEnd))),
             periodNote,
           };
           break;
         }
 
-        // ── Admin: New Leads ───────────────────────────────────────────────
+        // ── Admin: New Leads (GHL new opportunities) ─────────────────────────
         case "leads": {
-          const inPeriod = adminOpps.filter((o) => {
-            const d = new Date(o.createdAt);
-            return d >= effectiveStart && d <= effectiveEnd;
-          });
-          const inPrev = adminOpps.filter((o) => {
-            const d = new Date(o.createdAt);
-            return d >= effectivePrevStart && d <= effectivePrevEnd;
-          });
-          metrics[key] = { value: inPeriod.length, prev: inPrev.length, periodNote };
-          break;
-        }
-
-        // ── Admin: Calls Logged ────────────────────────────────────────────
-        case "calls_admin": {
-          const [curr, prev] = await Promise.all([
-            db().select({ c: count() }).from(calls)
-              .where(and(gte(calls.startedAt, effectiveStart), lte(calls.startedAt, effectiveEnd))),
-            db().select({ c: count() }).from(calls)
-              .where(and(gte(calls.startedAt, effectivePrevStart), lte(calls.startedAt, effectivePrevEnd))),
-          ]);
-          metrics[key] = { value: Number(curr[0]?.c ?? 0), prev: Number(prev[0]?.c ?? 0), periodNote };
-          break;
-        }
-
-        // ── Admin: Proposals Sent ──────────────────────────────────────────
-        case "proposals_sent": {
-          const [curr, prev] = await Promise.all([
-            db().select({ c: count() }).from(proposals)
-              .where(and(eq(proposals.status, "sent"), gte(proposals.sentAt, effectiveStart), lte(proposals.sentAt, effectiveEnd))),
-            db().select({ c: count() }).from(proposals)
-              .where(and(eq(proposals.status, "sent"), gte(proposals.sentAt, effectivePrevStart), lte(proposals.sentAt, effectivePrevEnd))),
-          ]);
-          metrics[key] = { value: Number(curr[0]?.c ?? 0), prev: Number(prev[0]?.c ?? 0), periodNote };
-          break;
-        }
-
-        // ── Admin: ROAS (monthly only, from offer metrics) ─────────────────
-        case "roas": {
-          try {
-            const res = await fetch(
-              `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/kpis/offer?period=${
-                new Date().toISOString().slice(0, 7)
-              }`,
-              { cache: "no-store" }
-            );
-            if (res.ok) {
-              const data = await res.json();
-              metrics[key] = { value: data.roas ?? 0, prev: 0, periodNote: "monthly" };
-            } else {
-              metrics[key] = { value: 0, prev: 0, periodNote: "monthly" };
-            }
-          } catch {
-            metrics[key] = { value: 0, prev: 0, periodNote: "monthly" };
-          }
-          break;
-        }
-
-        // ── Admin: MRR (from Stripe subscriptions) ─────────────────────────
-        case "mrr": {
-          try {
-            const thisMonth = new Date().toISOString().slice(0, 7);
-            const prevMonth = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 7);
-            const [currRes, prevRes] = await Promise.all([
-              fetch(`${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/kpis/business?period=${thisMonth}`, { cache: "no-store" }),
-              fetch(`${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/kpis/business?period=${prevMonth}`, { cache: "no-store" }),
-            ]);
-            const curr = currRes.ok ? await currRes.json() : {};
-            const prev = prevRes.ok ? await prevRes.json() : {};
-            metrics[key] = { value: curr.mrr ?? 0, prev: prev.mrr ?? 0, periodNote: "monthly" };
-          } catch {
-            metrics[key] = { value: 0, prev: 0, periodNote: "monthly" };
-          }
-          break;
-        }
-
-        // ── Admin: Ad Spend (monthly only) ────────────────────────────────
-        case "ad_spend": {
-          try {
-            const thisMonth = new Date().toISOString().slice(0, 7);
-            const res = await fetch(
-              `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/kpis/offer?period=${thisMonth}`,
-              { cache: "no-store" }
-            );
-            const data = res.ok ? await res.json() : {};
-            metrics[key] = { value: data.adSpend ?? 0, prev: 0, periodNote: "monthly" };
-          } catch {
-            metrics[key] = { value: 0, prev: 0, periodNote: "monthly" };
-          }
-          break;
-        }
-
-        // ── Admin: Pipeline Value ──────────────────────────────────────────
-        case "pipeline_value_admin": {
-          const openOpps = adminOpps.filter((o) => o.status === "open");
+          const filter = (o: GHLOpportunity, s: Date, e: Date) =>
+            new Date(o.createdAt) >= s && new Date(o.createdAt) <= e;
           metrics[key] = {
-            value: openOpps.reduce((s, o) => s + (o.monetaryValue ?? 0), 0),
-            prev: 0,
+            value: adminOpps.filter((o) => filter(o, effectiveStart, effectiveEnd)).length,
+            prev: adminOpps.filter((o) => filter(o, effectivePrevStart, effectivePrevEnd)).length,
+            periodNote,
           };
           break;
         }
 
-        // ── Admin: Software Spend ──────────────────────────────────────────
+        // ── Admin: Calls Logged (DB) ─────────────────────────────────────────
+        case "calls_admin": {
+          const [curr, prev] = await Promise.all([
+            db().select({ c: count() }).from(calls).where(and(gte(calls.startedAt, effectiveStart), lte(calls.startedAt, effectiveEnd))),
+            db().select({ c: count() }).from(calls).where(and(gte(calls.startedAt, effectivePrevStart), lte(calls.startedAt, effectivePrevEnd))),
+          ]);
+          metrics[key] = { value: Number(curr[0]?.c ?? 0), prev: Number(prev[0]?.c ?? 0), periodNote };
+          break;
+        }
+
+        // ── Admin: Proposals Sent (DB) ───────────────────────────────────────
+        case "proposals_sent": {
+          const [curr, prev] = await Promise.all([
+            db().select({ c: count() }).from(proposals).where(and(eq(proposals.status, "sent"), gte(proposals.sentAt, effectiveStart), lte(proposals.sentAt, effectiveEnd))),
+            db().select({ c: count() }).from(proposals).where(and(eq(proposals.status, "sent"), gte(proposals.sentAt, effectivePrevStart), lte(proposals.sentAt, effectivePrevEnd))),
+          ]);
+          metrics[key] = { value: Number(curr[0]?.c ?? 0), prev: Number(prev[0]?.c ?? 0), periodNote };
+          break;
+        }
+
+        // ── Admin: ROAS — reuses /api/kpis/offer (same logic as KPIs page) ──
+        case "roas": {
+          metrics[key] = {
+            value: offerData.roas ?? 0,
+            prev: prevOfferData.roas ?? 0,
+            periodNote: "monthly",
+          };
+          break;
+        }
+
+        // ── Admin: Ad Spend — reuses /api/kpis/offer ────────────────────────
+        case "ad_spend": {
+          metrics[key] = {
+            value: offerData.adSpend ?? 0,
+            prev: prevOfferData.adSpend ?? 0,
+            periodNote: "monthly",
+          };
+          break;
+        }
+
+        // ── Admin: MRR — reuses /api/kpis/business (same logic as KPIs page)
+        case "mrr": {
+          metrics[key] = {
+            value: bizData.mrr ?? 0,
+            prev: prevBizData.mrr ?? 0,
+            periodNote: "monthly",
+          };
+          break;
+        }
+
+        // ── Admin: Pipeline Value (GHL open opps) ────────────────────────────
+        case "pipeline_value_admin": {
+          const open = adminOpps.filter((o) => o.status === "open");
+          metrics[key] = { value: open.reduce((s, o) => s + (o.monetaryValue ?? 0), 0), prev: 0 };
+          break;
+        }
+
+        // ── Admin: Software Spend (DB) ───────────────────────────────────────
         case "software_spend": {
-          const rows = await db()
-            .select({ monthlyCost: softwareCosts.monthlyCost })
-            .from(softwareCosts)
-            .where(eq(softwareCosts.active, true));
+          const rows = await db().select({ monthlyCost: softwareCosts.monthlyCost }).from(softwareCosts).where(eq(softwareCosts.active, true));
           const total = rows.reduce((s, r) => s + r.monthlyCost, 0);
           metrics[key] = { value: total, prev: total, periodNote: "monthly" };
           break;
         }
 
-        // ── Rep: Deals Won ─────────────────────────────────────────────────
+        // ── Rep: Deals Won (GHL, vs monthly target) ──────────────────────────
         case "deals_won": {
-          const won = repOpps.filter((o) => {
-            if (o.status !== "won") return false;
-            const d = new Date(o.updatedAt);
-            return d >= effectiveStart && d <= effectiveEnd;
-          });
-          const prevWon = repOpps.filter((o) => {
-            if (o.status !== "won") return false;
-            const d = new Date(o.updatedAt);
-            return d >= effectivePrevStart && d <= effectivePrevEnd;
-          });
-          // Target only meaningful for month period
-          let target: number | undefined;
-          if (period === "month" && userId) {
-            try {
-              const { repTargets } = await import("@/lib/db/schema");
-              const rows = await db()
-                .select({ dealsPerMonth: repTargets.dealsPerMonth })
-                .from(repTargets)
-                .where(eq(repTargets.userId, userId))
-                .limit(1);
-              target = rows[0]?.dealsPerMonth;
-            } catch { /* no target */ }
-          }
-          metrics[key] = { value: won.length, prev: prevWon.length, target, periodNote };
-          break;
-        }
-
-        // ── Rep: Calls ────────────────────────────────────────────────────
-        case "calls_rep": {
-          if (!repEmail) { metrics[key] = { value: 0, prev: 0 }; break; }
-          const [curr, prev] = await Promise.all([
-            db().select({ c: count() }).from(calls)
-              .where(and(eq(calls.repEmail, repEmail), gte(calls.startedAt, effectiveStart), lte(calls.startedAt, effectiveEnd))),
-            db().select({ c: count() }).from(calls)
-              .where(and(eq(calls.repEmail, repEmail), gte(calls.startedAt, effectivePrevStart), lte(calls.startedAt, effectivePrevEnd))),
-          ]);
-          const value = Number(curr[0]?.c ?? 0);
-          const prevVal = Number(prev[0]?.c ?? 0);
-
-          // Build target based on period
-          let target: number | undefined;
-          if (userId) {
-            try {
-              const { repTargets } = await import("@/lib/db/schema");
-              const rows = await db()
-                .select({ callsPerDay: repTargets.callsPerDay })
-                .from(repTargets)
-                .where(eq(repTargets.userId, userId))
-                .limit(1);
-              if (rows[0]) {
-                const cpd = rows[0].callsPerDay;
-                if (period === "day") target = cpd;
-                else if (period === "week") target = cpd * 5;
-                else target = cpd * 22;
-              }
-            } catch { /* no target */ }
-          }
-          metrics[key] = { value, prev: prevVal, target, periodNote };
-          break;
-        }
-
-        // ── Rep: Commission ───────────────────────────────────────────────
-        case "commission": {
-          if (!userId) { metrics[key] = { value: 0, prev: 0 }; break; }
-          try {
-            const params = new URLSearchParams({ userId, email: repEmail });
-            if (ghlUserId) params.set("ghlUserId", ghlUserId);
-            const res = await fetch(
-              `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/kpi/rep-metrics?${params}`,
-              { cache: "no-store" }
-            );
-            const data = res.ok ? await res.json() : {};
-            // Map period to commission field
-            const value =
-              period === "day" ? (data.commissionThisMonth / 30) :
-              period === "week" ? data.commissionThisWeek :
-              data.commissionThisMonth;
-            metrics[key] = { value: Math.round(value * 100) / 100, prev: 0 };
-          } catch {
-            metrics[key] = { value: 0, prev: 0 };
-          }
-          break;
-        }
-
-        // ── Rep: Revenue Won ──────────────────────────────────────────────
-        case "revenue_won": {
-          const won = repOpps.filter((o) => {
-            if (o.status !== "won") return false;
-            const d = new Date(o.updatedAt);
-            return d >= effectiveStart && d <= effectiveEnd;
-          });
-          const prevWon = repOpps.filter((o) => {
-            if (o.status !== "won") return false;
-            const d = new Date(o.updatedAt);
-            return d >= effectivePrevStart && d <= effectivePrevEnd;
-          });
+          const filter = (o: GHLOpportunity, s: Date, e: Date) =>
+            o.status === "won" && new Date(o.updatedAt) >= s && new Date(o.updatedAt) <= e;
+          const target = period === "month" ? (repTarget?.dealsPerMonth ?? undefined) : undefined;
           metrics[key] = {
-            value: won.reduce((s, o) => s + (o.monetaryValue ?? 0), 0),
-            prev: prevWon.reduce((s, o) => s + (o.monetaryValue ?? 0), 0),
+            value: repOpps.filter((o) => filter(o, effectiveStart, effectiveEnd)).length,
+            prev: repOpps.filter((o) => filter(o, effectivePrevStart, effectivePrevEnd)).length,
+            target,
             periodNote,
           };
           break;
         }
 
-        // ── Rep: Pipeline Count ───────────────────────────────────────────
-        case "pipeline_count": {
-          const open = repOpps.filter((o) => o.status === "open");
-          metrics[key] = { value: open.length, prev: 0 };
+        // ── Rep: Calls (DB, vs period-scaled target) ─────────────────────────
+        case "calls_rep": {
+          if (!repEmail) { metrics[key] = { value: 0, prev: 0 }; break; }
+          const [curr, prev] = await Promise.all([
+            db().select({ c: count() }).from(calls).where(and(eq(calls.repEmail, repEmail), gte(calls.startedAt, effectiveStart), lte(calls.startedAt, effectiveEnd))),
+            db().select({ c: count() }).from(calls).where(and(eq(calls.repEmail, repEmail), gte(calls.startedAt, effectivePrevStart), lte(calls.startedAt, effectivePrevEnd))),
+          ]);
+          const cpd = repTarget?.callsPerDay ?? 0;
+          const target = cpd > 0
+            ? period === "day" ? cpd : period === "week" ? cpd * 5 : cpd * 22
+            : undefined;
+          metrics[key] = { value: Number(curr[0]?.c ?? 0), prev: Number(prev[0]?.c ?? 0), target, periodNote };
           break;
         }
 
-        // ── Rep: Pipeline Value ───────────────────────────────────────────
+        // ── Rep: Commission (DB, accurate by period) ─────────────────────────
+        case "commission": {
+          if (!userId || commissionPct <= 0) { metrics[key] = { value: 0, prev: 0 }; break; }
+          const [curr, prev] = await Promise.all([
+            computeCommission(userId, commissionPct, payoutTiming, effectiveStart, effectiveEnd),
+            computeCommission(userId, commissionPct, payoutTiming, effectivePrevStart, effectivePrevEnd),
+          ]);
+          metrics[key] = { value: curr, prev };
+          break;
+        }
+
+        // ── Rep: Revenue Won (GHL) ───────────────────────────────────────────
+        case "revenue_won": {
+          const filter = (o: GHLOpportunity, s: Date, e: Date) =>
+            o.status === "won" && new Date(o.updatedAt) >= s && new Date(o.updatedAt) <= e;
+          const sum = (opps: GHLOpportunity[]) => opps.reduce((t, o) => t + (o.monetaryValue ?? 0), 0);
+          metrics[key] = {
+            value: sum(repOpps.filter((o) => filter(o, effectiveStart, effectiveEnd))),
+            prev: sum(repOpps.filter((o) => filter(o, effectivePrevStart, effectivePrevEnd))),
+            periodNote,
+          };
+          break;
+        }
+
+        // ── Rep: Pipeline Count (GHL open opps) ─────────────────────────────
+        case "pipeline_count": {
+          metrics[key] = { value: repOpps.filter((o) => o.status === "open").length, prev: 0 };
+          break;
+        }
+
+        // ── Rep: Pipeline Value (GHL open opps) ─────────────────────────────
         case "pipeline_value": {
           const open = repOpps.filter((o) => o.status === "open");
-          metrics[key] = {
-            value: open.reduce((s, o) => s + (o.monetaryValue ?? 0), 0),
-            prev: 0,
-          };
+          metrics[key] = { value: open.reduce((s, o) => s + (o.monetaryValue ?? 0), 0), prev: 0 };
           break;
         }
 
