@@ -6,10 +6,19 @@ import { MessageSquare, CheckCheck } from "lucide-react";
 import { ConversationTile } from "./conversation-tile";
 import { ReplyModal } from "./reply-modal";
 import type { QueueItem } from "@/app/api/inbox/queue/route";
+import { OpportunityModal } from "@/components/pipeline/opportunity-modal";
+import type { GHLOpportunity } from "@/lib/ghl/types";
+
+interface OppState {
+  opportunity: GHLOpportunity;
+  stageName: string;
+  draft: string;
+}
 
 export function ConversationsStrip() {
   const queryClient = useQueryClient();
   const [replyItem, setReplyItem] = useState<QueueItem | null>(null);
+  const [oppState, setOppState] = useState<OppState | null>(null);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
 
   const { data, isLoading } = useQuery<{ items: QueueItem[]; total: number }>({
@@ -19,14 +28,46 @@ export function ConversationsStrip() {
     refetchInterval: 60_000,
   });
 
-  // Filter out dismissed (sent) items optimistically
   const items = (data?.items ?? []).filter((i) => !dismissedIds.has(i.id));
 
+  async function handleReply(item: QueueItem) {
+    // For GHL items with a contactId: try to open the opportunity card with AI draft pre-filled
+    if (item.channel === "GHL" && item.contactId) {
+      const [draftRes, oppRes] = await Promise.allSettled([
+        fetch("/api/inbox/queue/draft", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contactName: item.contactName,
+            lastMessage: item.lastMessage,
+            channel: item.channel,
+            platform: item.platform,
+          }),
+        }).then((r) => r.json()),
+        fetch(`/api/ghl/contacts/${item.contactId}/opportunity?name=${encodeURIComponent(item.contactName)}`).then((r) => r.json()),
+      ]);
+
+      const draft = draftRes.status === "fulfilled" ? (draftRes.value.draft ?? "") : "";
+      const oppData = oppRes.status === "fulfilled" ? oppRes.value : null;
+
+      if (oppData?.opportunity) {
+        setOppState({
+          opportunity: oppData.opportunity,
+          stageName: oppData.stageName ?? "",
+          draft,
+        });
+        return;
+      }
+    }
+
+    // Fallback: custom reply modal (Meta, TikTok, or GHL with no opportunity)
+    setReplyItem(item);
+  }
+
   function handleSent(item: QueueItem) {
-    // Optimistically remove from strip
     setDismissedIds((prev) => new Set([...prev, item.id]));
     setReplyItem(null);
-    // Invalidate so the next poll reflects the real state
+    setOppState(null);
     queryClient.invalidateQueries({ queryKey: ["inbox-queue-dashboard"] });
   }
 
@@ -78,7 +119,7 @@ export function ConversationsStrip() {
                 <div key={item.id} className="shrink-0">
                   <ConversationTile
                     item={item}
-                    onReply={() => setReplyItem(item)}
+                    onReply={() => handleReply(item)}
                   />
                 </div>
               ))}
@@ -90,7 +131,7 @@ export function ConversationsStrip() {
                 <ConversationTile
                   key={item.id}
                   item={item}
-                  onReply={() => setReplyItem(item)}
+                  onReply={() => handleReply(item)}
                 />
               ))}
             </div>
@@ -98,6 +139,17 @@ export function ConversationsStrip() {
         )}
       </div>
 
+      {/* Opportunity card with pre-filled draft (GHL contacts with opportunity) */}
+      {oppState && (
+        <OpportunityModal
+          opportunity={oppState.opportunity}
+          stageName={oppState.stageName}
+          initialDraft={oppState.draft}
+          onClose={() => setOppState(null)}
+        />
+      )}
+
+      {/* Fallback: custom reply modal for Meta/TikTok or contacts without opportunity */}
       {replyItem && (
         <ReplyModal
           item={replyItem}

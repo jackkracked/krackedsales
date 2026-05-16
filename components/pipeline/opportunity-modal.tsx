@@ -325,10 +325,11 @@ function NotesTab({
 }
 
 /** Messages tab — fetches conversation thread by contactId */
-function MessagesTab({ contactId, stageName, opportunityId }: {
+function MessagesTab({ contactId, stageName, opportunityId, initialDraft }: {
   contactId: string;
   stageName: string;
   opportunityId: string;
+  initialDraft?: string;
 }) {
   const stageChanges = useStageHistoryStore((s) => s.changes);
 
@@ -515,6 +516,7 @@ function MessagesTab({ contactId, stageName, opportunityId }: {
         contactId={contactId}
         messages={messages}
         onSent={() => refetch()}
+        initialDraft={initialDraft}
       />
     </div>
   );
@@ -1092,6 +1094,7 @@ export function OpportunityModal({
               contactId={contactId}
               stageName={localStageName}
               opportunityId={opportunity.id}
+              initialDraft={initialDraft}
             />
           </div>
 

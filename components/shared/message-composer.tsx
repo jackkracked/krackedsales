@@ -38,6 +38,7 @@ interface MessageComposerProps {
   contactId: string;
   messages: MessageLike[];
   onSent?: () => void;
+  initialDraft?: string;
 }
 
 // ─── Helper functions ─────────────────────────────────────────────────────────
@@ -134,9 +135,10 @@ function MessageComposer({
   contactId,
   messages,
   onSent,
+  initialDraft,
 }: MessageComposerProps) {
   const [channel, setChannel] = useState<Channel>(() => detectChannel(messages));
-  const [smsDraft, setSmsDraft] = useState("");
+  const [smsDraft, setSmsDraft] = useState(initialDraft ?? "");
   const [fbDraft, setFbDraft] = useState("");
   const [subject, setSubject] = useState(() => {
     const last = getLastEmailSubject(messages);
