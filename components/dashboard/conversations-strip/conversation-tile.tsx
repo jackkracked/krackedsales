@@ -63,7 +63,7 @@ export function ConversationTile({ item, onReply }: ConversationTileProps) {
   return (
     <div
       className={cn(
-        "group relative w-[200px] flex flex-col rounded-[12px] border bg-card p-3.5 select-none",
+        "group relative h-[190px] w-[200px] flex flex-col rounded-[12px] border bg-card p-3.5 select-none",
         "transition-shadow duration-150 hover:shadow-md",
         urgency === "high" && "border-destructive/30 bg-destructive/[0.015]",
         urgency === "mid"  && "border-amber-400/40 bg-amber-50/20",
