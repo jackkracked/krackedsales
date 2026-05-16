@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { X, ExternalLink, Copy, Check, Send, Clock, CreditCard, Repeat, Download, Eye, Mail } from "lucide-react";
+import { X, ExternalLink, Copy, Check, Send, Clock, CreditCard, Repeat, Download, Eye, Mail, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils/cn";
 import { ProposalStatusBadge } from "./proposal-status-badge";
@@ -46,6 +46,9 @@ interface ProposalDetailSlideOverProps {
   proposal: Proposal;
   onClose: () => void;
   onUpdated: () => void;
+  onDeleted?: () => void;
+  isAdmin?: boolean;
+  initialSendStep?: "idle" | "confirm";
 }
 
 function fmtDate(d: string | null | undefined) {
@@ -116,11 +119,48 @@ function InstalmentBadge({ status }: { status: string }) {
   );
 }
 
-export function ProposalDetailSlideOver({ proposal, onClose, onUpdated }: ProposalDetailSlideOverProps) {
+export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDeleted, isAdmin, initialSendStep }: ProposalDetailSlideOverProps) {
   const [copied, setCopied] = useState(false);
-  const [sendStep, setSendStep] = useState<"idle" | "confirm">("idle");
+  const [sendStep, setSendStep] = useState<"idle" | "confirm">(initialSendStep ?? "idle");
   const [sendEmail, setSendEmail] = useState(proposal.contactEmail ?? "");
+  const [emailWarning, setEmailWarning] = useState<string | null>(null);
+  const [resendSuccess, setResendSuccess] = useState(false);
+  const [markPaidStep, setMarkPaidStep] = useState<"idle" | "confirm">("idle");
+  const [markPaidDate, setMarkPaidDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [deleteStep, setDeleteStep] = useState<"idle" | "confirm">("idle");
   const queryClient = useQueryClient();
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`/api/proposals/${proposal.id}`, { method: "DELETE" });
+      const json = await r.json();
+      if (!r.ok || json.error) throw new Error(json.error ?? "Failed to delete");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["proposals"] });
+      onDeleted?.();
+      onClose();
+    },
+  });
+
+  const markPaidMutation = useMutation({
+    mutationFn: async (paidAt: string) => {
+      const r = await fetch(`/api/proposals/${proposal.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "paid", paidAt: new Date(paidAt + "T12:00:00.000Z").toISOString() }),
+      });
+      const json = await r.json();
+      if (!r.ok || json.error) throw new Error(json.error ?? "Failed");
+      return json;
+    },
+    onSuccess: () => {
+      setMarkPaidStep("idle");
+      queryClient.invalidateQueries({ queryKey: ["proposals"] });
+      onUpdated();
+    },
+  });
 
   const sendMutation = useMutation({
     mutationFn: async (recipientEmail?: string) => {
@@ -133,10 +173,32 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated }: Propos
       if (!r.ok || json.error) throw new Error(json.error ?? "Failed to send");
       return json;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       setSendStep("idle");
+      if (data?.emailWarning) setEmailWarning(data.emailWarning);
       queryClient.invalidateQueries({ queryKey: ["proposals"] });
       onUpdated();
+    },
+  });
+
+  const [resendStep, setResendStep] = useState<"idle" | "confirm">("idle");
+  const [resendEmail, setResendEmail] = useState(proposal.contactEmail ?? "");
+
+  const resendEmailMutation = useMutation({
+    mutationFn: async (email: string) => {
+      const r = await fetch(`/api/proposals/${proposal.id}/resend-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipientEmail: email || undefined }),
+      });
+      const json = await r.json();
+      if (!r.ok || json.error) throw new Error(json.error ?? "Failed to resend");
+      return json;
+    },
+    onSuccess: () => {
+      setResendStep("idle");
+      setResendSuccess(true);
+      setTimeout(() => setResendSuccess(false), 3000);
     },
   });
 
@@ -473,9 +535,64 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated }: Propos
           )}
 
           {proposal.status === "sent" && (
-            <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-              <Clock className="w-3.5 h-3.5" />
-              Waiting for client signature
+            <div className="space-y-2">
+              <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                <Clock className="w-3.5 h-3.5" />
+                Waiting for client signature
+              </div>
+              {emailWarning && (
+                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-[6px] px-3 py-2 leading-snug">
+                  ⚠️ {emailWarning}
+                </p>
+              )}
+              {resendSuccess ? (
+                <p className="text-center text-[11px] text-green-600 font-medium py-1">Email sent ✓</p>
+              ) : resendStep === "idle" ? (
+                <button
+                  onClick={() => { setResendEmail(proposal.contactEmail ?? ""); setResendStep("confirm"); }}
+                  className="w-full flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  Resend Email to Client
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-[10px] text-muted-foreground px-0.5">
+                    Originally sent to: <span className="font-medium text-foreground">{proposal.contactEmail ?? "—"}</span>
+                  </p>
+                  <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border border-border rounded-[7px]">
+                    <Mail className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <input
+                      type="email"
+                      value={resendEmail}
+                      onChange={(e) => setResendEmail(e.target.value)}
+                      placeholder="Send to address"
+                      className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
+                    />
+                  </div>
+                  {resendEmailMutation.isError && (
+                    <p className="text-[11px] text-red-600 px-1">
+                      {(resendEmailMutation.error as Error)?.message}
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { setResendStep("idle"); resendEmailMutation.reset(); }}
+                      className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => resendEmailMutation.mutate(resendEmail.trim())}
+                      disabled={resendEmailMutation.isPending || !resendEmail.trim()}
+                      className="flex-[2] flex items-center justify-center gap-2 px-3 py-2 bg-primary text-primary-foreground text-xs font-medium rounded-[7px] hover:bg-primary/90 transition-colors disabled:opacity-60"
+                    >
+                      <Send className="w-3 h-3" />
+                      {resendEmailMutation.isPending ? "Sending…" : "Send"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -483,6 +600,102 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated }: Propos
             <div className="flex items-center justify-center gap-1.5 text-xs text-green-600 font-medium">
               <Check className="w-3.5 h-3.5" />
               {fmtDate(proposal.paidAt) ? `Paid on ${fmtDate(proposal.paidAt)}` : "Paid in full"}
+            </div>
+          )}
+
+          {/* Mark as Paid — manual backfill for existing clients */}
+          {!["paid", "void"].includes(proposal.status) && (
+            <div className="space-y-2">
+              <div
+                className="overflow-hidden transition-all duration-300 ease-out"
+                style={{ maxHeight: markPaidStep === "idle" ? "52px" : "0px", opacity: markPaidStep === "idle" ? 1 : 0 }}
+              >
+                <button
+                  onClick={() => setMarkPaidStep("confirm")}
+                  className="w-full flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-[7px] hover:bg-emerald-100 transition-colors"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  Mark as Paid
+                </button>
+              </div>
+
+              <div
+                className="overflow-hidden transition-all duration-300 ease-out"
+                style={{ maxHeight: markPaidStep === "confirm" ? "140px" : "0px", opacity: markPaidStep === "confirm" ? 1 : 0 }}
+              >
+                <div className="space-y-2 pt-0.5">
+                  <p className="text-[10px] text-muted-foreground px-0.5">Set the payment date:</p>
+                  <input
+                    type="date"
+                    value={markPaidDate}
+                    onChange={(e) => setMarkPaidDate(e.target.value)}
+                    className="w-full h-8 rounded-[7px] border border-border bg-card px-2.5 text-xs text-foreground tabular-nums focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  {markPaidMutation.isError && (
+                    <p className="text-[11px] text-red-600 px-1">
+                      {(markPaidMutation.error as Error)?.message ?? "Failed"}
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { setMarkPaidStep("idle"); markPaidMutation.reset(); }}
+                      className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => markPaidMutation.mutate(markPaidDate)}
+                      disabled={markPaidMutation.isPending || !markPaidDate}
+                      className="flex-[2] flex items-center justify-center gap-2 px-3 py-2 bg-emerald-600 text-white text-xs font-medium rounded-[7px] hover:bg-emerald-700 transition-colors disabled:opacity-60"
+                    >
+                      <Check className="w-3 h-3" />
+                      {markPaidMutation.isPending ? "Saving…" : "Confirm Payment"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Delete — admin only */}
+          {isAdmin && (
+            <div className="pt-1">
+              {deleteStep === "idle" ? (
+                <button
+                  onClick={() => setDeleteStep("confirm")}
+                  className="w-full flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium text-destructive/70 border border-destructive/20 rounded-[7px] hover:border-destructive/50 hover:text-destructive transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete Proposal
+                </button>
+              ) : (
+                <div className="space-y-2 p-3 bg-destructive/5 border border-destructive/20 rounded-[8px]">
+                  <p className="text-xs text-destructive font-medium text-center">
+                    Permanently delete this proposal?
+                  </p>
+                  {deleteMutation.isError && (
+                    <p className="text-[11px] text-destructive px-1">
+                      {(deleteMutation.error as Error)?.message}
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { setDeleteStep("idle"); deleteMutation.reset(); }}
+                      className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => deleteMutation.mutate()}
+                      disabled={deleteMutation.isPending}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-destructive text-white text-xs font-medium rounded-[7px] hover:bg-destructive/90 transition-colors disabled:opacity-60"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      {deleteMutation.isPending ? "Deleting…" : "Delete"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

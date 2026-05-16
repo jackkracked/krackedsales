@@ -36,6 +36,19 @@ export function PipelineClient() {
 
   const pipeline = pipelines.find((p) => p.id === selectedPipelineId) ?? defaultPipeline;
 
+  // When navigated here with ?contact=, find which pipeline that contact belongs to
+  // and pre-select it so the kanban board can auto-open the right card.
+  useEffect(() => {
+    if (!autoOpenContactId || pipelines.length === 0) return;
+    fetch(`/api/ghl/contacts/${autoOpenContactId}/opportunity`)
+      .then((r) => r.json())
+      .then((data: { opportunity?: { pipelineId?: string } | null }) => {
+        const pipelineId = data?.opportunity?.pipelineId;
+        if (pipelineId) setSelectedPipelineId(pipelineId);
+      })
+      .catch(() => { /* stay on default pipeline */ });
+  }, [autoOpenContactId, pipelines.length]);
+
   const { data: opportunitiesData, isLoading: oppsLoading, isFetching } =
     useOpportunities(pipeline?.id);
 
@@ -253,8 +266,8 @@ export function PipelineClient() {
       {/* Add Lead Modal */}
       {showAddLead && pipeline && (
         <AddLeadModal
-          pipelineId={pipeline.id}
-          firstStageId={pipeline.stages[0]?.id ?? ""}
+          pipelines={pipelines}
+          defaultPipelineId={pipeline.id}
           onClose={() => setShowAddLead(false)}
         />
       )}

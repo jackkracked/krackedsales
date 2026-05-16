@@ -44,3 +44,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "Failed to update proposal" }, { status: 500 });
   }
 }
+
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const user = await getSessionUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (user.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    const { id } = await params;
+
+    // proposalInstalments cascade-deletes automatically (FK onDelete: cascade)
+    await db().delete(proposals).where(eq(proposals.id, id));
+
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("[DELETE /api/proposals/[id]]", err);
+    return NextResponse.json({ error: "Failed to delete proposal" }, { status: 500 });
+  }
+}

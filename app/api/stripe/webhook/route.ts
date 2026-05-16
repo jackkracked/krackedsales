@@ -91,18 +91,30 @@ export async function POST(req: NextRequest) {
   }
 
   const sig = req.headers.get("stripe-signature") ?? "";
-  const secret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
 
-  if (!secret) {
-    console.error("[stripe/webhook] STRIPE_WEBHOOK_SECRET not set");
+  // Support two signing secrets: snapshot payloads + thin payloads
+  const secrets = [
+    process.env.STRIPE_WEBHOOK_SECRET,
+    process.env.STRIPE_WEBHOOK_SECRET_THIN,
+  ].filter((s): s is string => Boolean(s));
+
+  if (secrets.length === 0) {
+    console.error("[stripe/webhook] No webhook secrets configured");
     return NextResponse.json({ error: "Webhook not configured" }, { status: 500 });
   }
 
-  let event: Stripe.Event;
-  try {
-    event = stripe().webhooks.constructEvent(rawBody, sig, secret);
-  } catch (err) {
-    console.error("[stripe/webhook] Signature verification failed:", err);
+  let event: Stripe.Event | null = null;
+  for (const secret of secrets) {
+    try {
+      event = stripe().webhooks.constructEvent(rawBody, sig, secret);
+      break;
+    } catch {
+      // try next secret
+    }
+  }
+
+  if (!event) {
+    console.error("[stripe/webhook] Signature verification failed with all configured secrets");
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
@@ -220,6 +232,20 @@ export async function POST(req: NextRequest) {
           .update(proposals)
           .set({ status: "void", updatedAt: new Date() })
           .where(eq(proposals.stripeInvoiceId, stripeInvoiceId));
+        break;
+      }
+
+      case "customer.subscription.updated": {
+        // When a client cancels, Stripe sets cancel_at_period_end = true.
+        // We record cancelledAt immediately so MRR drops on cancellation day,
+        // not at the end of the billing cycle.
+        const sub = event.data.object as Stripe.Subscription;
+        if (sub.cancel_at_period_end) {
+          await db()
+            .update(proposals)
+            .set({ cancelledAt: new Date(), updatedAt: new Date() })
+            .where(eq(proposals.stripeSubscriptionId, sub.id));
+        }
         break;
       }
 

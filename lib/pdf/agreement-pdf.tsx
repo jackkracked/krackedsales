@@ -1,4 +1,5 @@
 import React from "react";
+import path from "path";
 import {
   Document,
   Page,
@@ -8,6 +9,8 @@ import {
   StyleSheet,
 } from "@react-pdf/renderer";
 import { format } from "date-fns";
+
+const LOGO_PATH = path.join(process.cwd(), "public", "kracked-logo.png");
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,8 +54,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 56,
   },
   logoWrap: { alignItems: "center", marginBottom: 20 },
-  logoMain: { fontFamily: "Helvetica-Bold", fontSize: 22, letterSpacing: -0.5 },
-  logoSub: { fontFamily: "Helvetica-Bold", fontSize: 7, letterSpacing: 3, marginTop: 2 },
+  logoImage: { width: 180, height: 48, objectFit: "contain" },
   divider: { height: 8, backgroundColor: "#1a1a1a", borderRadius: 1, marginVertical: 14 },
   docTitle: { fontFamily: "Helvetica-Bold", fontSize: 9, marginBottom: 6 },
   sectionTitle: { fontFamily: "Helvetica-Bold", fontSize: 9, marginBottom: 4, marginTop: 8 },
@@ -372,8 +374,7 @@ export function AgreementPdf({ proposal }: { proposal: ProposalForPdf }) {
       <Page size="LETTER" style={s.page}>
         {/* Logo */}
         <View style={s.logoWrap}>
-          <Text style={s.logoMain}>Kracked</Text>
-          <Text style={s.logoSub}>RETENTION</Text>
+          <Image src={LOGO_PATH} style={s.logoImage} />
         </View>
 
         <Text style={s.docTitle}>Service Agreement and Statement of Work</Text>

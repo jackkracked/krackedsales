@@ -155,6 +155,7 @@ export async function GET(req: NextRequest) {
       const listId = demoListId();
       const sinceMs = start.getTime();
       const untilMs = end.getTime();
+      // ── Period-filtered tasks for demosCompleted count ──────────────────
       let page = 0;
       const allTasks: Array<{ id: string; name: string; parent: string | null; status: { status: string; color: string }; date_created: string; url: string }> = [];
       while (true) {
@@ -170,9 +171,18 @@ export async function GET(req: NextRequest) {
         (t) => !t.parent && t.name.toLowerCase().includes(": email demo")
       );
       demosCompleted = demoTasks.length;
-      // Build the recent demos list (most recent first, max 20)
-      for (const t of demoTasks.slice(0, 20)) {
-        // Strip the ": Email Demo" suffix to get the client name
+
+      // ── Recent demos — fetch latest 20 across all time, newest first ──────
+      const recentRes = await clickup.get<{ tasks: typeof allTasks }>(
+        `/list/${listId}/task?include_closed=true&subtasks=false&order_by=created&reverse=true&page=0`
+      );
+      const recentDemoTasks = (recentRes.tasks ?? [])
+        .filter((t) => !t.parent && t.name.toLowerCase().includes(": email demo"))
+        // Guarantee newest-first regardless of API sort behaviour
+        .sort((a, b) => parseInt(b.date_created, 10) - parseInt(a.date_created, 10))
+        .slice(0, 20);
+
+      for (const t of recentDemoTasks) {
         const clientName = t.name.replace(/:\s*email demo\s*$/i, "").trim();
         recentDemos.push({
           id: t.id,

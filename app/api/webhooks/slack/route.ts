@@ -287,13 +287,36 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<unk
         const stageFilter = args.stageName as string | undefined;
         const sinceFilter = args.since as string | undefined;
         const untilFilter = args.until as string | undefined;
-        let oppsUrl = `/api/ghl/opportunities?pipelineId=${encodeURIComponent(pipelineId)}`;
-        if (sinceFilter) oppsUrl += `&since=${encodeURIComponent(sinceFilter)}`;
-        if (untilFilter) oppsUrl += `&until=${encodeURIComponent(untilFilter)}`;
+
+        // When a date range is requested, use pipeline_stage_events to count
+        // leads by when they *entered* the New Lead stage — not by createdAt.
+        if (sinceFilter || untilFilter) {
+          let entriesUrl = `/api/ghl/opportunities/new-lead-entries?pipelineId=${encodeURIComponent(pipelineId)}`;
+          if (sinceFilter) entriesUrl += `&since=${encodeURIComponent(sinceFilter)}`;
+          if (untilFilter) entriesUrl += `&until=${encodeURIComponent(untilFilter)}`;
+          const data = await get(entriesUrl) as { total?: number; leads?: Array<{ name?: string; contact?: string | null; currentStage?: string; value?: number | null; enteredNewLeadAt?: string }> };
+          if ("error" in data) return data;
+          const leads = data.leads ?? [];
+          const byStage: Record<string, number> = {};
+          for (const l of leads) {
+            const s = l.currentStage ?? "Unknown";
+            byStage[s] = (byStage[s] ?? 0) + 1;
+          }
+          const filtered = stageFilter
+            ? leads.filter(l => l.currentStage?.toLowerCase().includes(stageFilter.toLowerCase()))
+            : leads;
+          return {
+            total: data.total ?? leads.length,
+            byStage,
+            leads: filtered.slice(0, 20).map(l => ({ name: l.name, contact: l.contact, stage: l.currentStage, enteredNewLeadAt: l.enteredNewLeadAt, value: l.value })),
+          };
+        }
+
+        // No date filter — return current pipeline snapshot grouped by stage
+        const oppsUrl = `/api/ghl/opportunities?pipelineId=${encodeURIComponent(pipelineId)}`;
         const data = await get(oppsUrl) as { opportunities?: Array<{ name?: string; pipelineStageId_name?: string; status?: string; monetaryValue?: number; contactName?: string }> };
         if ("error" in data) return data;
         const opps = data.opportunities ?? [];
-        // Group by stage
         const byStage: Record<string, number> = {};
         for (const o of opps) {
           const s = o.pipelineStageId_name ?? "Unknown";
@@ -486,7 +509,7 @@ async function processMessage(
     model: "gemini-2.5-flash",
     systemInstruction: buildSystemPrompt(),
     tools: [{ functionDeclarations: TOOLS }],
-    generationConfig: { temperature: 0.7 },
+    generationConfig: { temperature: 0 },
   });
 
   // Reuse preloaded history (fetched at gate check) to avoid a second Slack API call

@@ -20,6 +20,7 @@ import { cleanUrl, parseQualificationNote, isQualificationNote } from "@/lib/uti
 import { useStageHistoryStore, findStageChange } from "@/store/stage-history-store";
 import type { GHLOpportunity, GHLMessage } from "@/lib/ghl/types";
 import { MessageBody } from "@/components/shared/message-body";
+import { ActivityTab } from "@/components/activity/activity-tab";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,7 +32,7 @@ interface GHLNote {
   createdAt?: string;
 }
 
-type Tab = "overview" | "qualification" | "notes";
+type Tab = "overview" | "qualification" | "notes" | "activity";
 
 const STATUS_STYLES: Record<string, string> = {
   open: "bg-primary/10 text-primary",
@@ -638,7 +639,12 @@ export function OpportunityModal({
       await fetch(`/api/ghl/opportunities/${opportunity.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pipelineStageId: stage.id }),
+        body: JSON.stringify({
+        pipelineStageId: stage.id,
+        stageName: stage.name,
+        fromStageName: localStageName,
+        opportunityName: name,
+      }),
       });
       // Delay refetch — GHL needs a moment to propagate the write before we read back
       setTimeout(() => {
@@ -694,6 +700,7 @@ export function OpportunityModal({
     { key: "overview", label: "Overview", icon: User },
     { key: "qualification", label: "Qualification", icon: FileText },
     { key: "notes", label: "Notes", icon: MessageSquare },
+    { key: "activity", label: "Activity", icon: Activity },
   ];
 
   return (
@@ -1043,6 +1050,10 @@ export function OpportunityModal({
 
           {activeTab === "notes" && (
             <NotesTab contactId={contactId} notes={notes} isLoading={isLoading} />
+          )}
+
+          {activeTab === "activity" && (
+            <ActivityTab entityType="opportunity" entityId={opportunity.id} />
           )}
 
             </div>

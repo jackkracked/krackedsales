@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ghl } from "@/lib/ghl/client";
 import type { GHLMessage } from "@/lib/ghl/types";
+import { getSessionUser } from "@/lib/auth/session";
+import { logActivity } from "@/lib/activity/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +53,7 @@ export async function POST(
   { params }: { params: Promise<{ conversationId: string }> }
 ) {
   const { conversationId } = await params;
+  const sessionUser = await getSessionUser().catch(() => null);
   const { message, type = "TYPE_SMS", contactId, subject, html, cc, bcc } = await req.json();
 
   if (!message?.trim() && !html?.trim()) {
@@ -83,6 +86,18 @@ export async function POST(
     }
 
     const data = await ghl.post(`/conversations/messages`, payload);
+
+    logActivity({
+      userId: sessionUser?.id ?? "unknown",
+      userName: sessionUser?.name ?? "Unknown",
+      userEmail: sessionUser?.email ?? "unknown@unknown.com",
+      action: "message.sent",
+      entityType: "contact",
+      entityId: contactId,
+      entityName: undefined,
+      metadata: { channel: sendType, conversation_id: conversationId },
+    });
+
     return NextResponse.json(data);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

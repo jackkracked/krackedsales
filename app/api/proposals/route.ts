@@ -1,17 +1,51 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { proposals, proposalInstalments } from "@/lib/db/schema";
+import { proposals, proposalInstalments, users } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
 import crypto from "crypto";
+import { logActivity } from "@/lib/activity/logger";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
     const rows = await db()
-      .select()
+      .select({
+        id: proposals.id,
+        token: proposals.token,
+        title: proposals.title,
+        type: proposals.type,
+        ghlContactId: proposals.ghlContactId,
+        contactName: proposals.contactName,
+        contactEmail: proposals.contactEmail,
+        opportunityId: proposals.opportunityId,
+        createdBy: proposals.createdBy,
+        createdByName: users.name,
+        status: proposals.status,
+        totalAmount: proposals.totalAmount,
+        currency: proposals.currency,
+        serviceDescription: proposals.serviceDescription,
+        notes: proposals.notes,
+        paymentStructure: proposals.paymentStructure,
+        billingInterval: proposals.billingInterval,
+        billingIntervalCount: proposals.billingIntervalCount,
+        startDate: proposals.startDate,
+        endDate: proposals.endDate,
+        expiresAt: proposals.expiresAt,
+        stripeInvoiceId: proposals.stripeInvoiceId,
+        stripeSubscriptionId: proposals.stripeSubscriptionId,
+        stripeCustomerId: proposals.stripeCustomerId,
+        stripeHostedUrl: proposals.stripeHostedUrl,
+        signedAt: proposals.signedAt,
+        sentAt: proposals.sentAt,
+        paidAt: proposals.paidAt,
+        cancelledAt: proposals.cancelledAt,
+        createdAt: proposals.createdAt,
+        updatedAt: proposals.updatedAt,
+      })
       .from(proposals)
+      .leftJoin(users, eq(proposals.createdBy, users.id))
       .orderBy(desc(proposals.createdAt));
 
     const withInstalments = await Promise.all(
@@ -104,6 +138,17 @@ export async function POST(req: NextRequest) {
         });
       }
     }
+
+    logActivity({
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      action: "proposal.created",
+      entityType: "proposal",
+      entityId: proposal.id,
+      entityName: contactName,
+      metadata: { total_amount: totalAmount, currency, type, opportunity_id: opportunityId },
+    });
 
     return NextResponse.json({ proposal });
   } catch (err) {

@@ -36,7 +36,21 @@ export const users = pgTable("users", {
   role: text("role").notNull().default("admin"), // "admin" | "rep"
   isActive: boolean("is_active").notNull().default(true),
   ghlUserId: text("ghl_user_id"), // links to GHL user for pipeline/calendar filtering
+  commissionPct: doublePrecision("commission_pct").notNull().default(0), // % of proposal value earned as commission
   createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/**
+ * Global commission settings — single row, upserted on save.
+ * payoutTiming controls when a rep's commission is earned:
+ *   "full_paid"       — once the full proposal amount is paid
+ *   "first_instalment" — full commission on the first instalment payment
+ *   "split"           — commission split pro-rata across each instalment paid
+ */
+export const commissionSettings = pgTable("commission_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  payoutTiming: text("payout_timing").notNull().default("full_paid"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 /**
@@ -129,9 +143,13 @@ export const tasks = pgTable("tasks", {
   title: text("title").notNull(),
   notes: text("notes"),
   dueDate: timestamp("due_date"),
-  contactId: text("contact_id"),       // GHL contact ID (optional)
-  contactName: text("contact_name"),   // display name
+  contactId: text("contact_id"),           // GHL contact ID (optional)
+  contactName: text("contact_name"),       // display name
   opportunityId: text("opportunity_id"),
+  opportunityName: text("opportunity_name"), // denormalized for display
+  userId: uuid("user_id").references(() => users.id), // nullable for backward compat
+  userName: text("user_name"),             // denormalized for display
+  priority: text("priority").notNull().default("medium"), // "low" | "medium" | "high"
   completed: boolean("completed").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -607,6 +625,23 @@ export const bookingAutomationRules = pgTable("booking_automation_rules", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+/**
+ * Call disposition records — reps must set an outcome for every booked
+ * GHL calendar event before it clears from their dashboard.
+ * Outcomes are stored here; notes are also pushed to GHL contact notes.
+ */
+export const callDispositions = pgTable("call_dispositions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  calendarEventId: text("calendar_event_id").notNull().unique(), // GHL event ID, dedup key
+  contactId: text("contact_id"),      // GHL contact ID (used to push notes)
+  contactName: text("contact_name"),  // snapshot for display/reporting
+  repEmail: text("rep_email"),        // which rep owned this event
+  outcome: text("outcome").notNull(), // "no_show" | "closed" | "preparing_proposal" | "rebooked" | "not_interested" | "follow_up"
+  notes: text("notes"),              // saved locally + pushed to GHL notes if provided
+  dispositionedAt: timestamp("dispositioned_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 /** Full-text message index — powers inbox search across all channels */
 export const messageIndex = pgTable("message_index", {
   id: text("id").primaryKey(), // GHL/Meta message ID
@@ -618,4 +653,21 @@ export const messageIndex = pgTable("message_index", {
   direction: text("direction"), // 'inbound' | 'outbound'
   dateAdded: timestamp("date_added"),
   indexedAt: timestamp("indexed_at").defaultNow(),
+});
+
+/**
+ * Activity event log — every meaningful user action in the app.
+ * Used for per-entity timelines, global activity feed, and future AI/analytics.
+ */
+export const activityEvents = pgTable("activity_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id").notNull(),
+  userName: text("user_name").notNull(),
+  userEmail: text("user_email").notNull(),
+  action: text("action").notNull(),
+  entityType: text("entity_type").notNull(),
+  entityId: text("entity_id").notNull(),
+  entityName: text("entity_name"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });

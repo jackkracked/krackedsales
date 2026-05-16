@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  UserPlus, Users, X, ChevronRight, Eye, EyeOff, RefreshCw, CheckCircle2, KeyRound,
+  UserPlus, Users, X, ChevronRight, Eye, EyeOff, RefreshCw, CheckCircle2, KeyRound, DollarSign,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { FEATURES, FEATURE_LABELS, type FeatureKey } from "@/lib/auth/permission-constants";
@@ -17,6 +17,7 @@ interface TeamUser {
   role: string;
   isActive: boolean;
   ghlUserId: string | null;
+  commissionPct: number;
   createdAt: string;
   targets: {
     dealsPerMonth: number;
@@ -26,6 +27,8 @@ interface TeamUser {
   permissionOverrides: Record<string, boolean>;
   rolePreset: Record<string, boolean>;
 }
+
+type PayoutTiming = "full_paid" | "first_instalment" | "split";
 
 // ─── Small UI primitives ───────────────────────────────────────────────────────
 
@@ -157,6 +160,7 @@ function SlideOver({ user, onClose }: SlideOverProps) {
   const [role, setRole] = useState(user.role);
   const [isActive, setIsActive] = useState(user.isActive);
   const [ghlUserId, setGhlUserId] = useState(user.ghlUserId ?? "");
+  const [commissionPct, setCommissionPct] = useState(user.commissionPct ?? 0);
   const [dealsPerMonth, setDealsPerMonth] = useState(user.targets?.dealsPerMonth ?? 5);
   const [callsPerDay, setCallsPerDay] = useState(user.targets?.callsPerDay ?? 15);
   const [revenueTarget, setRevenueTarget] = useState(user.targets?.revenueTarget ?? 0);
@@ -204,6 +208,7 @@ function SlideOver({ user, onClose }: SlideOverProps) {
       role,
       isActive,
       ghlUserId,
+      commissionPct,
       targets: { dealsPerMonth, callsPerDay, revenueTarget },
       permissionOverrides: overrides,
     });
@@ -373,6 +378,41 @@ function SlideOver({ user, onClose }: SlideOverProps) {
               </div>
             </section>
           )}
+
+          {/* Commission */}
+          <section>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+              Commission
+            </p>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground">Commission percentage (%)</label>
+              <div className="relative">
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.5}
+                  value={commissionPct === 0 ? "" : commissionPct}
+                  placeholder="0"
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    if (raw === "") { setCommissionPct(0); return; }
+                    const num = parseFloat(raw);
+                    if (!isNaN(num)) setCommissionPct(Math.min(100, Math.max(0, num)));
+                  }}
+                  className={cn(
+                    "w-full rounded-[6px] border border-border bg-background px-3 py-2 pr-8",
+                    "text-sm text-foreground tabular-nums",
+                    "focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors"
+                  )}
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Applied to the total proposal value when commission is earned. Payout timing is set globally in Team settings.
+              </p>
+            </div>
+          </section>
 
           {/* Permission overrides */}
           <section>
@@ -553,6 +593,100 @@ function AddUserForm({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
+// ─── Commission payout timing block ───────────────────────────────────────────
+
+const PAYOUT_OPTIONS: { value: PayoutTiming; label: string; description: string }[] = [
+  {
+    value: "full_paid",
+    label: "Once full amount is paid",
+    description: "Commission is earned when the client pays the final instalment or full invoice.",
+  },
+  {
+    value: "first_instalment",
+    label: "Full commission on first payment",
+    description: "The rep earns their full commission as soon as the first payment is received.",
+  },
+  {
+    value: "split",
+    label: "Split across instalments",
+    description: "Commission is earned proportionally as each instalment comes in.",
+  },
+];
+
+function CommissionPayoutSettings() {
+  const queryClient = useQueryClient();
+  const [saving, setSaving] = useState(false);
+
+  const { data } = useQuery<{ payoutTiming: PayoutTiming }>({
+    queryKey: ["commission-settings"],
+    queryFn: () => fetch("/api/settings/commission").then((r) => r.json()),
+    staleTime: 60 * 1000,
+  });
+
+  const [selected, setSelected] = useState<PayoutTiming | null>(null);
+  const timing = selected ?? data?.payoutTiming ?? "full_paid";
+
+  async function handleSelect(value: PayoutTiming) {
+    setSelected(value);
+    setSaving(true);
+    await fetch("/api/settings/commission", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ payoutTiming: value }),
+    });
+    queryClient.invalidateQueries({ queryKey: ["commission-settings"] });
+    setSaving(false);
+  }
+
+  return (
+    <div className="bg-card border border-border rounded-[10px] overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <div className="flex items-center gap-2">
+          <DollarSign className="w-4 h-4 text-muted-foreground" />
+          <h2
+            className="text-sm font-semibold text-foreground"
+            style={{ fontFamily: "var(--font-heading)" }}
+          >
+            Commission Payout Timing
+          </h2>
+        </div>
+        {saving && <RefreshCw className="w-3.5 h-3.5 text-muted-foreground animate-spin" />}
+      </div>
+      <div className="p-4 space-y-2">
+        {PAYOUT_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => handleSelect(opt.value)}
+            className={cn(
+              "w-full flex items-start gap-3 px-4 py-3 rounded-[8px] border text-left transition-colors",
+              timing === opt.value
+                ? "border-primary bg-primary/5"
+                : "border-border bg-background hover:border-primary/40"
+            )}
+          >
+            {/* Radio circle */}
+            <span
+              className={cn(
+                "mt-0.5 w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center transition-colors",
+                timing === opt.value ? "border-primary" : "border-muted-foreground/40"
+              )}
+            >
+              {timing === opt.value && (
+                <span className="w-2 h-2 rounded-full bg-primary" />
+              )}
+            </span>
+            <div>
+              <p className="text-sm font-medium text-foreground">{opt.label}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{opt.description}</p>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function TeamSettings() {
@@ -633,6 +767,9 @@ export function TeamSettings() {
 
       {/* Add user form — shown inline when triggered */}
       {showAddForm && <AddUserForm onSuccess={() => setShowAddForm(false)} />}
+
+      {/* Commission payout timing — global setting */}
+      <CommissionPayoutSettings />
 
       {/* Slide-over for editing a user */}
       {selectedUser && (

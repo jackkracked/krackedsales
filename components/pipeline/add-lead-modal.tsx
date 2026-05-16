@@ -2,25 +2,49 @@
 
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { X, Plus } from "lucide-react";
+import { X } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
-const SOURCES = ["IG Comment", "TikTok Comment", "FB Comment", "Lead Form", "Other"];
+const SOURCES = [
+  "Kracked IG DM's",
+  "Kracked Messenger DM's",
+  "Taylor's TikTok DM's",
+  "Taylor's TikTok Funnel",
+  "Main Website Funnel",
+  "Free Demo Ads Funnel",
+  "Free Audit Ads Funnel",
+  "Aaron's Youtube",
+];
+
+interface Pipeline {
+  id: string;
+  name: string;
+  stages: Array<{ id: string; name: string }>;
+}
 
 interface AddLeadModalProps {
-  pipelineId: string;
-  firstStageId: string;
+  pipelines: Pipeline[];
+  defaultPipelineId: string;
   onClose: () => void;
 }
 
-export function AddLeadModal({ pipelineId, firstStageId, onClose }: AddLeadModalProps) {
+export function AddLeadModal({ pipelines, defaultPipelineId, onClose }: AddLeadModalProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [source, setSource] = useState("IG Comment");
+  const [website, setWebsite] = useState("");
+  const [source, setSource] = useState("Kracked IG DM's");
+  const [selectedPipelineId, setSelectedPipelineId] = useState(defaultPipelineId);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const queryClient = useQueryClient();
+
+  const selectedPipeline = pipelines.find((p) => p.id === selectedPipelineId) ?? pipelines[0];
+  const firstStageId = selectedPipeline?.stages[0]?.id ?? "";
+
+  function handlePipelineChange(id: string) {
+    setSelectedPipelineId(id);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -35,19 +59,22 @@ export function AddLeadModal({ pipelineId, firstStageId, onClose }: AddLeadModal
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
-          pipelineId,
+          email: email || undefined,
+          phone: phone || undefined,
+          website: website || undefined,
+          source,
+          pipelineId: selectedPipeline?.id,
           pipelineStageId: firstStageId,
-          contact: { name, email: email || undefined, phone: phone || undefined },
-          customFields: [{ id: "source", value: source }],
         }),
       });
 
-      if (!res.ok) throw new Error("Failed to create lead");
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to create lead");
 
       queryClient.invalidateQueries({ queryKey: ["opportunities"] });
       onClose();
-    } catch {
-      setError("Failed to add lead. Check your GHL connection.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add lead.");
     } finally {
       setIsSubmitting(false);
     }
@@ -107,10 +134,38 @@ export function AddLeadModal({ pipelineId, firstStageId, onClose }: AddLeadModal
               type="tel"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              placeholder="+44 7700 900000"
+              placeholder="+1 (555) 000-0000"
               className="w-full px-3 py-2 text-sm border border-border rounded-[7px] bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
             />
           </div>
+
+          {/* Website */}
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Website URL</label>
+            <input
+              type="url"
+              value={website}
+              onChange={(e) => setWebsite(e.target.value)}
+              placeholder="https://example.com"
+              className="w-full px-3 py-2 text-sm border border-border rounded-[7px] bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
+            />
+          </div>
+
+          {/* Pipeline */}
+          {pipelines.length > 1 && (
+            <div>
+              <label className="block text-xs font-medium text-foreground mb-1">Pipeline</label>
+              <select
+                value={selectedPipelineId}
+                onChange={(e) => handlePipelineChange(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-border rounded-[7px] bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
+              >
+                {pipelines.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Source */}
           <div>

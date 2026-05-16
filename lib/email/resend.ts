@@ -1,6 +1,6 @@
 import { Resend } from "resend";
 
-const FROM = "Kracked Retention <admin@krackedretention.com>";
+const FROM = "Kracked Retention <onboarding@resend.dev>";
 const GAGE = "gage@krackedretention.com";
 
 function client() {
@@ -51,10 +51,9 @@ export async function sendProposalLinkEmail(proposal: ProposalEmailData & {
     return;
   }
 
-  await resend.emails.send({
+  const { error } = await resend.emails.send({
     from: FROM,
     to,
-    cc: [GAGE],
     subject: `Your Proposal from Kracked Retention — ${proposal.title}`,
     html: `
       <div style="font-family: Helvetica, Arial, sans-serif; font-size: 14px; color: #1a1a1a; max-width: 600px; margin: 0 auto;">
@@ -97,6 +96,7 @@ export async function sendProposalLinkEmail(proposal: ProposalEmailData & {
       </div>
     `,
   });
+  if (error) throw new Error(`Resend rejected proposal link email: ${error.message}`);
 }
 
 // ─── Signed agreement email ───────────────────────────────────────────────────
@@ -117,7 +117,7 @@ export async function sendSignedAgreementEmail(
   const to: string[] = [GAGE];
   if (proposal.contactEmail) to.push(proposal.contactEmail);
 
-  await resend.emails.send({
+  const { error: signedError } = await resend.emails.send({
     from: FROM,
     to,
     subject: `Signed Agreement: ${proposal.title}`,
@@ -155,6 +155,7 @@ export async function sendSignedAgreementEmail(
       },
     ],
   });
+  if (signedError) throw new Error(`Resend rejected signed agreement email: ${signedError.message}`);
 }
 
 // ─── First payment receipt email ──────────────────────────────────────────────
@@ -175,7 +176,7 @@ export async function sendPaymentReceiptEmail(
   const to: string[] = [GAGE];
   if (proposal.contactEmail) to.push(proposal.contactEmail);
 
-  await resend.emails.send({
+  const { error: receiptError } = await resend.emails.send({
     from: FROM,
     to,
     subject: `Payment Received: ${proposal.title}`,
@@ -212,4 +213,5 @@ export async function sendPaymentReceiptEmail(
       },
     ],
   });
+  if (receiptError) throw new Error(`Resend rejected payment receipt email: ${receiptError.message}`);
 }

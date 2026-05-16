@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
 import { hasStripe, stripe } from "@/lib/stripe/client";
 import { sendProposalLinkEmail } from "@/lib/email/resend";
+import { logActivity } from "@/lib/activity/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -129,18 +130,36 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       })
       .where(eq(proposals.id, id));
 
-    // Fire-and-forget: email the proposal link to the client
-    sendProposalLinkEmail({
-      contactName: proposal.contactName,
-      contactEmail: effectiveEmail,
-      title: proposal.title,
-      totalAmount: proposal.totalAmount,
-      currency: proposal.currency,
-      token: proposal.token,
-      type: proposal.type,
-    }).catch((e) => console.error("[send] Proposal link email failed:", e));
+    logActivity({
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      action: "proposal.sent",
+      entityType: "proposal",
+      entityId: proposal.id,
+      entityName: proposal.contactName,
+      metadata: { total_amount: proposal.totalAmount, currency: proposal.currency },
+    });
 
-    return NextResponse.json({ success: true });
+    // Send the proposal link email — await so errors surface to the caller
+    let emailWarning: string | null = null;
+    try {
+      await sendProposalLinkEmail({
+        contactName: proposal.contactName,
+        contactEmail: effectiveEmail,
+        title: proposal.title,
+        totalAmount: proposal.totalAmount,
+        currency: proposal.currency,
+        token: proposal.token,
+        type: proposal.type,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[send] Proposal link email failed:", msg);
+      emailWarning = `Proposal marked sent but email failed to deliver: ${msg}`;
+    }
+
+    return NextResponse.json({ success: true, emailWarning });
   } catch (err) {
     console.error("[POST /api/proposals/[id]/send]", err);
     const msg = err instanceof Error ? err.message : "Failed to send proposal";

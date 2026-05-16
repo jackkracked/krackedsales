@@ -25,11 +25,13 @@ export interface QueueItem {
   id: string;           // conversationId / participantId / TikTok conversation_id
   channel: "GHL" | "Meta" | "TikTok";
   platform?: string;    // "facebook" | "instagram" for Meta
+  type?: string;        // GHL conversation type: TYPE_SMS, TYPE_EMAIL, etc.
   contactName: string;
   lastMessage: string;
   updatedAt: string;
   staleDays: number;
   contactId?: string;   // GHL contactId if available
+  recipientId?: string; // Meta: participant ID needed for sending
 }
 
 interface GHLConversation {
@@ -110,6 +112,7 @@ export async function GET(req: NextRequest) {
         id: conv.id,
         channel: "GHL",
         platform: isIg ? "instagram" : isFb ? "facebook" : undefined,
+        type: conv.type ?? conv.lastMessageType ?? undefined,
         contactName: conv.contactName ?? "Unknown",
         lastMessage: conv.lastMessageBody ?? "",
         updatedAt,
@@ -155,6 +158,7 @@ export async function GET(req: NextRequest) {
         lastMessage: conv.lastMessage ?? "",
         updatedAt,
         staleDays: staleDays(updatedAt),
+        recipientId: conv.participantId,
       });
     }
   } catch (err) {

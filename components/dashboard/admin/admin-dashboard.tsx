@@ -2,15 +2,15 @@
 
 import { Suspense } from "react";
 import { format, getHours } from "date-fns";
-import { useQuery } from "@tanstack/react-query";
 import { AdminKpiStrip } from "./admin-kpi-strip";
 import { TeamPerformanceGrid } from "./team-performance-grid";
 import { PipelineHealthPanel } from "./pipeline-health-panel";
-import { CalendarWidget } from "@/components/dashboard/calendar-widget";
+import { TasksStrip } from "@/components/dashboard/tasks-strip/tasks-strip";
+import { CallsStrip } from "@/components/dashboard/calls-strip/calls-strip";
 import { FollowUpQueue } from "@/components/dashboard/follow-up-queue";
-import { TasksWidget } from "@/components/dashboard/tasks-widget";
 import { AiCopilotPanel } from "@/components/dashboard/ai-copilot-panel";
-import type { GHLCalendarEvent } from "@/lib/ghl/types";
+import { ConversationsStrip } from "@/components/dashboard/conversations-strip/conversations-strip";
+import { ScrollToTop } from "@/components/layout/scroll-to-top";
 
 function getGreeting(): string {
   const h = getHours(new Date());
@@ -28,22 +28,15 @@ interface AdminDashboardProps {
   ghlUserId: string | null;
 }
 
-export function AdminDashboard({ userName, ghlUserId }: AdminDashboardProps) {
+export function AdminDashboard({ userName }: AdminDashboardProps) {
   const today = format(new Date(), "EEEE, d MMMM yyyy");
   const firstName = userName.split(" ")[0] || "";
 
-  // Calendar events fetched client-side — no longer blocks page render
-  const { data: calendarData } = useQuery<{ events: GHLCalendarEvent[] }>({
-    queryKey: ["calendar-today", ghlUserId],
-    queryFn: () => fetch("/api/ghl/calendar").then((r) => r.json()),
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const calendarEvents = calendarData?.events ?? [];
-  const salesContext = `Today: ${today}. Calendar events: ${calendarEvents.length}.`;
+  const salesContext = `Today: ${today}.`;
 
   return (
     <div className="flex flex-col h-full p-6 gap-5 overflow-y-auto">
+      <ScrollToTop />
       {/* Header */}
       <div>
         <h1
@@ -58,14 +51,19 @@ export function AdminDashboard({ userName, ghlUserId }: AdminDashboardProps) {
       {/* Admin KPI strip — Cash / Spend / Calls / Leads */}
       <AdminKpiStrip />
 
-      {/* Second row: Follow-up queue + Tasks + Calendar */}
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_260px_260px] gap-5">
-        <Suspense fallback={<Skeleton className="h-40" />}>
-          <FollowUpQueue />
-        </Suspense>
-        <TasksWidget />
-        <CalendarWidget events={calendarEvents} />
-      </div>
+      {/* Tasks strip — full width, above calls */}
+      <TasksStrip />
+
+      {/* Calls strip — full width */}
+      <CallsStrip isAdmin={true} />
+
+      {/* Conversations strip — awaiting reply */}
+      <ConversationsStrip />
+
+      {/* Second row: Follow-up queue — full width */}
+      <Suspense fallback={<Skeleton className="h-40" />}>
+        <FollowUpQueue />
+      </Suspense>
 
       {/* Third row: Team grid + Pipeline health */}
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-5">

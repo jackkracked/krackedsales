@@ -6,9 +6,11 @@ import { QuotaRing } from "./quota-ring";
 import { ActivityBars } from "./activity-bars";
 import { TodaysFocus } from "./todays-focus";
 import { GoingColdWidget, type PipelineOpp } from "./going-cold-widget";
-import { CalendarWidget } from "@/components/dashboard/calendar-widget";
+import { TasksStrip } from "@/components/dashboard/tasks-strip/tasks-strip";
+import { CallsStrip } from "@/components/dashboard/calls-strip/calls-strip";
 import { AiCopilotPanel } from "@/components/dashboard/ai-copilot-panel";
-import type { GHLCalendarEvent } from "@/lib/ghl/types";
+import { ConversationsStrip } from "@/components/dashboard/conversations-strip/conversations-strip";
+import { ScrollToTop } from "@/components/layout/scroll-to-top";
 
 function getGreeting(): string {
   const h = getHours(new Date());
@@ -24,6 +26,10 @@ interface RepMetrics {
   callsToday: number;
   activityBars: { date: string; calls: number }[];
   pipelineOpps: PipelineOpp[];
+  commissionPct: number;
+  commissionThisWeek: number;
+  commissionThisMonth: number;
+  commissionThisYear: number;
 }
 
 interface RepDashboardProps {
@@ -47,13 +53,6 @@ export function RepDashboard({ userId, userName, email, ghlUserId }: RepDashboar
     refetchInterval: 3 * 60 * 1000,
   });
 
-  const { data: calendarData } = useQuery<{ events: GHLCalendarEvent[] }>({
-    queryKey: ["calendar-today", ghlUserId],
-    queryFn: () => fetch("/api/ghl/calendar").then((r) => r.json()),
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const calendarEvents = calendarData?.events ?? [];
   const targets = metrics?.targets ?? { dealsPerMonth: 5, callsPerDay: 15, revenueTarget: 0 };
   const activityBars = metrics?.activityBars ?? Array.from({ length: 7 }, (_, i) => ({
     date: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i],
@@ -64,6 +63,7 @@ export function RepDashboard({ userId, userName, email, ghlUserId }: RepDashboar
 
   return (
     <div className="flex flex-col h-full p-6 gap-5 overflow-y-auto">
+      <ScrollToTop />
       {/* Header */}
       <div>
         <h1
@@ -75,8 +75,8 @@ export function RepDashboard({ userId, userName, email, ghlUserId }: RepDashboar
         <p className="text-sm text-muted-foreground mt-0.5">{today}</p>
       </div>
 
-      {/* Hero row: Quota ring + Activity bars + Calendar — all same height */}
-      <div className="grid grid-cols-1 xl:grid-cols-[auto_1fr_260px] gap-5 items-stretch">
+      {/* Hero row: Quota ring + Activity bars */}
+      <div className="grid grid-cols-1 xl:grid-cols-[auto_1fr] gap-5 items-stretch">
         <div className="bg-card border border-border rounded-[10px] p-5 flex items-center justify-center">
           <QuotaRing
             current={metrics?.dealsWon ?? 0}
@@ -90,8 +90,42 @@ export function RepDashboard({ userId, userName, email, ghlUserId }: RepDashboar
         <div className="bg-card border border-border rounded-[10px] p-4 flex flex-col justify-between">
           <ActivityBars data={activityBars} targetPerDay={targets.callsPerDay} />
         </div>
-        <CalendarWidget events={calendarEvents} />
       </div>
+
+      {/* Tasks strip — full width, above calls */}
+      <TasksStrip />
+
+      {/* Calls strip — full width */}
+      <CallsStrip isAdmin={false} />
+
+      {/* Conversations strip — awaiting reply */}
+      <ConversationsStrip />
+
+      {/* Commission row — only shown when a commission % is set */}
+      {(metrics?.commissionPct ?? 0) > 0 && (
+        <div className="grid grid-cols-3 gap-5">
+          {[
+            { label: "Commission this week", value: metrics?.commissionThisWeek ?? 0 },
+            { label: "Commission this month", value: metrics?.commissionThisMonth ?? 0 },
+            { label: "Commission this year", value: metrics?.commissionThisYear ?? 0 },
+          ].map((card) => (
+            <div
+              key={card.label}
+              className="bg-card border border-border rounded-[10px] px-5 py-4 flex flex-col gap-1"
+            >
+              <p className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground/70">
+                {card.label}
+              </p>
+              <p className="text-2xl font-bold text-foreground tabular-nums" style={{ fontFamily: "var(--font-heading)" }}>
+                ${card.value.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                at {metrics!.commissionPct}% commission
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Second row: Today's Focus + Going Cold */}
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-5">

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ghl } from "@/lib/ghl/client";
+import { getSessionUser } from "@/lib/auth/session";
+import { logActivity } from "@/lib/activity/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -33,14 +35,28 @@ export async function POST(
   { params }: { params: Promise<{ contactId: string }> }
 ) {
   const { contactId } = await params;
-  const { body } = await req.json();
+  const reqBody = await req.json();
+  const { body, contactName } = reqBody;
 
   if (!body?.trim()) {
     return NextResponse.json({ error: "Note body is required" }, { status: 400 });
   }
 
   try {
+    const sessionUser = await getSessionUser().catch(() => null);
     const data = await ghl.post(`/contacts/${contactId}/notes/`, { body });
+
+    logActivity({
+      userId: sessionUser?.id ?? "unknown",
+      userName: sessionUser?.name ?? "Unknown",
+      userEmail: sessionUser?.email ?? "unknown@unknown.com",
+      action: "note.created",
+      entityType: "contact",
+      entityId: contactId,
+      entityName: contactName,
+      metadata: { note_preview: body.slice(0, 100) },
+    });
+
     return NextResponse.json(data);
   } catch (err) {
     console.error("[POST /api/ghl/contacts/[id]/notes]", err);

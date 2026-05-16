@@ -28,6 +28,9 @@ interface Proposal {
   contactName: string;
   contactEmail: string | null;
   ghlContactId: string;
+  opportunityId: string | null;
+  createdBy: string | null;
+  createdByName: string | null;
   status: string;
   totalAmount: number;
   currency: string;
@@ -98,8 +101,35 @@ export function ProposalsClient() {
   const [filter, setFilter] = useState<string>("All");
   const [showCreate, setShowCreate] = useState(false);
   const [selected, setSelected] = useState<Proposal | null>(null);
+  const [selectedSendStep, setSelectedSendStep] = useState<"idle" | "confirm">("idle");
   const [oppModal, setOppModal] = useState<{ opp: GHLOpportunity; stageName: string } | null>(null);
-  const [oppLoading, setOppLoading] = useState<string | null>(null); // contactId being fetched
+  const [oppLoading, setOppLoading] = useState<string | null>(null); // proposal.id being fetched
+
+  async function openOppModal(proposal: Proposal) {
+    if (oppLoading) return;
+    setOppLoading(proposal.id);
+    try {
+      // Prefer direct opportunityId lookup — fast and reliable
+      if (proposal.opportunityId) {
+        const res = await fetch(`/api/ghl/opportunities/${proposal.opportunityId}`);
+        const opp = await res.json();
+        if (opp?.id) {
+          setOppModal({ opp, stageName: opp.pipelineStageId_name ?? "Unknown" });
+          return;
+        }
+      }
+      // Fall back to contact-based lookup
+      const res = await fetch(
+        `/api/ghl/contacts/${proposal.ghlContactId}/opportunity?name=${encodeURIComponent(proposal.contactName)}`
+      );
+      const json = await res.json();
+      if (json.opportunity) {
+        setOppModal({ opp: json.opportunity, stageName: json.stageName ?? "Unknown" });
+      }
+    } finally {
+      setOppLoading(null);
+    }
+  }
   const queryClient = useQueryClient();
 
   const { data, isPending } = useQuery<{ proposals: Proposal[] }>({
@@ -108,11 +138,17 @@ export function ProposalsClient() {
     staleTime: 30 * 1000,
   });
 
-  const sendMutation = useMutation({
-    mutationFn: (id: string) =>
-      fetch(`/api/proposals/${id}/send`, { method: "POST" }).then((r) => r.json()),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["proposals"] }),
+  const { data: me } = useQuery<{ role: string }>({
+    queryKey: ["me"],
+    queryFn: () => fetch("/api/me").then((r) => r.json()),
+    staleTime: 5 * 60 * 1000,
   });
+  const isAdmin = me?.role === "admin";
+
+  function openWithSend(proposal: Proposal) {
+    setSelected(proposal);
+    setSelectedSendStep("confirm");
+  }
 
   const allProposals = data?.proposals ?? [];
 
@@ -208,6 +244,7 @@ export function ProposalsClient() {
             <thead>
               <tr className="border-b border-border">
                 <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Client</th>
+                <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Rep</th>
                 <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Type</th>
                 <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
                 <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sent</th>
@@ -245,7 +282,7 @@ export function ProposalsClient() {
                 filtered.map((proposal) => (
                   <tr
                     key={proposal.id}
-                    onClick={() => setSelected(proposal)}
+                    onClick={() => { setSelected(proposal); setSelectedSendStep("idle"); }}
                     className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors cursor-pointer"
                   >
                     <td className="px-4 py-3">
@@ -262,6 +299,20 @@ export function ProposalsClient() {
                           )}
                         </div>
                       </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {proposal.createdByName ? (
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[9px] font-bold text-muted-foreground shrink-0">
+                            {proposal.createdByName.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase()}
+                          </div>
+                          <span className="text-xs text-muted-foreground truncate max-w-[80px]">
+                            {proposal.createdByName.split(" ")[0]}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground/40 text-xs">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <TypeBadge type={proposal.type} />
@@ -286,41 +337,27 @@ export function ProposalsClient() {
                         {proposal.status === "draft" && (
                           <button
                             title="Send proposal"
-                            onClick={(e) => { e.stopPropagation(); sendMutation.mutate(proposal.id); }}
-                            disabled={sendMutation.isPending}
-                            className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/8 transition-colors disabled:opacity-40"
+                            onClick={(e) => { e.stopPropagation(); openWithSend(proposal); }}
+                            className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/8 transition-colors"
                           >
                             <Send className="w-3.5 h-3.5" />
                           </button>
                         )}
                         <button
                           title="Message contact"
-                          onClick={(e) => { e.stopPropagation(); window.location.href = `/pipeline?contact=${proposal.ghlContactId}`; }}
-                          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                          disabled={oppLoading === proposal.id}
+                          onClick={(e) => { e.stopPropagation(); openOppModal(proposal); }}
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
                         >
-                          <MessageSquare className="w-3.5 h-3.5" />
+                          <MessageSquare className={cn("w-3.5 h-3.5", oppLoading === proposal.id && "animate-pulse")} />
                         </button>
                         <button
                           title="View opportunity"
-                          disabled={oppLoading === proposal.ghlContactId}
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            setOppLoading(proposal.ghlContactId);
-                            try {
-                              const res = await fetch(
-                                `/api/ghl/contacts/${proposal.ghlContactId}/opportunity?name=${encodeURIComponent(proposal.contactName)}`
-                              );
-                              const json = await res.json();
-                              if (json.opportunity) {
-                                setOppModal({ opp: json.opportunity, stageName: json.stageName ?? "Unknown" });
-                              }
-                            } finally {
-                              setOppLoading(null);
-                            }
-                          }}
+                          disabled={oppLoading === proposal.id}
+                          onClick={(e) => { e.stopPropagation(); openOppModal(proposal); }}
                           className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
                         >
-                          <Eye className={cn("w-3.5 h-3.5", oppLoading === proposal.ghlContactId && "animate-pulse")} />
+                          <Eye className={cn("w-3.5 h-3.5", oppLoading === proposal.id && "animate-pulse")} />
                         </button>
                       </div>
                     </td>
@@ -345,8 +382,11 @@ export function ProposalsClient() {
       {selected && (
         <ProposalDetailSlideOver
           proposal={allProposals.find((p) => p.id === selected.id) ?? selected}
-          onClose={() => setSelected(null)}
+          onClose={() => { setSelected(null); setSelectedSendStep("idle"); }}
           onUpdated={() => queryClient.invalidateQueries({ queryKey: ["proposals"] })}
+          onDeleted={() => { setSelected(null); setSelectedSendStep("idle"); }}
+          isAdmin={isAdmin}
+          initialSendStep={selectedSendStep}
         />
       )}
 

@@ -18,6 +18,7 @@ export async function GET() {
         role: users.role,
         isActive: users.isActive,
         ghlUserId: users.ghlUserId,
+        commissionPct: users.commissionPct,
         createdAt: users.createdAt,
       })
       .from(users)
@@ -59,14 +60,14 @@ export async function GET() {
  */
 export async function PATCH(req: NextRequest) {
   const body = await req.json();
-  const { userId, role, isActive, ghlUserId, targets, permissionOverrides, name, email, newPassword } = body;
+  const { userId, role, isActive, ghlUserId, targets, permissionOverrides, name, email, newPassword, commissionPct } = body;
 
   if (!userId) {
     return NextResponse.json({ error: "userId required" }, { status: 400 });
   }
 
   // Update user fields if provided
-  const userUpdates: Partial<{ role: string; isActive: boolean; ghlUserId: string | null; name: string; email: string; passwordHash: string }> = {};
+  const userUpdates: Partial<{ role: string; isActive: boolean; ghlUserId: string | null; name: string; email: string; passwordHash: string; commissionPct: number }> = {};
   if (role !== undefined) userUpdates.role = role;
   if (isActive !== undefined) userUpdates.isActive = isActive;
   if (ghlUserId !== undefined) userUpdates.ghlUserId = ghlUserId || null;
@@ -74,6 +75,9 @@ export async function PATCH(req: NextRequest) {
   if (email && typeof email === "string" && email.trim()) userUpdates.email = email.trim().toLowerCase();
   if (newPassword && typeof newPassword === "string" && newPassword.length >= 8) {
     userUpdates.passwordHash = await bcrypt.hash(newPassword, 10);
+  }
+  if (commissionPct !== undefined && typeof commissionPct === "number" && commissionPct >= 0) {
+    userUpdates.commissionPct = commissionPct;
   }
 
   if (Object.keys(userUpdates).length > 0) {

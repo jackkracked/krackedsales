@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ghl } from "@/lib/ghl/client";
 import type { GHLOpportunity } from "@/lib/ghl/types";
+import { getSessionUser } from "@/lib/auth/session";
+import { logActivity } from "@/lib/activity/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +29,7 @@ export async function PATCH(
   const { opportunityId } = await params;
   const body = await req.json();
   const { pipelineStageId, monetaryValue } = body;
+  const sessionUser = await getSessionUser().catch(() => null);
 
   if (!pipelineStageId && monetaryValue === undefined) {
     return NextResponse.json(
@@ -41,6 +44,22 @@ export async function PATCH(
     if (monetaryValue !== undefined) payload.monetaryValue = monetaryValue;
 
     const data = await ghl.put(`/opportunities/${opportunityId}`, payload);
+
+    logActivity({
+      userId: sessionUser?.id ?? "unknown",
+      userName: sessionUser?.name ?? "Unknown",
+      userEmail: sessionUser?.email ?? "unknown@unknown.com",
+      action: "opportunity.stage_changed",
+      entityType: "opportunity",
+      entityId: opportunityId,
+      entityName: body.opportunityName,
+      metadata: {
+        to_stage: body.stageName,
+        from_stage: body.fromStageName,
+        to_stage_id: pipelineStageId,
+      },
+    });
+
     return NextResponse.json(data);
   } catch (err) {
     console.error("[PATCH /api/ghl/opportunities/[id]]", err);

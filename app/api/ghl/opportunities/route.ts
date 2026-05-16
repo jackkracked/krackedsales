@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ghl, locationId } from "@/lib/ghl/client";
 import type { GHLOpportunity, GHLPipeline } from "@/lib/ghl/types";
+import { logActivity } from "@/lib/activity/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -66,14 +67,52 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
+  const { name, email, phone, website, source, pipelineId, pipelineStageId } = body;
+
   try {
-    const data = await ghl.post<GHLOpportunity>("/opportunities/", {
-      ...body,
+    // Step 1: Create the contact in GHL and get their contactId
+    const nameParts = (name ?? "").trim().split(/\s+/);
+    const firstName = nameParts[0] ?? "";
+    const lastName = nameParts.slice(1).join(" ") || undefined;
+
+    const contactPayload: Record<string, unknown> = {
       locationId: locationId(),
+      firstName,
+    };
+    if (lastName) contactPayload.lastName = lastName;
+    if (email) contactPayload.email = email;
+    if (phone) contactPayload.phone = phone;
+    if (website) contactPayload.website = website;
+    if (source) contactPayload.source = source;
+
+    const contactData = await ghl.post<{ contact: { id: string } }>("/contacts/", contactPayload);
+    const contactId = contactData.contact?.id;
+    if (!contactId) throw new Error("GHL did not return a contactId after contact creation");
+
+    // Step 2: Create the opportunity with the contactId
+    const oppData = await ghl.post<GHLOpportunity>("/opportunities/", {
+      locationId: locationId(),
+      name: name ?? firstName,
+      pipelineId,
+      pipelineStageId,
+      contactId,
     });
-    return NextResponse.json(data);
+
+    logActivity({
+      userId: "unknown",
+      userName: "Unknown",
+      userEmail: "unknown@unknown.com",
+      action: "lead.added",
+      entityType: "opportunity",
+      entityId: oppData.id ?? "",
+      entityName: name ?? firstName,
+      metadata: { pipeline_id: pipelineId, stage_id: pipelineStageId },
+    });
+
+    return NextResponse.json(oppData);
   } catch (err) {
-    console.error("[POST /api/ghl/opportunities]", err);
-    return NextResponse.json({ error: "Failed to create opportunity" }, { status: 500 });
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[POST /api/ghl/opportunities]", message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

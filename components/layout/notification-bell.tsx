@@ -23,6 +23,8 @@ const TYPE_ICON: Record<string, string> = {
   deal_cold:         "🥶",
   followup_overdue:  "⏰",
   ab_winner:         "🏆",
+  task_due_soon:     "📋",
+  task_due_today:    "✅",
 };
 
 export function NotificationBell() {

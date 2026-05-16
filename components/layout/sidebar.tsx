@@ -21,10 +21,18 @@ import {
   Phone,
   CalendarDays,
   FileText,
+  Activity,
 } from "lucide-react";
 import { NotificationBell } from "@/components/layout/notification-bell";
 
-const NAV_SECTIONS = [
+interface NavItem {
+  href: string;
+  label: string;
+  icon: React.ElementType;
+  adminOnly?: boolean;
+}
+
+const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   {
     label: "Work",
     items: [
@@ -40,9 +48,10 @@ const NAV_SECTIONS = [
   {
     label: "Measure",
     items: [
-      { href: "/kpis",         label: "KPIs",         icon: Target },
-      { href: "/demo-tracker", label: "Demo Tracker",  icon: BarChart3 },
-      { href: "/analytics",    label: "Analytics",     icon: TrendingUp },
+      { href: "/kpis",         label: "KPIs",          icon: Target },
+      { href: "/demo-tracker", label: "Demo Tracker",   icon: BarChart3 },
+      { href: "/analytics",    label: "Analytics",      icon: TrendingUp },
+      { href: "/activity",     label: "Activity",       icon: Activity, adminOnly: true },
     ],
   },
   {
@@ -54,10 +63,15 @@ const NAV_SECTIONS = [
   },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  userRole?: string;
+}
+
+export function Sidebar({ userRole }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { sidebarCollapsed, toggleSidebarCollapsed } = useUIStore();
+  const isAdmin = userRole === "admin";
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -138,7 +152,7 @@ export function Sidebar() {
               </span>
             )}
             <div className="space-y-px">
-              {section.items.map(({ href, label, icon: Icon }) => {
+              {section.items.filter((item) => !item.adminOnly || isAdmin).map(({ href, label, icon: Icon }) => {
                 const isActive = pathname === href || pathname.startsWith(href + "/");
                 return (
                   <Link
