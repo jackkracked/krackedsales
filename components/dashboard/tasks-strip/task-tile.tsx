@@ -119,71 +119,88 @@ export function TaskTile({
         )}
       </div>
 
-      {/* Date block */}
+      {/* Right column — cross-fades between date info and action buttons */}
       <div
         className={cn(
-          "flex flex-col items-center justify-center w-[60px] shrink-0 border-l",
-          status === "overdue" ? "border-destructive/15" : "border-border/50"
+          "relative flex flex-col items-center justify-center w-[68px] shrink-0 border-l overflow-hidden",
+          checked
+            ? "border-emerald-500/30 bg-emerald-50/60"
+            : status === "overdue" ? "border-destructive/15" : "border-border/50"
         )}
-      >
-        {task.dueDate ? (
-          <>
-            <span
-              className={cn(
-                "text-[17px] font-bold tabular-nums leading-none",
-                status === "overdue" && "text-destructive",
-                status === "today" && "text-amber-600",
-                status === "upcoming" && "text-foreground"
-              )}
-            >
-              {format(new Date(task.dueDate), "d")}
-            </span>
-            <span className="text-[9.5px] uppercase tracking-wide text-muted-foreground mt-0.5">
-              {format(new Date(task.dueDate), "EEE")}
-            </span>
-            <span
-              className={cn(
-                "text-[8.5px] font-semibold mt-1 px-1.5 py-[2px] rounded-full uppercase tracking-wide",
-                status === "overdue" && "bg-destructive/10 text-destructive",
-                status === "today" && "bg-amber-100 text-amber-700",
-                status === "upcoming" && "bg-muted text-muted-foreground"
-              )}
-            >
-              {status === "overdue"
-                ? overdueText(task.dueDate)
-                : status === "today"
-                ? "Today"
-                : format(new Date(task.dueDate), "MMM")}
-            </span>
-          </>
-        ) : (
-          <span className="text-[11px] text-muted-foreground/30">—</span>
-        )}
-      </div>
-
-      {/* Completion action bar — slides up from bottom on check */}
-      <div
-        className="absolute bottom-0 left-0 right-0 h-[32px] bg-emerald-600 flex items-center px-3 gap-3"
-        style={{
-          transform: checked ? "translateY(0)" : "translateY(100%)",
-          transition: "transform 160ms cubic-bezier(0.16, 1, 0.3, 1)",
-        }}
+        style={{ transition: "background-color 180ms ease, border-color 180ms ease" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <button
-          onClick={onRequestComplete}
-          className="flex-1 flex items-center gap-1.5 text-[11.5px] font-semibold text-white hover:text-white/90 transition-colors"
+        {/* Date — fades out when checked */}
+        <div
+          className="flex flex-col items-center gap-0 pointer-events-none"
+          style={{
+            opacity: checked ? 0 : 1,
+            transition: "opacity 150ms ease",
+          }}
         >
-          <Check className="w-3 h-3 shrink-0" strokeWidth={2.5} />
-          Complete
-        </button>
-        <button
-          onClick={onCancelCheck}
-          className="flex items-center gap-1 text-[11px] text-white/65 hover:text-white transition-colors"
+          {task.dueDate ? (
+            <>
+              <span
+                className={cn(
+                  "text-[17px] font-bold tabular-nums leading-none",
+                  status === "overdue" && "text-destructive",
+                  status === "today" && "text-amber-600",
+                  status === "upcoming" && "text-foreground"
+                )}
+              >
+                {format(new Date(task.dueDate), "d")}
+              </span>
+              <span className="text-[9.5px] uppercase tracking-wide text-muted-foreground mt-0.5">
+                {format(new Date(task.dueDate), "EEE")}
+              </span>
+              <span
+                className={cn(
+                  "text-[8.5px] font-semibold mt-1 px-1.5 py-[2px] rounded-full uppercase tracking-wide",
+                  status === "overdue" && "bg-destructive/10 text-destructive",
+                  status === "today" && "bg-amber-100 text-amber-700",
+                  status === "upcoming" && "bg-muted text-muted-foreground"
+                )}
+              >
+                {status === "overdue"
+                  ? overdueText(task.dueDate)
+                  : status === "today"
+                  ? "Today"
+                  : format(new Date(task.dueDate), "MMM")}
+              </span>
+            </>
+          ) : (
+            <span className="text-[11px] text-muted-foreground/30">—</span>
+          )}
+        </div>
+
+        {/* Action buttons — fades in when checked */}
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center gap-2"
+          style={{
+            opacity: checked ? 1 : 0,
+            transition: "opacity 150ms ease",
+            pointerEvents: checked ? "auto" : "none",
+          }}
         >
-          <X className="w-3.5 h-3.5" />
-          Cancel
-        </button>
+          <button
+            onClick={onRequestComplete}
+            className="flex flex-col items-center gap-0.5 group"
+          >
+            <span className="w-6 h-6 rounded-full bg-emerald-600 flex items-center justify-center group-hover:bg-emerald-700 transition-colors">
+              <Check className="w-3 h-3 text-white" strokeWidth={2.5} />
+            </span>
+            <span className="text-[10px] font-semibold text-emerald-700 leading-none">
+              Complete
+            </span>
+          </button>
+
+          <button
+            onClick={onCancelCheck}
+            className="text-[9.5px] text-muted-foreground hover:text-foreground transition-colors leading-none mt-0.5"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );
