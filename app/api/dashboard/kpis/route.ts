@@ -11,6 +11,7 @@ import {
   startOfDay, endOfDay,
   startOfWeek, endOfWeek,
   startOfMonth, endOfMonth,
+  addDays,
   subMonths, subWeeks, subDays,
   format,
 } from "date-fns";
@@ -197,7 +198,8 @@ export async function GET(req: NextRequest) {
   const prevMonth = format(subMonths(now, 1), "yyyy-MM");
 
   // ── Prefetch GHL opportunities (paginated) ───────────────────────────────
-  const needsAdminOpps = role === "admin" && keys.some((k) => ["cash", "leads", "pipeline_value_admin"].includes(k));
+  // cash now comes from Stripe (business endpoint), not GHL
+  const needsAdminOpps = role === "admin" && keys.some((k) => ["leads", "pipeline_value_admin"].includes(k));
   const needsRepOpps = keys.some((k) => ["deals_won", "revenue_won", "pipeline_count", "pipeline_value"].includes(k));
   const locId = locationId();
 
@@ -234,19 +236,26 @@ export async function GET(req: NextRequest) {
   // These reuse the existing /api/kpis/* routes which already have correct logic.
   // We use the request's own origin — guaranteed correct in all environments.
   const needsOffer = keys.some((k) => ["roas", "ad_spend"].includes(k));
-  const needsMrr = keys.includes("mrr");
+  // business endpoint needed for: mrr, cash (Stripe), and roas (Stripe cash / Meta spend)
+  const needsBiz = keys.some((k) => ["mrr", "cash", "roas"].includes(k));
 
-  type OfferData = { roas?: number; adSpend?: number };
-  type BizData = { mrr?: number };
+  type OfferData = { adSpend?: number };
+  type BizData = { mrr?: number; cashCollected?: number };
 
   const fetchJson = <T>(url: string): Promise<T> =>
     fetch(url, { cache: "no-store" }).then((r) => r.ok ? r.json() as Promise<T> : ({} as T)).catch(() => ({} as T));
 
+  // Business endpoint uses exclusive end date (?start=inclusive&end=exclusive)
+  const bizStart = format(startOfDay(start), "yyyy-MM-dd");
+  const bizEnd   = format(addDays(startOfDay(end), 1), "yyyy-MM-dd");
+  const bizPrevStart = format(startOfDay(prevStart), "yyyy-MM-dd");
+  const bizPrevEnd   = format(addDays(startOfDay(prevEnd), 1), "yyyy-MM-dd");
+
   const [offerData, prevOfferData, bizData, prevBizData] = await Promise.all([
-    needsOffer  ? fetchJson<OfferData>(`${origin}/api/kpis/offer?period=${thisMonth}`)    : Promise.resolve({} as OfferData),
-    needsOffer  ? fetchJson<OfferData>(`${origin}/api/kpis/offer?period=${prevMonth}`)    : Promise.resolve({} as OfferData),
-    needsMrr    ? fetchJson<BizData>(`${origin}/api/kpis/business?period=${thisMonth}`)   : Promise.resolve({} as BizData),
-    needsMrr    ? fetchJson<BizData>(`${origin}/api/kpis/business?period=${prevMonth}`)   : Promise.resolve({} as BizData),
+    needsOffer  ? fetchJson<OfferData>(`${origin}/api/kpis/offer?period=${thisMonth}`)                             : Promise.resolve({} as OfferData),
+    needsOffer  ? fetchJson<OfferData>(`${origin}/api/kpis/offer?period=${prevMonth}`)                             : Promise.resolve({} as OfferData),
+    needsBiz    ? fetchJson<BizData>(`${origin}/api/kpis/business?start=${bizStart}&end=${bizEnd}`)                : Promise.resolve({} as BizData),
+    needsBiz    ? fetchJson<BizData>(`${origin}/api/kpis/business?start=${bizPrevStart}&end=${bizPrevEnd}`)        : Promise.resolve({} as BizData),
   ]);
 
   // ── Compute each metric ──────────────────────────────────────────────────
@@ -265,14 +274,11 @@ export async function GET(req: NextRequest) {
     try {
       switch (key) {
 
-        // ── Admin: Cash Collected (GHL won deals) ────────────────────────────
+        // ── Admin: Cash Collected (Stripe paid invoices via business endpoint) ─
         case "cash": {
-          const filter = (o: GHLOpportunity, s: Date, e: Date) =>
-            o.status === "won" && new Date(o.updatedAt) >= s && new Date(o.updatedAt) <= e;
-          const sum = (opps: GHLOpportunity[]) => opps.reduce((t, o) => t + (o.monetaryValue ?? 0), 0);
           metrics[key] = {
-            value: sum(adminOpps.filter((o) => filter(o, effectiveStart, effectiveEnd))),
-            prev: sum(adminOpps.filter((o) => filter(o, effectivePrevStart, effectivePrevEnd))),
+            value: bizData.cashCollected ?? 0,
+            prev: prevBizData.cashCollected ?? 0,
             periodNote,
           };
           break;
@@ -310,11 +316,15 @@ export async function GET(req: NextRequest) {
           break;
         }
 
-        // ── Admin: ROAS — reuses /api/kpis/offer (same logic as KPIs page) ──
+        // ── Admin: ROAS — Stripe cash collected / Meta ad spend ─────────────
         case "roas": {
+          const cash = bizData.cashCollected ?? 0;
+          const spend = offerData.adSpend ?? 0;
+          const prevCash = prevBizData.cashCollected ?? 0;
+          const prevSpend = prevOfferData.adSpend ?? 0;
           metrics[key] = {
-            value: offerData.roas ?? 0,
-            prev: prevOfferData.roas ?? 0,
+            value: spend > 0 ? Math.round((cash / spend) * 100) / 100 : 0,
+            prev: prevSpend > 0 ? Math.round((prevCash / prevSpend) * 100) / 100 : 0,
             periodNote: "monthly",
           };
           break;
