@@ -77,7 +77,18 @@ DONE & verified (tsc 0 errors, lint errors unchanged at 57, warnings 130→128):
 - T1.8 opportunity-modal tabs labelled. DONE.
 - FLAG: dead "Play recording" button still flagged for owner decision.
 
-### REMAINING
+### Commit `66377ca` — Tier 2 foundation
+DONE & verified (tsc 0, lint errors unchanged at 57):
+- T2.1 semantic tokens (`--success/--warning/--info` + subtle/foreground, `--overlay`) wired into @theme inline. Additive.
+- T2.2 stripped 69 dead `dark:` classes across 8 files. Behavior-neutral.
+- T2.3 built `components/ui/modal.tsx` + `confirm-dialog.tsx` on Radix Dialog (focus trap/Escape/scroll-lock/restoration). Additive, not yet wired in.
+
+### REMAINING — needs VISUAL verification (see note)
+- T2.5 color sweep (20+ files, visible shade changes) — typecheck-safe but visually unverified locally.
+- T2.4 modal migration to `<Modal>` (~20 overlays, changes focus/scroll/portal behavior) — needs a running app to verify.
+- T2.6 confirm-dialog swaps (sync→async restructure per site).
 - Tier 1 tail: workflow-canvas emoji→lucide; broader icon-button aria sweep; toggle role="switch".
-- ALL of Tier 2 (tokens → strip dead dark: → build Modal+ConfirmDialog → color sweep → incremental modal migration → confirm swaps).
 - Tier 3 = plan only (untouched, as agreed).
+
+### ⚠️ VERIFICATION CONSTRAINT
+Local `npm run build`/`next dev` cannot run — `.env.local` lacks API keys (Stripe/etc.), so page-data collection fails. tsc is the only local gate. The remaining Tier 2 work is VISUAL/behavioral; it should be verified on a Vercel PREVIEW deployment of this branch (env exists there) before trusting it, rather than applied blind.
