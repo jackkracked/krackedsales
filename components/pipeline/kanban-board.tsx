@@ -367,7 +367,7 @@ export function KanbanBoard({ pipeline, opportunities, commentLeads = [], unread
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
       >
-        <div className="flex gap-3 overflow-x-scroll pb-3 h-full min-h-0 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border/80 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-muted/60">
+        <div className="flex gap-3 overflow-x-scroll pb-3 h-full min-h-0 pipeline-hscroll">
           {pipeline.stages.map((stage, stageIndex) => {
             const isOver = (() => {
               if (!overId || !activeId) return false;

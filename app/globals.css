@@ -101,6 +101,19 @@ h1, h2, h3, h4, h5, h6 {
 * { scrollbar-width: none; }
 *:hover { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 
+/* ─── Pipeline board — ALWAYS-visible horizontal scrollbar ─── */
+/* Mouse users without a horizontal scroll wheel need a draggable bar to reach
+   stages off-screen. Overrides the hidden-by-default scrollbar above. */
+.pipeline-hscroll { scrollbar-width: auto; scrollbar-color: var(--border) var(--muted); }
+.pipeline-hscroll::-webkit-scrollbar { height: 12px; }
+.pipeline-hscroll::-webkit-scrollbar-track { background: var(--muted); border-radius: 999px; }
+.pipeline-hscroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+  border: 3px solid var(--muted);
+}
+.pipeline-hscroll:hover::-webkit-scrollbar-thumb { background: #B8B3AC; }
+
 /* ─── Focus Ring ─── */
 :focus-visible {
   outline: 2px solid var(--primary);
