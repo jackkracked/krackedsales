@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils/cn";
 import { Avatar } from "@/components/ui/avatar";
 import { Check, Clock, ExternalLink, MessageCircle } from "lucide-react";
 import { relativeTime } from "@/lib/utils/date";
-import { cleanUrl, looksLikeUrl } from "@/lib/utils/url";
+import { cleanUrl, looksLikeUrl, isQualificationNote, parseQualificationNote } from "@/lib/utils/url";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 import { useBrandCategoryStore, normalizeDomain, type BrandCategory } from "@/store/brand-category-store";
 import { quickHealthTier } from "@/lib/deal-health";
@@ -102,6 +102,27 @@ function useContactWebsite(contactId: string | undefined, contactWebsite?: strin
       for (const f of fields) {
         const val = f.field_value ?? f.value ?? "";
         if (val && looksLikeUrl(val)) return cleanUrl(val);
+      }
+
+      // Fall back to the qualification NOTE — older / Zapier-created leads store
+      // the website there ("What is your eCommerce website URL? ..."), not in a
+      // form field. Mirrors the form→notes fallback used in the qualification tab.
+      try {
+        const notesRes = await fetch(`/api/ghl/contacts/${contactId}/notes`);
+        if (notesRes.ok) {
+          const notesData = await notesRes.json();
+          const qualNote = (notesData.notes ?? []).find(
+            (n: { body: string }) => isQualificationNote(n.body),
+          );
+          if (qualNote) {
+            const urlPair = parseQualificationNote(qualNote.body).find(
+              (qa) => qa.isUrl && qa.cleanedUrl,
+            );
+            if (urlPair?.cleanedUrl) return urlPair.cleanedUrl;
+          }
+        }
+      } catch {
+        /* notes unavailable — fall through to no-website */
       }
 
       return null;
