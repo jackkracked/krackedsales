@@ -14,7 +14,6 @@ interface GHLOpportunitiesResponse {
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const pipelineId = searchParams.get("pipelineId");
-  const page = parseInt(searchParams.get("page") ?? "1", 10);
   const since = searchParams.get("since");
   const until = searchParams.get("until");
 
@@ -23,14 +22,28 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [oppsData, pipelinesData] = await Promise.all([
-      ghl.get<GHLOpportunitiesResponse>(
+    // Fetch EVERY opportunity in the pipeline, not just the first 100.
+    // The board must never silently drop opportunities — missing a live deal
+    // is a data-integrity failure. GHL pages at 100/request, so loop until
+    // we've pulled the full set (with a safety cap).
+    const MAX_PAGES = 60; // safety cap: 6,000 opportunities
+    const allOpps: GHLOpportunity[] = [];
+    let total = Infinity;
+
+    const pipelinesData = await ghl.get<{ pipelines: GHLPipeline[] }>(
+      `/opportunities/pipelines?locationId=${locationId()}`
+    );
+
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const oppsData = await ghl.get<GHLOpportunitiesResponse>(
         `/opportunities/search?location_id=${locationId()}&pipeline_id=${pipelineId}&limit=100&page=${page}`
-      ),
-      ghl.get<{ pipelines: GHLPipeline[] }>(
-        `/opportunities/pipelines?locationId=${locationId()}`
-      ),
-    ]);
+      );
+      const batch = oppsData.opportunities ?? [];
+      allOpps.push(...batch);
+      total = oppsData.meta?.total ?? allOpps.length;
+      // Stop when the last page returns a partial batch or we've reached the total.
+      if (batch.length < 100 || allOpps.length >= total) break;
+    }
 
     const pipeline = pipelinesData.pipelines?.find((p) => p.id === pipelineId);
     const stageMap: Record<string, string> = {};
@@ -40,7 +53,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    let opps = (oppsData.opportunities ?? []).map((opp) => ({
+    let opps = allOpps.map((opp) => ({
       ...opp,
       pipelineStageId_name: stageMap[opp.pipelineStageId] ?? "Unknown Stage",
     }));
@@ -59,7 +72,7 @@ export async function GET(req: NextRequest) {
       console.log(`[opportunities] date filter ${since}→${until} (CST): ${before} total → ${opps.length} matched`);
     }
 
-    return NextResponse.json({ opportunities: opps, meta: oppsData.meta });
+    return NextResponse.json({ opportunities: opps, meta: { total } });
   } catch (err) {
     console.error("[GET /api/ghl/opportunities]", err);
     return NextResponse.json({ error: "Failed to fetch opportunities" }, { status: 500 });
