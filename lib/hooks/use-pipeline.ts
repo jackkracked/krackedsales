@@ -33,9 +33,13 @@ export function useOpportunities(pipelineId?: string) {
       if (!res.ok) throw new Error("Failed to fetch opportunities");
       return res.json();
     },
-    staleTime: 10 * 1000,
-    refetchInterval: 10 * 1000,   // poll every 10s for near real-time
-    refetchOnWindowFocus: true,    // refresh immediately when tab regains focus
+    // The board now loads EVERY opportunity (full pagination), so a large
+    // pipeline is many GHL calls per fetch. Poll less aggressively to avoid
+    // hammering GHL, and rely on refetchOnWindowFocus for instant freshness
+    // when the user returns to the tab.
+    staleTime: 30 * 1000,
+    refetchInterval: 45 * 1000,
+    refetchOnWindowFocus: true,
     enabled: !!pipelineId,
   });
 }
