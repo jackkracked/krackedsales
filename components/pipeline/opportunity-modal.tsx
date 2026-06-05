@@ -16,7 +16,7 @@ import { TIER_COLORS } from "@/lib/deal-health";
 import type { DealHealthResult } from "@/lib/deal-health";
 import { formatDateTime, relativeTime } from "@/lib/utils/date";
 import { cn } from "@/lib/utils/cn";
-import { cleanUrl, looksLikeUrl, isQualificationNote } from "@/lib/utils/url";
+import { cleanUrl, looksLikeUrl, isQualificationNote, parseQualificationNote } from "@/lib/utils/url";
 import { useStageHistoryStore, findStageChange } from "@/store/stage-history-store";
 import { DemoLinksRow } from "@/components/shared/demo-links-row";
 import type { GHLOpportunity, GHLMessage } from "@/lib/ghl/types";
@@ -147,9 +147,26 @@ function QualificationTab({
     staleTime: 10 * 60 * 1000, // field defs rarely change
   });
 
-  const isLoading = contactLoading || defsLoading;
+  const contact = contactData?.contact;
+  const rawFields = contact?.customFields ?? contact?.customField ?? [];
+  const fieldDefs = fieldDefsData?.fields ?? {};
+  const resolved = resolveCustomFields(rawFields, fieldDefs);
+  const hasFormData = resolved.length > 0;
 
-  if (isLoading) {
+  // Fallback: when the GHL form has no qualification data, read it from the
+  // contact's "Qualification Questions" note (older / Zapier-created leads).
+  const { data: notesData, isLoading: notesLoading } = useQuery<{ notes: GHLNote[] }>({
+    queryKey: ["ghl-contact-notes-qual", contactId],
+    queryFn: async () => {
+      const res = await fetch(`/api/ghl/contacts/${contactId}/notes`);
+      if (!res.ok) return { notes: [] };
+      return res.json();
+    },
+    enabled: !!contactId && !contactLoading && !defsLoading && !hasFormData,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  if (contactLoading || defsLoading) {
     return (
       <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
         <RefreshCw className="w-4 h-4 animate-spin mr-2" />
@@ -158,20 +175,60 @@ function QualificationTab({
     );
   }
 
-  const contact = contactData?.contact;
-  const rawFields = contact?.customFields ?? contact?.customField ?? [];
-  const fieldDefs = fieldDefsData?.fields ?? {};
-  const resolved = resolveCustomFields(rawFields, fieldDefs);
+  // ── No form data → fall back to the qualification note ──
+  if (!hasFormData) {
+    if (notesLoading) {
+      return (
+        <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+          <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+          Loading qualification data…
+        </div>
+      );
+    }
+    const qualNote = (notesData?.notes ?? []).find((n) => isQualificationNote(n.body));
+    const qaPairs = qualNote ? parseQualificationNote(qualNote.body) : [];
 
-  if (resolved.length === 0) {
+    if (qaPairs.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
+          <FileText className="w-8 h-8 opacity-30" />
+          <p className="text-sm font-medium">No qualification data</p>
+          <p className="text-xs text-center max-w-48">
+            Lead-form answers (or a qualification note) will appear here once the contact has submitted them.
+          </p>
+        </div>
+      );
+    }
+
     return (
-      <div className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
-        <FileText className="w-8 h-8 opacity-30" />
-        <p className="text-sm font-medium">No qualification data</p>
-        <p className="text-xs text-center max-w-48">
-          Custom field data from lead forms will appear here once the contact has submitted them.
-        </p>
-      </div>
+      <section>
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2.5 flex items-center gap-1.5">
+          <FileText className="w-3.5 h-3.5" />
+          Lead Qualification
+        </h3>
+        <div className="space-y-2">
+          {qaPairs.map((qa, i) => (
+            <div key={i} className="bg-muted/30 border border-border/60 rounded-[8px] p-3.5">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 leading-tight">
+                {qa.question}
+              </p>
+              {qa.isUrl && qa.cleanedUrl ? (
+                <a
+                  href={qa.cleanedUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-primary hover:underline flex items-center gap-1"
+                >
+                  <ExternalLink className="w-3 h-3 shrink-0" />
+                  <span className="truncate">{qa.cleanedUrl}</span>
+                </a>
+              ) : (
+                <p className="text-sm text-foreground leading-relaxed">{qa.answer}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
     );
   }
 
