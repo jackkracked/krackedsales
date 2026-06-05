@@ -56,7 +56,7 @@ function QueueListItem({
       onClick={onSelect}
       className={cn(
         "w-full text-left px-4 py-3 border-b border-border/60 last:border-0 transition-colors",
-        isSelected ? "bg-primary/[0.06] border-l-2 border-l-primary" : "hover:bg-muted/30"
+        isSelected ? "bg-primary/[0.06]" : "hover:bg-muted/30"
       )}
     >
       <div className="flex items-center gap-2 mb-0.5">

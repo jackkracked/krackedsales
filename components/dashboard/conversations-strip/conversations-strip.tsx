@@ -157,7 +157,7 @@ function InboxDrawer({ items, total, onReply, onClose }: InboxDrawerProps) {
                     className={cn(
                       "w-full text-left px-4 py-3.5 rounded-[12px] transition-all duration-150 group",
                       "hover:bg-muted/50",
-                      isLate ? "border-l-2 border-l-destructive pl-3.5" : ""
+                      isLate ? "bg-destructive/[0.06]" : ""
                     )}
                   >
                     <div className="flex items-center gap-2 mb-1">

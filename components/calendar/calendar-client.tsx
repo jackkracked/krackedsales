@@ -144,13 +144,13 @@ function EventBlock({
       onClick={onClick}
       title={event.summary}
       className={cn(
-        "absolute left-1 right-1 overflow-hidden rounded-[6px] border-l-2 px-1.5 py-0.5 text-left cursor-pointer hover:brightness-95 transition-all z-10",
+        "absolute left-1 right-1 overflow-hidden rounded-[6px] border px-1.5 py-0.5 text-left cursor-pointer hover:brightness-95 transition-all z-10",
         isGoogle && "opacity-40 border-dashed"
       )}
       style={{
         top,
         height: Math.min(height, GRID_HEIGHT - top),
-        borderLeftColor: color,
+        borderColor: color,
         backgroundColor: `${color}18`,
       }}
     >

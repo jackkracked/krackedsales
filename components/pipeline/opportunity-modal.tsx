@@ -471,12 +471,12 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft, onFiel
               .slice(-1)[0]?.id;
 
             const label = isCreated
-              ? "📥 New Lead"
+              ? "New Lead"
               : stored
-              ? `🔄 ${stored.fromStage} → ${stored.toStage}`
+              ? `${stored.fromStage} → ${stored.toStage}`
               : isLatestUpdate
-              ? `🔄 Moved to ${stageName}`
-              : "🔄 Stage changed";
+              ? `Moved to ${stageName}`
+              : "Stage changed";
             return (
               <div key={msg.id} className="flex justify-center my-0.5">
                 <span className="text-[11px] text-muted-foreground/70 bg-muted/50 px-2.5 py-0.5 rounded-full leading-5">
@@ -860,14 +860,19 @@ export function OpportunityModal({
                 <button
                   key={key}
                   onClick={() => setActiveTab(key)}
+                  aria-label={label}
+                  aria-current={activeTab === key ? "true" : undefined}
                   className={cn(
-                    "flex items-center justify-center flex-1 py-2.5 border-b-2 transition-colors",
+                    "flex items-center justify-center gap-1.5 min-w-0 flex-1 py-2.5 border-b-2 transition-colors",
                     activeTab === key
                       ? "border-primary text-primary"
                       : "border-transparent text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  <Icon className="w-4 h-4" title={label} />
+                  <Icon className="w-4 h-4 shrink-0" />
+                  {activeTab === key && (
+                    <span className="text-[11px] font-medium truncate">{label}</span>
+                  )}
                 </button>
               ))}
             </div>

@@ -184,6 +184,7 @@ export function Sidebar({ userRole }: SidebarProps) {
                     key={href}
                     href={href}
                     title={sidebarCollapsed ? label : undefined}
+                    aria-current={isActive ? "page" : undefined}
                     className={cn(
                       "flex items-center px-2 py-1.5 rounded-md text-[13px] font-medium transition-colors duration-100",
                       isActive

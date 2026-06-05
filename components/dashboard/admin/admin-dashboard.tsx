@@ -7,7 +7,6 @@ import { toZonedDate } from "@/lib/utils/timezone";
 import { PipelineHealthPanel } from "./pipeline-health-panel";
 import { TasksStrip } from "@/components/dashboard/tasks-strip/tasks-strip";
 import { CallsStrip } from "@/components/dashboard/calls-strip/calls-strip";
-import { AiCopilotPanel } from "@/components/dashboard/ai-copilot-panel";
 import { ConversationsStrip } from "@/components/dashboard/conversations-strip/conversations-strip";
 import { KpiWidget } from "@/components/dashboard/kpi-widget/kpi-widget";
 import { GoalProgressBars } from "@/components/dashboard/goal-progress/goal-progress-bars";

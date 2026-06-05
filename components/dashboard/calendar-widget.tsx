@@ -41,7 +41,7 @@ export function CalendarWidget({ events }: CalendarWidgetProps) {
               <button
                 key={event.id}
                 onClick={() => setSelected(event)}
-                className="w-full text-left flex items-start gap-3 py-2 px-2 -mx-2 rounded-[6px] border-l-2 border-primary pl-3 hover:bg-muted/30 transition-colors group"
+                className="w-full text-left flex items-start gap-3 py-2 px-2 -mx-2 rounded-[6px] hover:bg-muted/30 transition-colors group"
               >
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">
@@ -49,7 +49,7 @@ export function CalendarWidget({ events }: CalendarWidgetProps) {
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {formatEventTime(event.startTime, tz)}
-                    {event.contactName && ` — ${event.contactName}`}
+                    {event.contactName && ` · ${event.contactName}`}
                   </p>
                 </div>
               </button>

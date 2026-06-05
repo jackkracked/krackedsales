@@ -344,7 +344,7 @@ export function FollowUpQueue() {
         </div>
       ) : !current ? (
         <div className="py-8 text-center text-sm text-muted-foreground">
-          All caught up — no unanswered messages 🎉
+          All caught up. No unanswered messages.
         </div>
       ) : (
         <div className="p-4 space-y-4">

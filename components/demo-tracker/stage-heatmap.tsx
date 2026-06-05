@@ -113,11 +113,10 @@ export function StageHeatmap({ tasks, range }: StageHeatmapProps) {
               }
               className={cn(
                 "flex items-center gap-2.5 px-3 py-2 rounded-lg bg-card border border-border",
-                "border-l-[3px]",
-                heat === "green" && "border-l-emerald-500",
-                heat === "amber" && "border-l-amber-400",
-                heat === "red"   && "border-l-red-500",
-                heat === null    && "border-l-border opacity-50",
+                heat === "green" && "border-emerald-500",
+                heat === "amber" && "border-amber-400",
+                heat === "red"   && "border-red-500",
+                heat === null    && "border-border opacity-50",
               )}
             >
               <span className="text-xs font-medium text-foreground">{label}</span>

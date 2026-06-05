@@ -377,7 +377,7 @@ function ghlBodyToHtml(body: string): string {
       const trimmed = url.trim();
       if (!/^https?:\/\//i.test(trimmed)) return `[${trimmed}]`;
       if (IMAGE_EXT.test(trimmed) || trimmed.includes("/media/")) {
-        return `<img src="${trimmed}" alt="" style="max-width:100%;height:auto;display:block;margin:8px 0;" />`;
+        return `<img src="${trimmed}" alt="Attached image" onerror="this.style.display='none'" style="max-width:100%;height:auto;display:block;margin:8px 0;" />`;
       }
       return `<a href="${trimmed}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;">${trimmed}</a>`;
     });
