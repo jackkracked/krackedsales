@@ -56,9 +56,13 @@ export async function POST(
       metadata: { outcome, has_notes: !!notes, rep_email: repEmail ?? user.email },
     });
 
-    // Push notes to GHL contact if provided
-    if (notes?.trim() && contactId) {
-      const noteBody = `[Call outcome: ${outcome.replace(/_/g, " ")}]\n\n${notes.trim()}`;
+    // Always record the outcome on the GHL contact so every call leaves a trace
+    // on the record (visible in the contact's Notes tab), with or without notes.
+    if (contactId) {
+      const outcomeLabel = outcome.replace(/_/g, " ");
+      const noteBody = notes?.trim()
+        ? `[Call outcome: ${outcomeLabel}]\n\n${notes.trim()}`
+        : `[Call outcome: ${outcomeLabel}]`;
       await ghl.post(`/contacts/${contactId}/notes/`, { body: noteBody }).catch((err) => {
         // Non-fatal — log but don't fail the request
         console.error("[outcome] Failed to push note to GHL:", err.message);

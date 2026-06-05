@@ -642,12 +642,21 @@ function NotesTab({ contact }: { contact: UnifiedContact }) {
     <div className="flex flex-col flex-1 min-h-0">
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
         {!notes.length && !adding && <EmptyState icon={StickyNote} message="No notes yet" />}
-        {notes.map((n) => (
-          <div key={n.id} className="bg-muted/30 border border-border/50 rounded-[8px] px-3 py-2.5">
-            <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{n.body}</p>
-            <p className="text-[11px] text-muted-foreground mt-1.5">{relativeTime(n.createdAt ?? n.dateAdded ?? new Date().toISOString())}</p>
-          </div>
-        ))}
+        {notes.map((n) => {
+          const callMatch = n.body.match(/^\[Call outcome:\s*([^\]]+)\]\s*\n*([\s\S]*)$/i);
+          const bodyText = callMatch ? (callMatch[2]?.trim() ?? "") : n.body;
+          return (
+            <div key={n.id} className="bg-muted/30 border border-border/50 rounded-[8px] px-3 py-2.5">
+              {callMatch && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-primary/10 text-primary mb-1.5">
+                  <Phone className="w-2.5 h-2.5" /> Call · {callMatch[1].trim()}
+                </span>
+              )}
+              {bodyText && <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{bodyText}</p>}
+              <p className="text-[11px] text-muted-foreground mt-1.5">{relativeTime(n.createdAt ?? n.dateAdded ?? new Date().toISOString())}</p>
+            </div>
+          );
+        })}
       </div>
       {contact.ghlContactId && (
         <div className="px-4 pb-4 shrink-0">
