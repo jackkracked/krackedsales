@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { CallPrepSections } from "./types";
+import type { CompanyResearch } from "./research";
 import type {
   GatheredContact,
   CallHistory,
@@ -19,7 +20,7 @@ interface GenerateInput {
   contact: GatheredContact;
   callType: "intro" | "follow_up";
   callHistory: CallHistory;
-  websiteContent: string | null;
+  research: CompanyResearch | null;
   demoStatus: DemoInfo | null;
   proposalStatus: { status: string; amount: number } | null;
   recentMessages: RecentMessage[];
@@ -32,12 +33,11 @@ export async function generateCallPrep(
   const model = client.getGenerativeModel({ model: MODEL });
 
   const isIntro = input.callType === "intro";
+  const hasResearch = !!input.research && !input.research.degraded;
 
   const contactContext = buildContactContext(input.contact);
+  const researchContext = buildResearchContext(input.research);
   const historyContext = buildHistoryContext(input.callHistory, isIntro);
-  const websiteContext = input.websiteContent
-    ? `\n## Website Content (scraped)\n${input.websiteContent}`
-    : "\n## Website Content\nCould not be retrieved.";
   const demoContext = buildDemoContext(input.demoStatus);
   const proposalContext = input.proposalStatus
     ? `\nProposal Status: ${input.proposalStatus.status} ($${input.proposalStatus.amount})`
@@ -47,7 +47,7 @@ export async function generateCallPrep(
   const prompt = `You are preparing a call brief for a sales rep at Kracked, an email design agency. This is a${isIntro ? "n INTRO" : " FOLLOW-UP"} call.
 
 ${contactContext}
-${websiteContext}
+${researchContext}
 ${historyContext}
 ${demoContext}
 ${proposalContext}
@@ -56,17 +56,17 @@ ${messagesContext}
 Generate a comprehensive call preparation brief. Respond with ONLY valid JSON matching this exact structure (no markdown, no explanation):
 
 {
-  "executiveSummary": "2-3 sentences: who they are, where they're at in the pipeline, what this call is about",
+  "executiveSummary": "2-3 sentences: who this company definitively is (what they sell), their maturity, and what this call is about. State facts, not guesses.",
   "callAgenda": ["talking point 1", "talking point 2", "...up to 5 numbered items"],
-  "brandResearch": ${input.websiteContent ? '{"summary": "what the business does", "audience": "who their customers are", "currentMarketing": "their current email/marketing presence and opportunities"}' : "null"},
+  "brandResearch": ${hasResearch ? '{"summary": "what they sell + their maturity, definitively", "audience": "their target customer", "currentMarketing": "their current email presence and the concrete opportunity for Kracked; append source URLs in parentheses if available"}' : "null"},
   "qualification": {
-    "budget": "assessment based on available data or 'Unknown'",
-    "timeline": "assessment or 'Unknown'",
-    "decisionMaker": "assessment or 'Unknown'",
-    "fit": "High/Medium/Low with brief reasoning"
+    "budget": "Do NOT estimate a budget. Write exactly: 'Confirm on call — lead value in the CRM is a system default, not a real budget signal.'",
+    "timeline": "A specific question to confirm on the call (from the unknowns), e.g. 'Confirm on call: are they planning a launch or campaign soon?'",
+    "decisionMaker": "State the known contact and, if the decision-maker is unconfirmed, 'Confirm on call: is ${input.contact.name} the decision-maker?'",
+    "fit": "High/Medium/Low with DEFINITIVE reasoning from the research (e.g. DTC brand with email capture but no flows = strong fit for an email agency). No hedging."
   },
   "objectionPlaybook": [
-    {"objection": "likely objection", "response": "suggested response"},
+    {"objection": "likely objection for THIS specific business", "response": "suggested response grounded in their actual situation"},
     {"objection": "...", "response": "..."}
   ]${!isIntro ? `,
   "previousInteractions": {
@@ -76,14 +76,14 @@ Generate a comprehensive call preparation brief. Respond with ONLY valid JSON ma
   }` : ""}
 }
 
-Rules:
-- Be specific to THIS contact and brand, not generic
-- For intro calls: focus on brand research, qualification, and demo walkthrough prep
-- For follow-up calls: focus on what happened last time, what changed, and next steps
-- Call agenda items should be actionable conversation points, not headers
-- Objections should be realistic for an email design agency selling to this type of business
-- Keep the executive summary punchy; the rep has 30 seconds
-- If data is missing, make reasonable inferences from what's available rather than saying "unknown"`;
+CRITICAL RULES:
+- BANNED WORDS: "likely", "probably", "appears", "seems", "suggests", "maybe", "could be", "might", "possibly". Every statement must be a definitive fact drawn from the research or call history below.
+- Ground EVERY claim in the Company Research or Call History provided. Do not infer business type from the company's name.
+- NEVER treat lead/deal value as a budget signal — it is a system default ($1000 on every new lead) and is meaningless. Do not mention a dollar budget.
+- When something is genuinely unknown, do NOT guess — phrase it as a specific "Confirm on call: …" question. The provided "To confirm on the call" list is your source for these.
+- Be specific to THIS company. Objections and agenda items must reflect their actual products, channel, and maturity.
+- Keep the executive summary punchy; the rep has 30 seconds.
+${!hasResearch ? "- NOTE: deep company research was unavailable for this lead. Be honest about what is unknown and lead the brief with confirm-on-call questions rather than inventing facts." : ""}`;
 
   const result = await model.generateContent(prompt);
   const text = result.response.text().trim().replace(/```json|```/g, "").trim();
@@ -95,9 +95,9 @@ Rules:
       callAgenda: parsed.callAgenda ?? [],
       brandResearch: parsed.brandResearch ?? null,
       qualification: parsed.qualification ?? {
-        budget: "Unknown",
-        timeline: "Unknown",
-        decisionMaker: "Unknown",
+        budget: "Confirm on call — lead value is a system default, not a budget signal.",
+        timeline: "Confirm on call.",
+        decisionMaker: "Confirm on call.",
         fit: "Unknown",
       },
       objectionPlaybook: parsed.objectionPlaybook ?? [],
@@ -122,14 +122,51 @@ function buildContactContext(contact: GatheredContact): string {
   if (contact.companyName) lines.push(`Company: ${contact.companyName}`);
   if (contact.tags.length) lines.push(`Tags: ${contact.tags.join(", ")}`);
   if (contact.stage) lines.push(`Pipeline Stage: ${contact.stage}`);
-  if (contact.monetaryValue) lines.push(`Deal Value: $${contact.monetaryValue}`);
   if (contact.source) lines.push(`Lead Source: ${contact.source}`);
+  // Deliberately NOT including monetaryValue/deal value — it is a system default
+  // ($1000 on every new lead) and must never be read as a budget signal.
 
   const fields = Object.entries(contact.customFields);
   if (fields.length) {
     lines.push("\nCustom Fields:");
     for (const [k, v] of fields) {
       lines.push(`  ${k}: ${v}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function buildResearchContext(research: CompanyResearch | null): string {
+  if (!research || research.degraded) {
+    return "\n## Company Research\nDeep research was unavailable for this lead. Do not invent facts about the company.";
+  }
+
+  const lines = ["\n## Company Research (verified — state these as fact)"];
+  if (research.whatTheySell) lines.push(`What they sell: ${research.whatTheySell}`);
+  if (research.productsAndPricing) lines.push(`Products & pricing: ${research.productsAndPricing}`);
+  if (research.targetCustomer) lines.push(`Target customer: ${research.targetCustomer}`);
+  if (research.positioningVoice) lines.push(`Positioning & voice: ${research.positioningVoice}`);
+  if (research.maturity) lines.push(`Maturity: ${research.maturity}`);
+  if (research.salesChannel) lines.push(`Sales channel: ${research.salesChannel}`);
+  if (research.emailPresence) lines.push(`Email presence & opportunity: ${research.emailPresence}`);
+
+  if (research.publicNumbers.length) {
+    lines.push("\nPublic numbers (sourced — safe to cite):");
+    for (const n of research.publicNumbers) {
+      lines.push(`  - ${n.claim} (source: ${n.sourceUrl})`);
+    }
+  }
+
+  if (research.confirmOnCall.length) {
+    lines.push("\nTo confirm on the call (do not guess these — turn them into questions):");
+    for (const q of research.confirmOnCall) lines.push(`  - ${q}`);
+  }
+
+  if (research.sources.length) {
+    lines.push("\nSources:");
+    for (const s of research.sources.slice(0, 6)) {
+      lines.push(`  - ${s.title ? `${s.title}: ` : ""}${s.uri}`);
     }
   }
 

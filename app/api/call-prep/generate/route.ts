@@ -3,7 +3,9 @@ import { getSessionUser } from "@/lib/auth/session";
 import { orchestrateCallPrep } from "@/lib/call-prep";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// Deep research (multi-page fetch + grounded Gemini 2.5 Pro + structuring call)
+// runs ~20-40s; 60s would kill it mid-flight. 300s is available on this plan.
+export const maxDuration = 300;
 
 /**
  * POST /api/call-prep/generate
@@ -17,7 +19,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { calendarEventId, contactId, contactName } = body;
+  const { calendarEventId, contactId, contactName, force } = body;
 
   if (!calendarEventId || !contactId) {
     return NextResponse.json(
@@ -31,6 +33,7 @@ export async function POST(req: NextRequest) {
       calendarEventId,
       contactId,
       contactName,
+      force: force === true,
     });
 
     return NextResponse.json({ prep });

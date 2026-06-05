@@ -8,8 +8,8 @@ import {
   gatherDemoStatus,
   gatherProposalStatus,
   gatherRecentMessages,
-  scrapeWebsite,
 } from "./gather";
+import { fetchSitePages, researchCompany } from "./research";
 import { generateCallPrep } from "./generate";
 import type { CallPrepData } from "./types";
 
@@ -17,6 +17,8 @@ interface OrchestrateOptions {
   calendarEventId: string;
   contactId: string;
   contactName?: string;
+  /** Bypass the cached "ready" prep and regenerate from scratch. */
+  force?: boolean;
   onStep?: (step: string) => void;
 }
 
@@ -32,6 +34,7 @@ export async function orchestrateCallPrep({
   calendarEventId,
   contactId,
   contactName,
+  force = false,
   onStep,
 }: OrchestrateOptions): Promise<CallPrepData> {
   // Mark as generating
@@ -41,7 +44,7 @@ export async function orchestrateCallPrep({
     .where(eq(callPreps.calendarEventId, calendarEventId))
     .limit(1);
 
-  if (existing && existing.status === "ready" && existing.sections) {
+  if (!force && existing && existing.status === "ready" && existing.sections) {
     return toCallPrepData(existing);
   }
 
@@ -75,14 +78,18 @@ export async function orchestrateCallPrep({
     // Step 1b: Detect call type
     const callType = await detectCallType(contactId);
 
-    // Step 2: Website scrape
+    // Step 2: Deep company research — read their site + grounded web search.
+    // Never throws; degrades to a thin result so the brief still generates.
     onStep?.("website");
-    let websiteContent: string | null = null;
-    if (contact.website) {
-      websiteContent = await scrapeWebsite(contact.website);
-      if (!websiteContent) {
-        failedSections.push("brandResearch");
-      }
+    const siteText = contact.website ? await fetchSitePages(contact.website) : "";
+    const research = await researchCompany({
+      website: contact.website,
+      companyName: contact.companyName,
+      contactName: contact.name,
+      siteText,
+    });
+    if (research.degraded) {
+      failedSections.push("brandResearch");
     }
 
     // Step 3: Call history, demo, messages, proposals (parallel)
@@ -101,7 +108,7 @@ export async function orchestrateCallPrep({
       contact,
       callType,
       callHistory,
-      websiteContent,
+      research,
       demoStatus,
       proposalStatus,
       recentMessages,
