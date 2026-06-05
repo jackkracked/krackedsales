@@ -5,6 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { X, Clock, User, TrendingUp, ExternalLink } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { cn } from "@/lib/utils/cn";
+import { useUserTimezone } from "@/providers/timezone-provider";
+import { toZonedDate } from "@/lib/utils/timezone";
 import { OpportunityModal } from "@/components/pipeline/opportunity-modal";
 import type { GHLCalendarEvent, GHLOpportunity } from "@/lib/ghl/types";
 
@@ -21,14 +23,15 @@ const STATUS_COLORS: Record<string, string> = {
   "no-show": "bg-rose-50 text-rose-600",
 };
 
-function formatTime(iso: string) {
-  try { return format(parseISO(iso), "h:mm a"); } catch { return iso; }
+function formatTime(iso: string, tz: string) {
+  try { return format(toZonedDate(parseISO(iso), tz), "h:mm a"); } catch { return iso; }
 }
-function formatDate(iso: string) {
-  try { return format(parseISO(iso), "EEEE, d MMMM yyyy"); } catch { return iso; }
+function formatDate(iso: string, tz: string) {
+  try { return format(toZonedDate(parseISO(iso), tz), "EEEE, d MMMM yyyy"); } catch { return iso; }
 }
 
 export function CalendarEventModal({ event, onClose }: CalendarEventModalProps) {
+  const tz = useUserTimezone();
   const [showOppModal, setShowOppModal] = useState(false);
 
   const { data: oppData, isLoading: loadingOpp } = useQuery<{
@@ -91,8 +94,8 @@ export function CalendarEventModal({ event, onClose }: CalendarEventModalProps) 
             <div className="flex items-center gap-2.5 text-sm text-foreground">
               <Clock className="w-4 h-4 text-muted-foreground shrink-0" />
               <span>
-                {formatDate(event.startTime)} &middot; {formatTime(event.startTime)}
-                {event.endTime && ` – ${formatTime(event.endTime)}`}
+                {formatDate(event.startTime, tz)} &middot; {formatTime(event.startTime, tz)}
+                {event.endTime && ` – ${formatTime(event.endTime, tz)}`}
               </span>
             </div>
 

@@ -1,28 +1,58 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { tasks } from "@/lib/db/schema";
-import { eq, asc, and } from "drizzle-orm";
+import { eq, asc, desc, and, SQL } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
 import { logActivity } from "@/lib/activity/logger";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const user = await getSessionUser().catch(() => null);
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+    const { searchParams } = req.nextUrl;
+    const view = searchParams.get("view") ?? "my";
+    const status = searchParams.get("status") ?? "open";
+    const priority = searchParams.get("priority") ?? "all";
+    const sort = searchParams.get("sort") ?? "dueDate";
+
+    // Build filter conditions
+    const conditions: SQL[] = [];
+
+    // View: "my" filters to current user, "team" returns all (admin only)
+    if (view === "team" && user.role === "admin") {
+      // no user filter — show all
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      conditions.push(eq(tasks.userId, user.id as any));
+    }
+
+    // Status filter
+    if (status === "open") {
+      conditions.push(eq(tasks.completed, false));
+    } else if (status === "completed") {
+      conditions.push(eq(tasks.completed, true));
+    }
+    // "all" — no status filter
+
+    // Priority filter
+    if (priority !== "all") {
+      conditions.push(eq(tasks.priority, priority));
+    }
+
+    // Sort
+    const orderBy =
+      sort === "priority" ? asc(tasks.priority) :
+      sort === "createdAt" ? desc(tasks.createdAt) :
+      asc(tasks.dueDate); // default
+
     const rows = await db()
       .select()
       .from(tasks)
-      .where(
-        and(
-          eq(tasks.completed, false),
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          eq(tasks.userId, user.id as any)
-        )
-      )
-      .orderBy(asc(tasks.dueDate));
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(orderBy);
 
     return NextResponse.json({ tasks: rows });
   } catch (err) {

@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { format, parseISO } from "date-fns";
 import { Calendar } from "lucide-react";
+import { useUserTimezone } from "@/providers/timezone-provider";
+import { toZonedDate } from "@/lib/utils/timezone";
 import { CalendarEventModal } from "./calendar-event-modal";
 import type { GHLCalendarEvent } from "@/lib/ghl/types";
 
@@ -10,11 +12,12 @@ interface CalendarWidgetProps {
   events: GHLCalendarEvent[];
 }
 
-function formatEventTime(iso: string) {
-  try { return format(parseISO(iso), "d MMM 'at' HH:mm"); } catch { return iso; }
+function formatEventTime(iso: string, tz: string) {
+  try { return format(toZonedDate(parseISO(iso), tz), "d MMM 'at' HH:mm"); } catch { return iso; }
 }
 
 export function CalendarWidget({ events }: CalendarWidgetProps) {
+  const tz = useUserTimezone();
   const [selected, setSelected] = useState<GHLCalendarEvent | null>(null);
 
   return (
@@ -45,7 +48,7 @@ export function CalendarWidget({ events }: CalendarWidgetProps) {
                     {event.title}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {formatEventTime(event.startTime)}
+                    {formatEventTime(event.startTime, tz)}
                     {event.contactName && ` — ${event.contactName}`}
                   </p>
                 </div>

@@ -5,6 +5,7 @@ import { and, eq, gte, lt, isNotNull, inArray, or, isNull } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
 import { stripe, hasStripe } from "@/lib/stripe/client";
 import Stripe from "stripe";
+import { eachDayOfInterval, startOfDay, endOfDay } from "date-fns";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +94,7 @@ export async function GET(req: NextRequest) {
 
     // ─── All Stripe-sourced metrics ───────────────────────────────────────────
     let cashCollected = 0;
+    let cashSeries: number[] = [];
     let mrr = 0;
     let managementClients = 0;
     let newManagementCount = 0;
@@ -110,7 +112,10 @@ export async function GET(req: NextRequest) {
       const startUnix = Math.floor(start.getTime() / 1000);
       const endUnix = Math.floor(end.getTime() / 1000);
 
-      // 1. Paid invoices in period → cash collected, new project clients
+      // 1. Paid invoices in period → new project clients
+      // Note: filter by status_transitions.paid_at is not available in list API,
+      // so we fetch invoices created in range for project/management counts.
+      // Cash collected uses charges (created = payment date) for accuracy.
       const paidInvoices = await paginateAll<Stripe.Invoice>((after) =>
         stripeClient.invoices.list({
           status: "paid",
@@ -120,7 +125,33 @@ export async function GET(req: NextRequest) {
         })
       );
 
-      cashCollected = paidInvoices.reduce((sum, inv) => sum + (inv.amount_paid ?? 0), 0) / 100;
+      // Cash collected = succeeded charges in period (charge.created is the actual payment date)
+      let periodCharges: (Stripe.Charge & { balance_transaction: Stripe.BalanceTransaction | null })[] = [];
+      try {
+        periodCharges = await paginateAll<Stripe.Charge & { balance_transaction: Stripe.BalanceTransaction | null }>((after) =>
+          stripeClient.charges.list({
+            created: { gte: startUnix, lt: endUnix },
+            expand: ["data.balance_transaction"],
+            limit: 100,
+            ...(after ? { starting_after: after } : {}),
+          }) as Promise<{ data: (Stripe.Charge & { balance_transaction: Stripe.BalanceTransaction | null })[]; has_more: boolean }>
+        );
+      } catch (e) {
+        console.error("[kpis/business] Charges fetch failed:", e);
+      }
+
+      const succeededCharges = periodCharges.filter((c) => c.status === "succeeded");
+      cashCollected = succeededCharges.reduce((sum, c) => sum + c.amount, 0) / 100;
+
+      // Daily cash series for sparklines
+      const days = eachDayOfInterval({ start, end: new Date(Math.min(end.getTime(), Date.now())) });
+      cashSeries = days.slice(0, 31).map((day) => {
+        const dayStart = Math.floor(startOfDay(day).getTime() / 1000);
+        const dayEnd = Math.floor(endOfDay(day).getTime() / 1000);
+        return succeededCharges
+          .filter((c) => c.created >= dayStart && c.created <= dayEnd)
+          .reduce((sum, c) => sum + c.amount, 0) / 100;
+      });
 
       // New project clients = distinct customers on one-time (non-subscription) paid invoices
       // In Stripe API 2026-04-22.dahlia, subscription invoices have parent.type = "subscription_details"
@@ -141,22 +172,28 @@ export async function GET(req: NextRequest) {
       // 2. Active subscriptions (current state) + cancelled subs → historical MRR
       // Active subs = current management client count (always present)
       // For MRR at a point in time: subs created before period end AND not cancelled before period start
-      const [activeSubscriptions, allCancelledSubs] = await Promise.all([
-        paginateAll<Stripe.Subscription>((after) =>
-          stripeClient.subscriptions.list({
-            status: "active",
-            limit: 100,
-            ...(after ? { starting_after: after } : {}),
-          })
-        ),
-        paginateAll<Stripe.Subscription>((after) =>
-          stripeClient.subscriptions.list({
-            status: "canceled",
-            limit: 100,
-            ...(after ? { starting_after: after } : {}),
-          })
-        ),
-      ]);
+      let activeSubscriptions: Stripe.Subscription[] = [];
+      let allCancelledSubs: Stripe.Subscription[] = [];
+      try {
+        [activeSubscriptions, allCancelledSubs] = await Promise.all([
+          paginateAll<Stripe.Subscription>((after) =>
+            stripeClient.subscriptions.list({
+              status: "active",
+              limit: 100,
+              ...(after ? { starting_after: after } : {}),
+            })
+          ),
+          paginateAll<Stripe.Subscription>((after) =>
+            stripeClient.subscriptions.list({
+              status: "canceled",
+              limit: 100,
+              ...(after ? { starting_after: after } : {}),
+            })
+          ),
+        ]);
+      } catch (e) {
+        console.error("[kpis/business] Subscription fetch failed:", e);
+      }
 
       // Management client count = currently active subscriptions
       managementClients = new Set(
@@ -165,15 +202,8 @@ export async function GET(req: NextRequest) {
         )
       ).size;
 
-      // Historical MRR = subs that were active at any point during the period
-      // Active subs: created before period end
-      // Cancelled subs: created before period end AND cancelled_at >= period start
-      const activeDuringPeriod = [
-        ...activeSubscriptions.filter((sub) => sub.created < endUnix),
-        ...allCancelledSubs.filter(
-          (sub) => sub.created < endUnix && (sub.canceled_at ?? 0) >= startUnix
-        ),
-      ];
+      // MRR = currently active subscriptions only (true MRR, not historical)
+      const activeDuringPeriod = activeSubscriptions;
 
       mrr = activeDuringPeriod.reduce((sum, sub) => {
         const item = sub.items.data[0];
@@ -221,27 +251,13 @@ export async function GET(req: NextRequest) {
         return sum + toMonthlyCents(item);
       }, 0) / 100;
 
-      // 5. Charges in period → failed payments + processing fees
-      // Expand balance_transaction so we get the Stripe fee on each charge directly,
-      // avoiding the unreliable balanceTransactions.list({ type }) filter.
-      try {
-        const allCharges = await paginateAll<Stripe.Charge & { balance_transaction: Stripe.BalanceTransaction | null }>((after) =>
-          stripeClient.charges.list({
-            created: { gte: startUnix, lt: endUnix },
-            expand: ["data.balance_transaction"],
-            limit: 100,
-            ...(after ? { starting_after: after } : {}),
-          }) as Promise<{ data: (Stripe.Charge & { balance_transaction: Stripe.BalanceTransaction | null })[]; has_more: boolean }>
-        );
-        failedPayments = allCharges
-          .filter((c) => c.status === "failed")
-          .reduce((sum, c) => sum + c.amount, 0) / 100;
-        processingFees = allCharges
-          .filter((c) => c.status === "succeeded" && c.balance_transaction)
-          .reduce((sum, c) => sum + (c.balance_transaction?.fee ?? 0), 0) / 100;
-      } catch (e) {
-        console.error("[kpis/business] Charges fetch failed:", e);
-      }
+      // 5. Failed payments + processing fees — reuse periodCharges fetched above
+      failedPayments = periodCharges
+        .filter((c) => c.status === "failed")
+        .reduce((sum, c) => sum + c.amount, 0) / 100;
+      processingFees = periodCharges
+        .filter((c) => c.status === "succeeded" && c.balance_transaction)
+        .reduce((sum, c) => sum + (c.balance_transaction?.fee ?? 0), 0) / 100;
 
       // 6. Refunds
       try {
@@ -263,6 +279,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       // Revenue
       cashCollected,
+      cashSeries,
       mrr,
       processingFees,
       refunds,

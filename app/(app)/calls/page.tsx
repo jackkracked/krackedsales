@@ -13,7 +13,7 @@ export default function CallsPage() {
           Calls
         </h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Google Meet sessions and GHL dialer calls across all reps
+          Scheduled appointments, Google Meet sessions, and GHL dialer calls across all reps
         </p>
       </div>
       <CallsClient />

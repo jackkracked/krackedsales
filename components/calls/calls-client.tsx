@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ArrowUp,
   ArrowDown,
+  CalendarClock,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { relativeTime, formatDate } from "@/lib/utils/date";
@@ -21,7 +22,7 @@ import { TranscriptDrawer } from "./transcript-drawer";
 
 interface Call {
   id: string;
-  callType: "meet" | "dialer";
+  callType: "meet" | "dialer" | "scheduled";
   direction: "inbound" | "outbound" | null;
   contactId: string | null;
   contactName: string | null;
@@ -29,10 +30,13 @@ interface Call {
   repName: string | null;
   startedAt: string;
   durationSeconds: number | null;
+  status: string | null;
   transcriptAvailable: boolean;
   recordingAvailable: boolean;
   meetConferenceId?: string;
   smartNotesUrl?: string;
+  fathomRecordingId?: number | null;
+  fathomShareUrl?: string | null;
 }
 
 interface CallsData {
@@ -51,7 +55,7 @@ interface UserCalendar {
   name: string;
 }
 
-type CallTypeFilter = "all" | "meet" | "dialer";
+type CallTypeFilter = "all" | "meet" | "dialer" | "scheduled";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -87,7 +91,9 @@ function defaultSince(): string {
 }
 
 function defaultUntil(): string {
-  return isoDate(new Date());
+  const d = new Date();
+  d.setDate(d.getDate() + 30);
+  return isoDate(d);
 }
 
 // ─── Skeleton row ─────────────────────────────────────────────────────────────
@@ -95,7 +101,7 @@ function defaultUntil(): string {
 function SkeletonRow({ i }: { i: number }) {
   return (
     <tr className="border-b border-border/30" style={{ animationDelay: `${i * 40}ms` }}>
-      {[48, 160, 120, 60, 80, 60, 64].map((w, j) => (
+      {[48, 160, 120, 60, 80, 60, 56, 64].map((w, j) => (
         <td key={j} className="px-4 py-3">
           <div
             className="h-2.5 rounded-full bg-muted animate-pulse"
@@ -223,7 +229,8 @@ export function CallsClient() {
 
   // Build query params
   const params = new URLSearchParams();
-  if (type !== "all") params.set("type", type);
+  if (type === "meet") params.set("type", "meet,scheduled");
+  else if (type !== "all") params.set("type", type);
   if (repFilter.length > 0) params.set("reps", repFilter.join(","));
   if (since) params.set("since", since);
   if (until) params.set("until", until);
@@ -295,7 +302,7 @@ export function CallsClient() {
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {t === "all" ? "All" : t === "meet" ? "Meet" : "Dialer"}
+              {t === "all" ? "All" : t === "meet" ? "Meet" : t === "dialer" ? "Dialer" : "Meet"}
             </button>
           ))}
         </div>
@@ -416,6 +423,11 @@ export function CallsClient() {
                   Duration
                 </span>
               </th>
+              <th className="px-4 py-3 text-left w-24 align-middle">
+                <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                  Status
+                </span>
+              </th>
               <th className="px-4 py-3 text-right w-20 align-middle">
                 <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Actions
@@ -428,7 +440,7 @@ export function CallsClient() {
               Array.from({ length: 12 }, (_, i) => <SkeletonRow key={i} i={i} />)
             ) : calls.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-20 text-center">
+                <td colSpan={8} className="py-20 text-center">
                   <p className="text-sm font-medium text-foreground mb-1">No calls found</p>
                   {(search || type !== "all" || repFilter.length > 0) && (
                     <p className="text-xs text-muted-foreground">
@@ -468,8 +480,12 @@ function CallRow({
   call: Call;
   onOpenTranscript: () => void;
 }) {
+  const isFuture = new Date(call.startedAt) > new Date();
   return (
-    <tr className="border-b border-border/30 transition-colors duration-100 hover:bg-muted/20">
+    <tr className={cn(
+      "border-b border-border/30 transition-colors duration-100 hover:bg-muted/20",
+      isFuture && "bg-emerald-50/30"
+    )}>
       {/* Type */}
       <td className="px-4 py-3">
         <CallTypeBadge type={call.callType} />
@@ -510,7 +526,10 @@ function CallRow({
       {/* Date */}
       <td className="px-4 py-3">
         <span
-          className="text-xs text-muted-foreground"
+          className={cn(
+            "text-xs font-medium",
+            isFuture ? "text-emerald-600" : "text-muted-foreground"
+          )}
           title={formatDate(call.startedAt)}
         >
           {relativeTime(call.startedAt)}
@@ -524,9 +543,27 @@ function CallRow({
         </span>
       </td>
 
+      {/* Status */}
+      <td className="px-4 py-3">
+        {call.status ? (
+          <AppointmentStatusBadge status={call.status} />
+        ) : (
+          <span className="text-muted-foreground/40 text-sm">—</span>
+        )}
+      </td>
+
       {/* Actions */}
       <td className="px-4 py-3">
         <div className="flex items-center justify-end gap-1">
+          {/* Fathom indicator — shows when call has a Fathom transcript */}
+          {call.transcriptAvailable && call.fathomRecordingId != null && (
+            <span
+              title="Fathom transcript available"
+              className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400 mr-1"
+            >
+              F
+            </span>
+          )}
           <button
             onClick={call.transcriptAvailable ? onOpenTranscript : undefined}
             disabled={!call.transcriptAvailable}
@@ -560,14 +597,38 @@ function CallRow({
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
 
-function CallTypeBadge({ type }: { type: "meet" | "dialer" }) {
-  return type === "meet" ? (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
-      Meet
-    </span>
-  ) : (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
+function CallTypeBadge({ type }: { type: "meet" | "dialer" | "scheduled" }) {
+  if (type === "meet" || type === "scheduled") {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+        Meet
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-400">
       Dialer
+    </span>
+  );
+}
+
+const STATUS_STYLES: Record<string, string> = {
+  booked:    "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400",
+  confirmed: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400",
+  showed:    "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400",
+  completed: "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400",
+  noshow:    "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400",
+  cancelled: "bg-zinc-100 text-zinc-500 dark:bg-zinc-500/15 dark:text-zinc-400",
+};
+
+function AppointmentStatusBadge({ status }: { status: string }) {
+  const normalized = status.toLowerCase().replace(/[-_\s]/g, "");
+  const style = STATUS_STYLES[normalized] ?? "bg-muted text-muted-foreground";
+  const label = normalized === "noshow" ? "No-show" : status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+
+  return (
+    <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium", style)}>
+      {label}
     </span>
   );
 }
@@ -576,10 +637,10 @@ function DirectionIndicator({
   type,
   direction,
 }: {
-  type: "meet" | "dialer";
+  type: "meet" | "dialer" | "scheduled";
   direction: "inbound" | "outbound" | null;
 }) {
-  if (type === "meet" || direction === null) {
+  if (type === "meet" || type === "scheduled" || direction === null) {
     return <span className="text-muted-foreground/40 text-sm">—</span>;
   }
   return direction === "outbound" ? (

@@ -78,6 +78,13 @@ const MEET_SCOPES = [
   "https://www.googleapis.com/auth/meetings.space.readonly",
 ];
 
+// Requires the service account's domain-wide delegation to include this scope:
+//   https://www.googleapis.com/auth/drive.readonly
+// Add it in Google Admin Console → Security → API controls → Domain-wide delegation
+const DRIVE_SCOPES = [
+  "https://www.googleapis.com/auth/drive.readonly",
+];
+
 /**
  * Returns a Google Calendar API client impersonating the given user.
  */
@@ -93,6 +100,15 @@ export async function calendarClient(userEmail: string) {
 export async function meetClient(userEmail: string) {
   const auth = makeJWT(userEmail, MEET_SCOPES);
   return google.meet({ version: "v2", auth });
+}
+
+/**
+ * Returns a Google Drive API client impersonating the given user.
+ * Used to search for Gemini meeting notes created after each Google Meet call.
+ */
+export async function driveClient(userEmail: string) {
+  const auth = makeJWT(userEmail, DRIVE_SCOPES);
+  return google.drive({ version: "v3", auth });
 }
 
 export { isConfigured as isGoogleConfigured };

@@ -4,6 +4,8 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { X, ChevronRight, ChevronLeft, Search, Plus, Trash2, Check } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { format } from "date-fns";
+import { useUserTimezone } from "@/providers/timezone-provider";
+import { toZonedDate } from "@/lib/utils/timezone";
 
 function toTitleCase(str: string): string {
   return str.replace(/\b\w/g, (c) => c.toUpperCase());
@@ -30,6 +32,12 @@ interface CustomFlow {
   type: "email" | "sms";
 }
 
+interface DepositInstalment {
+  id: string;
+  amount: number;
+  dueDate: string;
+}
+
 interface FormState {
   // Step 0
   contact: GHLContact | null;
@@ -50,6 +58,9 @@ interface FormState {
   billingInterval: "day" | "week" | "month" | "year";
   billingIntervalCount: string;
   instalments: Instalment[];
+  // Deposit (management subscription only)
+  hasDeposit: boolean;
+  depositInstalments: DepositInstalment[];
   // Step 4 — Review
   notes: string;
 }
@@ -92,6 +103,10 @@ const STEPS = ["Client & Type", "Scope", "Price", "Payment", "Review"];
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function newInstalment(): Instalment {
+  return { id: Math.random().toString(36).slice(2), amount: 0, dueDate: format(new Date(), "yyyy-MM-dd") };
+}
+
+function newDepositInstalment(): DepositInstalment {
   return { id: Math.random().toString(36).slice(2), amount: 0, dueDate: format(new Date(), "yyyy-MM-dd") };
 }
 
@@ -154,6 +169,14 @@ function ContactSearch({ value, onChange, onClear }: {
   const [open, setOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Inline create contact state
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newFirstName, setNewFirstName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+
   useEffect(() => { if (value) setQuery(value.name); }, [value]);
 
   function search(q: string) {
@@ -170,6 +193,51 @@ function ContactSearch({ value, onChange, onClear }: {
     }, 300);
   }
 
+  function resetCreateForm() {
+    setShowCreateForm(false);
+    setNewFirstName("");
+    setNewEmail("");
+    setNewPhone("");
+    setCreateError("");
+  }
+
+  async function handleCreateContact() {
+    if (!newFirstName.trim()) return;
+    setCreating(true);
+    setCreateError("");
+    try {
+      const res = await fetch("/api/ghl/contacts/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          firstName: newFirstName.trim(),
+          email: newEmail.trim() || undefined,
+          phone: newPhone.trim() || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? "Failed to create contact");
+      }
+      const data = await res.json();
+      const contact: GHLContact = {
+        id: data.contact?.id ?? data.id,
+        name: newFirstName.trim(),
+        email: newEmail.trim() || null,
+      };
+      onChange(contact);
+      setQuery(toTitleCase(contact.name));
+      resetCreateForm();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  // Whether search has been performed and returned no results
+  const searchedWithNoResults = open && !loading && query.length >= 2 && results.length === 0;
+
   return (
     <div className="relative">
       <div className="relative">
@@ -181,25 +249,108 @@ function ContactSearch({ value, onChange, onClear }: {
           className="w-full pl-9 pr-3 py-2 text-sm bg-background border border-border rounded-[7px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
         />
       </div>
-      {open && (loading || results.length > 0) && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-[8px] shadow-lg z-50 max-h-48 overflow-y-auto">
+      {open && !showCreateForm && (
+        <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-[8px] shadow-lg z-50 max-h-56 overflow-y-auto">
           {loading ? (
             <div className="px-3 py-2.5 text-xs text-muted-foreground">Searching…</div>
-          ) : results.map(c => (
-            <button key={c.id} type="button" onMouseDown={() => { onChange({ ...c, name: toTitleCase(c.name) }); setQuery(toTitleCase(c.name)); setOpen(false); }}
-              className="w-full text-left px-3 py-2.5 hover:bg-muted/50 transition-colors">
-              <p className="text-sm font-medium text-foreground">{toTitleCase(c.name)}</p>
-              {c.email && <p className="text-xs text-muted-foreground">{c.email}</p>}
-            </button>
-          ))}
+          ) : (
+            <>
+              {results.map(c => (
+                <button key={c.id} type="button" onMouseDown={() => { onChange({ ...c, name: toTitleCase(c.name) }); setQuery(toTitleCase(c.name)); setOpen(false); }}
+                  className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors border-b border-border/30 last:border-0">
+                  <p className="text-sm font-medium text-foreground">{toTitleCase(c.name)}</p>
+                  {c.email && <p className="text-xs text-muted-foreground">{c.email}</p>}
+                </button>
+              ))}
+              {results.length === 0 && query.length >= 2 && (
+                <div className="px-3 py-2 text-xs text-muted-foreground">No contacts found</div>
+              )}
+              <button
+                type="button"
+                onMouseDown={() => {
+                  setShowCreateForm(true);
+                  setNewFirstName(query.length >= 2 ? query : "");
+                  setOpen(false);
+                }}
+                className="w-full text-left px-3 py-2 text-sm text-primary font-medium flex items-center gap-1.5 hover:bg-primary/5 transition-colors border-t border-border"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Create new contact{query.length >= 2 ? ` "${query}"` : ""}
+              </button>
+            </>
+          )}
         </div>
       )}
+
+      {/* Inline create contact form */}
+      {showCreateForm && !value && (
+        <div className="mt-2 border border-border rounded-[8px] p-3 space-y-3 bg-background">
+          <div>
+            <label className="block text-[11px] font-medium text-foreground mb-1">
+              Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={newFirstName}
+              onChange={e => setNewFirstName(e.target.value)}
+              placeholder="Contact name…"
+              className="w-full px-3 py-2 text-sm bg-background border border-border rounded-[7px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-foreground mb-1">Email</label>
+            <input
+              type="email"
+              value={newEmail}
+              onChange={e => setNewEmail(e.target.value)}
+              placeholder="email@example.com"
+              className="w-full px-3 py-2 text-sm bg-background border border-border rounded-[7px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-foreground mb-1">Phone</label>
+            <input
+              type="tel"
+              value={newPhone}
+              onChange={e => setNewPhone(e.target.value)}
+              placeholder="+1 (555) 000-0000"
+              className="w-full px-3 py-2 text-sm bg-background border border-border rounded-[7px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+            />
+          </div>
+          {createError && (
+            <p className="text-xs text-red-500 bg-red-50 px-3 py-2 rounded-[6px]">{createError}</p>
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCreateContact}
+              disabled={!newFirstName.trim() || creating}
+              className={cn(
+                "flex-1 px-3 py-2 text-sm font-medium rounded-[7px] transition-all",
+                newFirstName.trim() && !creating
+                  ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                  : "bg-muted text-muted-foreground cursor-not-allowed"
+              )}
+            >
+              {creating ? "Creating…" : "Create & Select"}
+            </button>
+            <button
+              type="button"
+              onClick={resetCreateForm}
+              className="px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {value && (
         <div className="mt-2 flex items-center gap-2 px-2.5 py-1.5 bg-primary/5 border border-primary/20 rounded-[6px]">
           <Check className="w-3 h-3 text-primary shrink-0" />
           <span className="text-xs text-primary font-medium">{toTitleCase(value.name)}</span>
           {value.email && <span className="text-xs text-muted-foreground">{value.email}</span>}
-          <button type="button" onClick={() => { onClear(); setQuery(""); }}
+          <button type="button" onClick={() => { onClear(); setQuery(""); resetCreateForm(); }}
             className="ml-auto p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors">
             <X className="w-3 h-3" />
           </button>
@@ -281,6 +432,7 @@ export interface ProposalCreateModalProps {
 }
 
 export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalProps) {
+  const tz = useUserTimezone();
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -297,11 +449,13 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
     scopeNotes: "",
     totalAmount: "",
     currency: "USD",
-    startDate: format(new Date(), "yyyy-MM-dd"),
+    startDate: format(toZonedDate(new Date(), tz), "yyyy-MM-dd"),
     paymentStructure: "subscription",
     billingInterval: "month",
     billingIntervalCount: "1",
     instalments: [newInstalment(), newInstalment()],
+    hasDeposit: false,
+    depositInstalments: [newDepositInstalment()],
     notes: "",
   });
 
@@ -364,6 +518,32 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
     }));
   }
 
+  function updateDepositInstalment(id: string, field: "amount" | "dueDate", val: string | number) {
+    setForm(prev => ({ ...prev, depositInstalments: prev.depositInstalments.map(i => i.id === id ? { ...i, [field]: val } : i) }));
+  }
+
+  function addDepositInstalment() {
+    setForm(prev => ({ ...prev, depositInstalments: [...prev.depositInstalments, newDepositInstalment()] }));
+  }
+
+  function removeDepositInstalment(id: string) {
+    setForm(prev => ({ ...prev, depositInstalments: prev.depositInstalments.filter(i => i.id !== id) }));
+  }
+
+  function distributeDepositEvenly() {
+    const cycleAmt = parseFloat(form.totalAmount) || 0;
+    const count = form.depositInstalments.length;
+    if (!count) return;
+    const each = Math.round((cycleAmt / count) * 100) / 100;
+    setForm(prev => ({
+      ...prev,
+      depositInstalments: prev.depositInstalments.map((i, idx) => ({
+        ...i,
+        amount: idx === count - 1 ? Math.round((cycleAmt - each * (count - 1)) * 100) / 100 : each,
+      })),
+    }));
+  }
+
   function canAdvance(): boolean {
     if (step === 0) return !!form.contact;
     if (step === 2) return parseFloat(form.totalAmount) > 0;
@@ -371,6 +551,11 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
       const total = parseFloat(form.totalAmount) || 0;
       const sum = form.instalments.reduce((acc, i) => acc + (i.amount || 0), 0);
       return Math.abs(sum - total) < 0.01 && form.instalments.length > 0;
+    }
+    if (step === 3 && form.hasDeposit) {
+      const cycleAmt = parseFloat(form.totalAmount) || 0;
+      const depositSum = form.depositInstalments.reduce((acc, i) => acc + (i.amount || 0), 0);
+      return Math.abs(depositSum - cycleAmt) < 0.01 && form.depositInstalments.length > 0;
     }
     return true;
   }
@@ -398,6 +583,14 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
       if (form.paymentStructure === "subscription") {
         payload.billingInterval = form.billingInterval;
         payload.billingIntervalCount = parseInt(form.billingIntervalCount) || 1;
+
+        if (form.hasDeposit) {
+          payload.hasDeposit = true;
+          payload.depositTotal = parseFloat(form.totalAmount);
+          payload.depositInstalments = form.depositInstalments.map((i, idx) => ({
+            number: idx + 1, amount: i.amount, dueDate: i.dueDate,
+          }));
+        }
       }
 
       if (form.paymentStructure === "instalment") {
@@ -694,6 +887,116 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
                   <p className="text-[11px] text-muted-foreground">
                     Bills every {form.billingIntervalCount || "1"} {form.billingInterval}(s) — {form.currency} {parseFloat(form.totalAmount || "0").toLocaleString()} per cycle
                   </p>
+
+                  {/* Deposit toggle */}
+                  <div className="mt-4 pt-4 border-t border-border">
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.hasDeposit}
+                        onChange={e => set("hasDeposit", e.target.checked)}
+                        className="w-4 h-4 rounded border-border text-primary focus:ring-primary/30"
+                      />
+                      <span className="text-xs font-medium text-foreground">Collect deposit before start?</span>
+                    </label>
+                    <p className="text-[11px] text-muted-foreground mt-1 ml-6.5">
+                      Deposit covers the first billing cycle. Subscription auto-starts when fully paid.
+                    </p>
+                  </div>
+
+                  {form.hasDeposit && (
+                    <div className="mt-3 space-y-3">
+                      {/* Deposit total (read-only) */}
+                      <div className="flex items-center gap-2 px-3 py-2 bg-primary/5 border border-primary/20 rounded-[6px]">
+                        <span className="text-xs text-primary font-medium">
+                          Deposit total: {currencySymbol}{parseFloat(form.totalAmount || "0").toLocaleString()}
+                        </span>
+                        <span className="text-[10px] text-primary/60 ml-auto">= 1 billing cycle</span>
+                      </div>
+
+                      {/* Deposit instalment schedule */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-xs font-medium text-foreground">Deposit Payments</label>
+                          <button type="button" onClick={distributeDepositEvenly}
+                            className="text-[11px] font-medium text-primary hover:text-primary/80 transition-colors">
+                            Distribute evenly
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          {form.depositInstalments.map((inst, idx) => (
+                            <div key={inst.id} className="flex items-center gap-2">
+                              <span className="text-xs text-muted-foreground w-4 shrink-0 text-center">{idx + 1}</span>
+                              <div className="relative flex-1">
+                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">{currencySymbol}</span>
+                                <input type="number" value={inst.amount || ""} onChange={e => updateDepositInstalment(inst.id, "amount", parseFloat(e.target.value) || 0)}
+                                  placeholder="0" min="0" step="0.01"
+                                  className="w-full pl-6 pr-2 py-1.5 text-sm bg-background border border-border rounded-[6px] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+                                />
+                              </div>
+                              <input type="date" value={inst.dueDate} onChange={e => updateDepositInstalment(inst.id, "dueDate", e.target.value)}
+                                className="flex-1 px-2.5 py-1.5 text-sm bg-background border border-border rounded-[6px] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+                              />
+                              {form.depositInstalments.length > 1 && (
+                                <button type="button" onClick={() => removeDepositInstalment(inst.id)}
+                                  className="p-1.5 text-muted-foreground hover:text-red-500 transition-colors shrink-0">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        <button type="button" onClick={addDepositInstalment}
+                          className="mt-2 flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors">
+                          <Plus className="w-3.5 h-3.5" />
+                          Add deposit payment
+                        </button>
+
+                        {/* Validation */}
+                        {totalAmt > 0 && (() => {
+                          const depositSum = form.depositInstalments.reduce((acc, i) => acc + (i.amount || 0), 0);
+                          const diff = Math.abs(depositSum - totalAmt);
+                          return (
+                            <div className={cn("mt-3 px-3 py-2 rounded-[6px] text-xs",
+                              diff < 0.01 ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700")}>
+                              {diff < 0.01
+                                ? `Deposit total matches — ${form.currency} ${depositSum.toLocaleString()}`
+                                : `Sum (${form.currency} ${depositSum.toLocaleString()}) doesn't match cycle amount (${form.currency} ${totalAmt.toLocaleString()}) — difference: ${form.currency} ${diff.toFixed(2)}`
+                              }
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {/* Date summary */}
+                      {form.startDate && (
+                        <div className="px-3 py-2.5 bg-muted/40 rounded-[6px] space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Retainer Start Date</span>
+                            <span className="font-medium text-foreground">{format(new Date(form.startDate + "T00:00:00"), "d MMM yyyy")}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">First Subscription Charge</span>
+                            <span className="font-medium text-foreground">
+                              {(() => {
+                                const start = new Date(form.startDate + "T00:00:00");
+                                const interval = form.billingInterval;
+                                const count = parseInt(form.billingIntervalCount) || 1;
+                                if (interval === "day") start.setDate(start.getDate() + count);
+                                else if (interval === "week") start.setDate(start.getDate() + count * 7);
+                                else if (interval === "month") start.setMonth(start.getMonth() + count);
+                                else if (interval === "year") start.setFullYear(start.getFullYear() + count);
+                                return format(start, "d MMM yyyy");
+                              })()}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            Deposits cover the first {form.billingIntervalCount || "1"} {form.billingInterval}(s). Recurring billing starts after.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
               ) : (
                 <>
@@ -779,14 +1082,14 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
                   label="Payment"
                   value={
                     form.paymentStructure === "subscription"
-                      ? `Subscription — every ${form.billingIntervalCount} ${form.billingInterval}(s)`
+                      ? `Subscription — every ${form.billingIntervalCount} ${form.billingInterval}(s)${form.hasDeposit ? ` (${form.depositInstalments.length} deposit payment${form.depositInstalments.length !== 1 ? "s" : ""} first)` : ""}`
                       : form.paymentStructure === "instalment"
                       ? `${form.instalments.length} instalments`
                       : "Single payment"
                   }
                 />
                 {scopePreview && <ReviewRow label="Scope" value={scopePreview} />}
-                {form.startDate && <ReviewRow label="Start Date" value={format(new Date(form.startDate + "T00:00:00"), "d MMM yyyy")} />}
+                {form.startDate && <ReviewRow label="Start Date" value={format(toZonedDate(new Date(form.startDate + "T00:00:00"), tz), "d MMM yyyy")} />}
               </div>
 
               <div>

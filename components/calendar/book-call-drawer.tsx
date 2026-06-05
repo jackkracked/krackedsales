@@ -3,18 +3,19 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format, addMinutes, parseISO } from "date-fns";
-import { X, Video, Phone } from "lucide-react";
+import { X, Phone, Check, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { useUserTimezone } from "@/providers/timezone-provider";
+import { toZonedDate } from "@/lib/utils/timezone";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface UserCalendar {
+interface TeamMember {
   id: string;
-  repName: string;
-  repEmail: string;
-  ghlCalendarId: string | null;
+  name: string;
+  email: string;
+  ghlUserId: string | null;
   color: string;
-  isActive: boolean;
 }
 
 interface ContactResult {
@@ -24,10 +25,22 @@ interface ContactResult {
   phone: string | null;
 }
 
+interface GhlCalendarOption {
+  id: string;
+  name: string;
+}
+
+interface BusyBlock {
+  start: string;
+  end: string;
+}
+
 interface BookCallDrawerProps {
   open: boolean;
   onClose: () => void;
   onBooked?: () => void;
+  initialDate?: string;      // "yyyy-MM-dd"
+  initialStartTime?: string; // "HH:mm"
 }
 
 interface FormState {
@@ -45,8 +58,8 @@ interface FormState {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function todayStr(): string {
-  return format(new Date(), "yyyy-MM-dd");
+function todayStr(tz: string): string {
+  return format(toZonedDate(new Date(), tz), "yyyy-MM-dd");
 }
 
 function defaultEndTime(startTime: string): string {
@@ -62,6 +75,98 @@ function defaultEndTime(startTime: string): string {
 function buildISODateTime(date: string, time: string): string {
   // Returns ISO 8601 string like "2026-05-07T14:00:00"
   return `${date}T${time}:00`;
+}
+
+// ─── Conflict helpers ─────────────────────────────────────────────────────────
+
+const TIMELINE_START_HOUR = 8;
+const TIMELINE_END_HOUR = 18;
+const TIMELINE_SPAN = TIMELINE_END_HOUR - TIMELINE_START_HOUR; // 10 hours
+
+/** Convert "HH:mm" to fractional hours. */
+function timeToHours(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return h + m / 60;
+}
+
+/** Convert an ISO datetime string to fractional hours. */
+function isoToHours(iso: string): number {
+  const d = parseISO(iso);
+  return d.getHours() + d.getMinutes() / 60;
+}
+
+/** Convert fractional hours to a % offset within the 8am-6pm window. */
+function hoursToPercent(hours: number): number {
+  return Math.max(0, Math.min(100, ((hours - TIMELINE_START_HOUR) / TIMELINE_SPAN) * 100));
+}
+
+function ConflictTimeline({
+  busyBlocks,
+  startTime,
+  endTime,
+}: {
+  busyBlocks: BusyBlock[];
+  startTime: string; // "HH:mm"
+  endTime: string;   // "HH:mm"
+}) {
+  const selStart = hoursToPercent(timeToHours(startTime));
+  const selEnd = hoursToPercent(timeToHours(endTime));
+  const selWidth = Math.max(selEnd - selStart, 1);
+
+  // Check if selected window overlaps any busy block
+  const selStartH = timeToHours(startTime);
+  const selEndH = timeToHours(endTime);
+  const hasOverlap = busyBlocks.some((b) => {
+    const bStart = isoToHours(b.start);
+    const bEnd = isoToHours(b.end);
+    return bStart < selEndH && bEnd > selStartH;
+  });
+
+  return (
+    <div className="space-y-2">
+      {/* Timeline bar */}
+      <div className="relative w-full h-6 bg-muted/40 rounded-[6px] border border-border overflow-hidden">
+        {/* Busy blocks */}
+        {busyBlocks.map((b, i) => {
+          const left = hoursToPercent(isoToHours(b.start));
+          const right = hoursToPercent(isoToHours(b.end));
+          const width = Math.max(right - left, 0.5);
+          return (
+            <div
+              key={i}
+              className="absolute top-0 bottom-0 bg-rose-400/50 rounded-[2px]"
+              style={{ left: `${left}%`, width: `${width}%` }}
+            />
+          );
+        })}
+        {/* Selected time window */}
+        <div
+          className="absolute top-0 bottom-0 bg-primary/60 rounded-[2px] border border-primary/80"
+          style={{ left: `${selStart}%`, width: `${selWidth}%` }}
+        />
+      </div>
+
+      {/* Time labels */}
+      <div className="flex justify-between text-[10px] text-muted-foreground px-0.5">
+        <span>8 AM</span>
+        <span>12 PM</span>
+        <span>6 PM</span>
+      </div>
+
+      {/* Status */}
+      {hasOverlap ? (
+        <div className="flex items-center gap-1.5 text-xs text-amber-600">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          <span>Conflicts with existing events</span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5 text-xs text-emerald-600">
+          <Check className="w-3.5 h-3.5 shrink-0" />
+          <span>No conflicts</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Field wrapper ────────────────────────────────────────────────────────────
@@ -170,7 +275,8 @@ function ContactSearch({
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export function BookCallDrawer({ open, onClose, onBooked }: BookCallDrawerProps) {
+export function BookCallDrawer({ open, onClose, onBooked, initialDate, initialStartTime }: BookCallDrawerProps) {
+  const tz = useUserTimezone();
   const [form, setForm]       = useState<FormState>({
     contactId:    "",
     contactName:  "",
@@ -178,9 +284,9 @@ export function BookCallDrawer({ open, onClose, onBooked }: BookCallDrawerProps)
     repEmail:     "",
     callType:     "meet",
     ghlCalendarId: "",
-    date:          todayStr(),
-    startTime:     "09:00",
-    endTime:       "09:30",
+    date:          initialDate ?? todayStr(tz),
+    startTime:     initialStartTime ?? "09:00",
+    endTime:       defaultEndTime(initialStartTime ?? "09:00"),
     notes:         "",
   });
   const [loading, setLoading] = useState(false);
@@ -191,34 +297,59 @@ export function BookCallDrawer({ open, onClose, onBooked }: BookCallDrawerProps)
     setForm((f) => ({ ...f, [key]: val }));
   }
 
-  // ── User calendars ────────────────────────────────────────────────────────
-  const { data: calData } = useQuery<{ userCalendars: UserCalendar[] }>({
-    queryKey: ["user-calendars"],
-    queryFn: () => fetch("/api/settings/user-calendars").then((r) => r.json()),
+  // ── Team members ──────────────────────────────────────────────────────────
+  const { data: teamData } = useQuery<{ members: TeamMember[] }>({
+    queryKey: ["calendar-team"],
+    queryFn: () => fetch("/api/calendar/team").then((r) => r.json()),
     staleTime: 5 * 60_000,
   });
 
-  const userCalendars = calData?.userCalendars?.filter((c) => c.isActive) ?? [];
+  const teamMembers = teamData?.members ?? [];
 
-  // Seed first rep when calendars load
+  // ── GHL calendars (for dropdown) ──────────────────────────────────────
+  const { data: ghlCalData, isLoading: ghlCalendarsLoading } = useQuery<{
+    calendars: GhlCalendarOption[];
+  }>({
+    queryKey: ["ghl-calendars"],
+    queryFn: () => fetch("/api/calendar/ghl-calendars").then((r) => r.json()),
+    staleTime: 5 * 60_000,
+  });
+
+  const ghlCalendars = ghlCalData?.calendars ?? [];
+
+  // ── Conflict detection ────────────────────────────────────────────────
+  const conflictsEnabled = !!form.repEmail && !!form.date;
+  const { data: conflictData } = useQuery<{ busyBlocks: BusyBlock[] }>({
+    queryKey: ["conflicts", form.repEmail, form.date],
+    queryFn: () => {
+      const since = `${form.date}T00:00:00`;
+      const until = `${form.date}T23:59:59`;
+      return fetch(
+        `/api/calendar/conflicts?repEmail=${encodeURIComponent(form.repEmail)}&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}`
+      ).then((r) => r.json());
+    },
+    enabled: conflictsEnabled,
+    staleTime: 30_000,
+  });
+
+  const busyBlocks = conflictData?.busyBlocks ?? [];
+
+  // Seed first rep when members load
   useEffect(() => {
-    if (userCalendars.length > 0 && !form.repEmail) {
-      const first = userCalendars[0];
+    if (teamMembers.length > 0 && !form.repEmail) {
+      const first = teamMembers[0];
       setForm((f) => ({
         ...f,
-        repEmail:      first.repEmail,
-        ghlCalendarId: first.ghlCalendarId ?? "",
+        repEmail: first.email,
       }));
     }
-  }, [userCalendars]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [teamMembers]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // When rep changes, update ghlCalendarId to that rep's calendar
+  // When rep changes, update email
   function handleRepChange(email: string) {
-    const cal = userCalendars.find((c) => c.repEmail === email);
     setForm((f) => ({
       ...f,
-      repEmail:      email,
-      ghlCalendarId: cal?.ghlCalendarId ?? "",
+      repEmail: email,
     }));
   }
 
@@ -236,8 +367,16 @@ export function BookCallDrawer({ open, onClose, onBooked }: BookCallDrawerProps)
     if (open) {
       setSuccess(false);
       setError(null);
+      const date = initialDate ?? todayStr(tz);
+      const startTime = initialStartTime ?? "09:00";
+      setForm((f) => ({
+        ...f,
+        date,
+        startTime,
+        endTime: defaultEndTime(startTime),
+      }));
     }
-  }, [open]);
+  }, [open, initialDate, initialStartTime]);
 
   const handleContactSelect = useCallback((c: ContactResult) => {
     setForm((f) => ({
@@ -350,7 +489,7 @@ export function BookCallDrawer({ open, onClose, onBooked }: BookCallDrawerProps)
               </div>
               <p className="text-sm font-semibold text-foreground">Call booked!</p>
               <p className="text-xs text-muted-foreground">
-                Confirmation sent to {form.contactName}.
+                Appointment created for {form.contactName}.
               </p>
             </div>
           ) : (
@@ -373,50 +512,52 @@ export function BookCallDrawer({ open, onClose, onBooked }: BookCallDrawerProps)
                   required
                 >
                   <option value="" disabled>Select a rep…</option>
-                  {userCalendars.map((uc) => (
-                    <option key={uc.repEmail} value={uc.repEmail}>
-                      {uc.repName}
+                  {teamMembers.map((m) => (
+                    <option key={m.id} value={m.email}>
+                      {m.name}
                     </option>
                   ))}
                 </select>
               </Field>
 
-              {/* Call type */}
-              <Field label="Call Type">
-                <div className="flex gap-2">
-                  {(["meet", "dialer"] as const).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => set("callType", t)}
-                      className={cn(
-                        "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[8px] text-sm font-medium border transition-all",
-                        form.callType === t
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
-                      )}
-                    >
-                      {t === "meet" ? <Video className="w-4 h-4" /> : <Phone className="w-4 h-4" />}
-                      {t === "meet" ? "Google Meet" : "Dialer"}
-                    </button>
-                  ))}
-                </div>
-              </Field>
+              {/* Call type — Google Meet checkbox */}
+              <label className="flex items-center gap-2.5 cursor-pointer group">
+                <span
+                  className={cn(
+                    "flex items-center justify-center w-[18px] h-[18px] rounded-[4px] border transition-all shrink-0",
+                    form.callType === "meet"
+                      ? "bg-primary border-primary"
+                      : "border-border bg-card group-hover:border-primary/40"
+                  )}
+                >
+                  {form.callType === "meet" && <Check className="w-3.5 h-3.5 text-primary-foreground" />}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={form.callType === "meet"}
+                  onChange={(e) => set("callType", e.target.checked ? "meet" : "dialer")}
+                  className="sr-only"
+                />
+                <span className="text-sm text-foreground">Create Google Meet link</span>
+              </label>
 
               {/* GHL Calendar */}
               <Field label="GHL Calendar *">
-                <input
+                <select
                   value={form.ghlCalendarId}
                   onChange={(e) => set("ghlCalendarId", e.target.value)}
-                  placeholder="GHL Calendar ID…"
-                  className={INPUT_CLS}
+                  className={SELECT_CLS}
                   required
-                />
-                {userCalendars.length > 0 && (
-                  <p className="text-[11px] text-muted-foreground mt-1">
-                    Auto-filled from rep settings. Edit if needed.
-                  </p>
-                )}
+                >
+                  <option value="" disabled>
+                    {ghlCalendarsLoading ? "Loading calendars…" : "Select a calendar…"}
+                  </option>
+                  {ghlCalendars.map((cal) => (
+                    <option key={cal.id} value={cal.id}>
+                      {cal.name}
+                    </option>
+                  ))}
+                </select>
               </Field>
 
               {/* Date */}
@@ -451,6 +592,15 @@ export function BookCallDrawer({ open, onClose, onBooked }: BookCallDrawerProps)
                   />
                 </Field>
               </div>
+
+              {/* Conflict preview */}
+              {conflictsEnabled && (
+                <ConflictTimeline
+                  busyBlocks={busyBlocks}
+                  startTime={form.startTime}
+                  endTime={form.endTime}
+                />
+              )}
 
               {/* Notes */}
               <Field label="Notes">

@@ -22,12 +22,7 @@ export function KpiEditSheet({ pool, selected, onSave, onClose, isSaving }: KpiE
       if (draft.length <= 1) return;
       setDraft(draft.filter((k) => k !== key));
     } else {
-      if (draft.length >= 3) {
-        // Replace the last selected one
-        setDraft([...draft.slice(0, 2), key]);
-      } else {
-        setDraft([...draft, key]);
-      }
+      setDraft([...draft, key]);
     }
   }
 
@@ -56,7 +51,7 @@ export function KpiEditSheet({ pool, selected, onSave, onClose, isSaving }: KpiE
               Customise KPIs
             </h3>
             <p className="text-[11.5px] text-muted-foreground mt-0.5">
-              Pick 3 metrics to pin to your dashboard
+              Select metrics to pin to your dashboard
             </p>
           </div>
           <button
@@ -67,29 +62,10 @@ export function KpiEditSheet({ pool, selected, onSave, onClose, isSaving }: KpiE
           </button>
         </div>
 
-        {/* Selection count */}
-        <div className="px-5 py-3 bg-muted/20 border-b border-border">
-          <div className="flex items-center gap-1.5">
-            {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                className={cn(
-                  "h-[3px] flex-1 rounded-full transition-colors duration-200",
-                  draft[i] ? "bg-primary" : "bg-muted/40"
-                )}
-              />
-            ))}
-          </div>
-          <p className="text-[10.5px] text-muted-foreground mt-1.5">
-            {draft.length} of 3 selected
-          </p>
-        </div>
-
         {/* Metric list */}
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
           {pool.map((metric) => {
             const isSelected = draft.includes(metric.key);
-            const position = draft.indexOf(metric.key);
             return (
               <button
                 key={metric.key}
@@ -124,9 +100,7 @@ export function KpiEditSheet({ pool, selected, onSave, onClose, isSaving }: KpiE
                   )}
                 >
                   {isSelected && (
-                    <span className="text-[9px] font-bold text-primary-foreground">
-                      {position + 1}
-                    </span>
+                    <Check className="w-3 h-3 text-primary-foreground" />
                   )}
                 </div>
               </button>
@@ -138,10 +112,10 @@ export function KpiEditSheet({ pool, selected, onSave, onClose, isSaving }: KpiE
         <div className="px-5 py-4 border-t border-border">
           <button
             onClick={() => onSave(draft)}
-            disabled={draft.length !== 3 || isSaving}
+            disabled={draft.length < 1 || isSaving}
             className={cn(
               "w-full py-2.5 rounded-[8px] text-[13px] font-semibold transition-all",
-              draft.length === 3 && !isSaving
+              draft.length >= 1 && !isSaving
                 ? "bg-primary text-primary-foreground hover:opacity-90"
                 : "bg-muted text-muted-foreground cursor-not-allowed"
             )}

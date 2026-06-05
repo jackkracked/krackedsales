@@ -35,6 +35,7 @@ export async function getSessionUser() {
       role: users.role,
       isActive: users.isActive,
       ghlUserId: users.ghlUserId,
+      timezone: users.timezone,
     })
     .from(users)
     .where(eq(users.id, userId))

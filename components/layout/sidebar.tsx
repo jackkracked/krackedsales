@@ -20,9 +20,12 @@ import {
   Users,
   Phone,
   CalendarDays,
+  ListTodo,
   FileText,
   Activity,
+  Workflow,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { NotificationBell } from "@/components/layout/notification-bell";
 
 interface NavItem {
@@ -42,6 +45,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
       { href: "/proposals",  label: "Proposals", icon: FileText },
       { href: "/calls",      label: "Calls",     icon: Phone },
       { href: "/calendar",   label: "Calendar",  icon: CalendarDays },
+      { href: "/tasks",      label: "Tasks",     icon: ListTodo },
       { href: "/inbox",      label: "Inbox",     icon: MessageSquare },
     ],
   },
@@ -57,6 +61,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   {
     label: "Automate",
     items: [
+      { href: "/workflows",  label: "Workflows",  icon: Workflow },
       { href: "/follow-ups", label: "Follow-ups", icon: Send },
       { href: "/templates",  label: "Templates",  icon: Layers },
     ],
@@ -72,6 +77,26 @@ export function Sidebar({ userRole }: SidebarProps) {
   const router = useRouter();
   const { sidebarCollapsed, toggleSidebarCollapsed } = useUIStore();
   const isAdmin = userRole === "admin";
+
+  const { data: fathomStatus } = useQuery<{ connected: boolean }>({
+    queryKey: ["fathom-status"],
+    queryFn: () => fetch("/api/fathom/status").then((r) => r.json()),
+    staleTime: 60_000,
+  });
+  const showFathomDot = fathomStatus?.connected === false;
+
+  // Unread inbox count for badge
+  const { data: awaitingData } = useQuery<{ contactIds: string[] }>({
+    queryKey: ["pipeline-awaiting-reply"],
+    queryFn: async () => {
+      const res = await fetch("/api/ghl/conversations/awaiting-reply");
+      if (!res.ok) return { contactIds: [] };
+      return res.json();
+    },
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: 2 * 60 * 1000,
+  });
+  const inboxUnreadCount = awaitingData?.contactIds?.length ?? 0;
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -166,10 +191,17 @@ export function Sidebar({ userRole }: SidebarProps) {
                         : "text-foreground/70 hover:text-foreground hover:bg-border/50",
                     )}
                   >
-                    <Icon className="w-3.5 h-3.5 shrink-0" />
+                    <span className="relative shrink-0">
+                      <Icon className="w-3.5 h-3.5" />
+                      {label === "Inbox" && inboxUnreadCount > 0 && sidebarCollapsed && (
+                        <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] flex items-center justify-center rounded-full bg-red-500 text-white text-[8px] font-bold px-0.5">
+                          {inboxUnreadCount}
+                        </span>
+                      )}
+                    </span>
                     <span
                       className={cn(
-                        "whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out",
+                        "whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out flex-1",
                         sidebarCollapsed
                           ? "max-w-0 opacity-0 ml-0"
                           : "max-w-[160px] opacity-100 ml-2.5"
@@ -177,6 +209,14 @@ export function Sidebar({ userRole }: SidebarProps) {
                     >
                       {label}
                     </span>
+                    {label === "Inbox" && inboxUnreadCount > 0 && !sidebarCollapsed && (
+                      <span className={cn(
+                        "min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold px-1 ml-auto shrink-0",
+                        isActive ? "bg-primary-foreground/20 text-primary-foreground" : "bg-red-500 text-white"
+                      )}>
+                        {inboxUnreadCount}
+                      </span>
+                    )}
                   </Link>
                 );
               })}
@@ -197,9 +237,17 @@ export function Sidebar({ userRole }: SidebarProps) {
               : "text-foreground/70 hover:text-foreground hover:bg-border/50"
           )}
         >
-          <Settings2 className="w-3.5 h-3.5 shrink-0" />
+          <span className="relative shrink-0">
+            <Settings2 className="w-3.5 h-3.5" />
+            {showFathomDot && sidebarCollapsed && (
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-destructive rounded-full" />
+            )}
+          </span>
           <span className={cn("whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out", sidebarCollapsed ? "max-w-0 opacity-0 ml-0" : "max-w-[160px] opacity-100 ml-2.5")}>
             Settings
+            {showFathomDot && !sidebarCollapsed && (
+              <span className="inline-block w-2 h-2 bg-destructive rounded-full ml-1.5 align-middle" />
+            )}
           </span>
         </Link>
         <button

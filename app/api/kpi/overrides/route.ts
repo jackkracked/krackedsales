@@ -19,10 +19,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { metricKey, period, value } = await req.json() as {
+  const { metricKey, period, value, note } = await req.json() as {
     metricKey: string;
     period: string;
     value: number;
+    note?: string | null;
   };
 
   const client = db();
@@ -34,10 +35,10 @@ export async function POST(req: NextRequest) {
   if (existing.length > 0) {
     await client
       .update(kpiOverrides)
-      .set({ value, updatedAt: new Date() })
+      .set({ value, note: note ?? null, updatedAt: new Date() })
       .where(and(eq(kpiOverrides.metricKey, metricKey), eq(kpiOverrides.period, period)));
   } else {
-    await client.insert(kpiOverrides).values({ metricKey, period, value });
+    await client.insert(kpiOverrides).values({ metricKey, period, value, note: note ?? null });
   }
 
   return NextResponse.json({ ok: true });

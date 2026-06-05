@@ -33,6 +33,10 @@ export async function GET() {
         startDate: proposals.startDate,
         endDate: proposals.endDate,
         expiresAt: proposals.expiresAt,
+        hasDeposit: proposals.hasDeposit,
+        depositTotal: proposals.depositTotal,
+        depositsPaidTotal: proposals.depositsPaidTotal,
+        subscriptionCreatedAt: proposals.subscriptionCreatedAt,
         stripeInvoiceId: proposals.stripeInvoiceId,
         stripeSubscriptionId: proposals.stripeSubscriptionId,
         stripeCustomerId: proposals.stripeCustomerId,
@@ -50,7 +54,7 @@ export async function GET() {
 
     const withInstalments = await Promise.all(
       rows.map(async (p) => {
-        if (p.paymentStructure === "instalment") {
+        if (p.paymentStructure === "instalment" || p.hasDeposit) {
           const instalments = await db()
             .select()
             .from(proposalInstalments)
@@ -90,6 +94,9 @@ export async function POST(req: NextRequest) {
       endDate,
       notes,
       instalments,
+      hasDeposit,
+      depositTotal,
+      depositInstalments,
     } = body;
 
     if (!type || !ghlContactId || !contactName || !totalAmount || !paymentStructure) {
@@ -97,7 +104,10 @@ export async function POST(req: NextRequest) {
     }
 
     const token = crypto.randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+    // Default expiry: today (rep can change it in the preview)
+    const todayNoon = new Date();
+    todayNoon.setUTCHours(12, 0, 0, 0);
+    const expiresAt = todayNoon;
 
     const title = `${type === "management" ? "Management Retainer" : "Project"} — ${contactName}`;
 
@@ -120,9 +130,11 @@ export async function POST(req: NextRequest) {
         paymentStructure,
         billingInterval: billingInterval ?? null,
         billingIntervalCount: billingIntervalCount ?? null,
-        startDate: startDate ? new Date(startDate) : null,
-        endDate: endDate ? new Date(endDate) : null,
+        startDate: startDate ? new Date(startDate + "T12:00:00.000Z") : todayNoon,
+        endDate: endDate ? new Date(endDate + "T12:00:00.000Z") : null,
         expiresAt,
+        hasDeposit: hasDeposit ?? false,
+        depositTotal: hasDeposit ? (depositTotal ?? null) : null,
         updatedAt: new Date(),
       })
       .returning();
@@ -134,7 +146,20 @@ export async function POST(req: NextRequest) {
           proposalId: proposal.id,
           instalmentNumber: inst.number,
           amount: inst.amount,
-          dueDate: new Date(inst.dueDate),
+          dueDate: new Date(inst.dueDate + "T12:00:00.000Z"),
+        });
+      }
+    }
+
+    // Create deposit instalment rows for subscription proposals with deposits
+    if (hasDeposit && Array.isArray(depositInstalments)) {
+      for (const inst of depositInstalments) {
+        await db().insert(proposalInstalments).values({
+          proposalId: proposal.id,
+          instalmentNumber: inst.number,
+          amount: inst.amount,
+          dueDate: new Date(inst.dueDate + "T12:00:00.000Z"),
+          isDeposit: true,
         });
       }
     }

@@ -321,7 +321,7 @@ export function FollowUpQueue() {
 
   return (
     <>
-    <div className="bg-card border border-border rounded-[10px] overflow-hidden">
+    <div className="bg-card border border-border rounded-[10px] overflow-hidden shrink-0">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <h3 className="text-sm font-semibold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>

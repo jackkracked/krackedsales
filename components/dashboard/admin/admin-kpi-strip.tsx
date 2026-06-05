@@ -116,7 +116,7 @@ export function AdminKpiStrip() {
   const showDashes = isError && !data;
 
   return (
-    <div className="bg-card border border-border rounded-[10px] flex overflow-hidden">
+    <div className="bg-card border border-border rounded-[10px] flex overflow-hidden min-h-[80px]">
       {showSkeleton ? (
         <>
           {[0, 1, 2, 3].map((i) => (

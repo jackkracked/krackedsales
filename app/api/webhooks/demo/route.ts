@@ -22,21 +22,28 @@ export async function POST(req: NextRequest) {
       Object.entries(body).map(([k, v]) => [k, String(v ?? "")])
     );
 
+    console.log("[demo webhook] posting to:", webhookUrl);
+
     const res = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: formBody.toString(),
     });
 
+    const responseText = await res.text().catch(() => "");
+    console.log("[demo webhook] n8n status:", res.status, "body:", responseText);
+
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      console.error("[demo webhook] n8n responded", res.status, text);
-      return NextResponse.json({ error: "Webhook failed" }, { status: 502 });
+      return NextResponse.json(
+        { error: `n8n returned ${res.status}`, detail: responseText },
+        { status: 502 }
+      );
     }
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[demo webhook]", err);
-    return NextResponse.json({ error: "Failed to send" }, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[demo webhook] fetch threw:", message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

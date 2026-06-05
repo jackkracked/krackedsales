@@ -8,6 +8,7 @@ import { useBrandCategoryStore } from "@/store/brand-category-store";
 import { KanbanBoard } from "./kanban-board";
 import type { CommentLead } from "./comment-lead-card";
 import { PipelineListView } from "./pipeline-list-view";
+import { PipelineSelector } from "./pipeline-selector";
 import { AddLeadModal } from "./add-lead-modal";
 import { LayoutGrid, List, Plus, RefreshCw, ChevronDown, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
@@ -83,6 +84,18 @@ export function PipelineClient() {
     (awaitingData?.contactIds ?? []).filter(Boolean)
   );
 
+  // Fetch team members to build ghlUserId → name map for rep avatars
+  const { data: teamData } = useQuery<{ users: Array<{ name: string; ghlUserId: string | null }> }>({
+    queryKey: ["team-settings"],
+    queryFn: () => fetch("/api/settings/team").then((r) => r.json()),
+    staleTime: 10 * 60 * 1000,
+  });
+  const repMap = new Map<string, string>(
+    (teamData?.users ?? [])
+      .filter((u) => u.ghlUserId)
+      .map((u) => [u.ghlUserId!, u.name])
+  );
+
   const isLoading = pipelinesLoading || oppsLoading;
   const allOpportunities = opportunitiesData?.opportunities ?? [];
   const commentLeads = commentLeadsData?.leads ?? [];
@@ -147,24 +160,12 @@ export function PipelineClient() {
       {/* Toolbar */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2">
-          {/* Pipeline selector dropdown */}
-          {pipelines.length > 1 && (
-            <div className="relative">
-              <select
-                value={pipeline.id}
-                onChange={(e) => setSelectedPipelineId(e.target.value)}
-                className="appearance-none pl-3 pr-8 py-1.5 text-sm font-medium border border-border rounded-[7px] bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer"
-              >
-                {pipelines.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-            </div>
-          )}
-          {pipelines.length === 1 && (
-            <span className="text-sm font-medium text-foreground">{pipeline.name}</span>
-          )}
+          {/* Pipeline selector */}
+          <PipelineSelector
+            pipelines={pipelines}
+            selectedId={pipeline.id}
+            onSelect={(id) => setSelectedPipelineId(id)}
+          />
 
           {/* View toggle */}
           <div className="flex items-center bg-muted rounded-lg p-0.5">
@@ -257,7 +258,7 @@ export function PipelineClient() {
             Loading opportunities…
           </div>
         ) : viewMode === "kanban" ? (
-          <KanbanBoard pipeline={pipeline} opportunities={opportunities} commentLeads={filteredCommentLeads} unreadContactIds={unreadContactIds} autoOpenContactId={autoOpenContactId ?? undefined} />
+          <KanbanBoard pipeline={pipeline} opportunities={opportunities} commentLeads={filteredCommentLeads} unreadContactIds={unreadContactIds} repMap={repMap} autoOpenContactId={autoOpenContactId ?? undefined} />
         ) : (
           <PipelineListView pipeline={pipeline} opportunities={opportunities} />
         )}

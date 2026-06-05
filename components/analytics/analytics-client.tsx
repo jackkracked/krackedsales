@@ -27,6 +27,8 @@ import {
   startOfQuarter,
 } from "date-fns";
 import { cn } from "@/lib/utils/cn";
+import { useUserTimezone } from "@/providers/timezone-provider";
+import { toZonedDate } from "@/lib/utils/timezone";
 import { RefreshCw, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { DonutChart } from "@/components/ui/donut-chart";
 import type { EnrichedTask } from "@/app/api/clickup/tasks/route";
@@ -120,7 +122,7 @@ function StatCard({ label, value, subtitle, trend, accent = "default" }: StatCar
 // useAnalytics
 // ---------------------------------------------------------------------------
 
-function useAnalytics(tasks: EnrichedTask[], period: Period) {
+function useAnalytics(tasks: EnrichedTask[], period: Period, tz: string) {
   return useMemo(() => {
     const periodStart = getPeriodStart(period);
     const days = getPeriodDays(period);
@@ -178,7 +180,7 @@ function useAnalytics(tasks: EnrichedTask[], period: Period) {
         return t.bucket === "DEMO_SENT" && u >= ds && u <= de;
       }).length;
       return {
-        label: format(day, barDays <= 14 ? "dd MMM" : "dd/MM"),
+        label: format(toZonedDate(day, tz), barDays <= 14 ? "dd MMM" : "dd/MM"),
         count,
         sent,
         dayName: format(day, "EEEE"),
@@ -237,7 +239,7 @@ function useAnalytics(tasks: EnrichedTask[], period: Period) {
       fulfillmentRate,
       total: tasks.length,
     };
-  }, [tasks, period]);
+  }, [tasks, period, tz]);
 }
 
 // ---------------------------------------------------------------------------
@@ -524,10 +526,11 @@ function CommentLeadsSection({ period }: { period: Period }) {
 // ---------------------------------------------------------------------------
 
 export function AnalyticsClient() {
+  const tz = useUserTimezone();
   const [period, setPeriod] = useState<Period>("week");
   const { data, isLoading, isFetching } = useDemoTasks();
   const tasks = data?.tasks ?? [];
-  const stats = useAnalytics(tasks, period);
+  const stats = useAnalytics(tasks, period, tz);
 
   const PERIODS: { key: Period; label: string }[] = [
     { key: "today", label: "Today" },

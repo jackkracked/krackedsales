@@ -16,10 +16,11 @@ import { TIER_COLORS } from "@/lib/deal-health";
 import type { DealHealthResult } from "@/lib/deal-health";
 import { formatDateTime, relativeTime } from "@/lib/utils/date";
 import { cn } from "@/lib/utils/cn";
-import { cleanUrl, parseQualificationNote, isQualificationNote } from "@/lib/utils/url";
+import { cleanUrl, looksLikeUrl, isQualificationNote } from "@/lib/utils/url";
 import { useStageHistoryStore, findStageChange } from "@/store/stage-history-store";
 import type { GHLOpportunity, GHLMessage } from "@/lib/ghl/types";
 import { MessageBody } from "@/components/shared/message-body";
+import { ChatBubble, SmartBanner, groupMessages } from "@/components/shared/chat-bubble";
 import { ActivityTab } from "@/components/activity/activity-tab";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -55,19 +56,97 @@ function Field({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
-/** Qualification tab — parses Q&A from lead form note, URLs are clean + editable */
+/** Custom field definition from /api/ghl/custom-fields */
+interface FieldDef { name: string; fieldKey: string; folder?: string }
+
+/** Parsed custom field with resolved label */
+interface ResolvedCustomField {
+  label: string;
+  value: string;
+  folder?: string;
+  isUrl: boolean;
+  cleanedUrl?: string;
+}
+
+/** Fields to promote to the top of qualification view */
+const PROMOTED_KEYWORDS = ["website", "url", "company", "brand", "revenue"];
+const SKIP_VALUES = ["", "--", "N/A", "n/a", "null", "undefined"];
+
+function resolveCustomFields(
+  rawFields: Array<{ id: string; field_value?: string; value?: string }>,
+  fieldDefs: Record<string, FieldDef>
+): ResolvedCustomField[] {
+  const results: ResolvedCustomField[] = [];
+
+  for (const f of rawFields) {
+    const rawValue = f.field_value ?? f.value ?? "";
+    if (!rawValue || SKIP_VALUES.includes(rawValue.trim())) continue;
+
+    const def = fieldDefs[f.id];
+    const label = def?.name ?? f.id;
+    const folder = def?.folder;
+    const isUrl = looksLikeUrl(rawValue);
+
+    results.push({
+      label,
+      value: rawValue,
+      folder,
+      isUrl,
+      cleanedUrl: isUrl ? cleanUrl(rawValue) : undefined,
+    });
+  }
+
+  // Sort: promoted fields first, then by folder, then alphabetical
+  return results.sort((a, b) => {
+    const aPromoted = PROMOTED_KEYWORDS.some((k) => a.label.toLowerCase().includes(k));
+    const bPromoted = PROMOTED_KEYWORDS.some((k) => b.label.toLowerCase().includes(k));
+    if (aPromoted && !bPromoted) return -1;
+    if (!aPromoted && bPromoted) return 1;
+    const folderCmp = (a.folder ?? "").localeCompare(b.folder ?? "");
+    if (folderCmp !== 0) return folderCmp;
+    return a.label.localeCompare(b.label);
+  });
+}
+
+/** Qualification tab — shows custom fields from the contact's GHL profile */
 function QualificationTab({
   contactId,
-  notes,
-  isLoading,
 }: {
   contactId: string;
-  notes: GHLNote[];
-  isLoading: boolean;
 }) {
-  const queryClient = useQueryClient();
-  const [editingUrl, setEditingUrl] = useState<{ noteId: string; questionIndex: number; value: string } | null>(null);
-  const [saving, setSaving] = useState(false);
+  // Fetch the contact (includes customFields)
+  const { data: contactData, isLoading: contactLoading } = useQuery<{
+    contact: {
+      customFields?: Array<{ id: string; field_value?: string; value?: string }>;
+      customField?: Array<{ id: string; field_value?: string; value?: string }>;
+      website?: string;
+      companyName?: string;
+    } | null;
+  }>({
+    queryKey: ["ghl-contact", contactId],
+    queryFn: async () => {
+      const res = await fetch(`/api/ghl/contacts/${contactId}`);
+      if (!res.ok) return { contact: null };
+      return res.json();
+    },
+    enabled: !!contactId,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  // Fetch custom field definitions (ID → name mapping)
+  const { data: fieldDefsData, isLoading: defsLoading } = useQuery<{
+    fields: Record<string, FieldDef>;
+  }>({
+    queryKey: ["ghl-custom-field-defs"],
+    queryFn: async () => {
+      const res = await fetch("/api/ghl/custom-fields");
+      if (!res.ok) return { fields: {} };
+      return res.json();
+    },
+    staleTime: 10 * 60 * 1000, // field defs rarely change
+  });
+
+  const isLoading = contactLoading || defsLoading;
 
   if (isLoading) {
     return (
@@ -78,131 +157,67 @@ function QualificationTab({
     );
   }
 
-  // Find the qualification note
-  const qualNote = notes.find((n) => isQualificationNote(n.body));
+  const contact = contactData?.contact;
+  const rawFields = contact?.customFields ?? contact?.customField ?? [];
+  const fieldDefs = fieldDefsData?.fields ?? {};
+  const resolved = resolveCustomFields(rawFields, fieldDefs);
 
-  if (!qualNote) {
+  if (resolved.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
         <FileText className="w-8 h-8 opacity-30" />
         <p className="text-sm font-medium">No qualification data</p>
         <p className="text-xs text-center max-w-48">
-          Qualification questions from the lead form will appear here once the contact has submitted them.
+          Custom field data from lead forms will appear here once the contact has submitted them.
         </p>
       </div>
     );
   }
 
-  const qaPairs = parseQualificationNote(qualNote.body);
-
-  async function saveUrlEdit() {
-    if (!editingUrl) return;
-    setSaving(true);
-    try {
-      // Rebuild note body with corrected URL
-      const updated = qualNote!.body.replace(editingUrl.value, cleanUrl(editingUrl.value));
-      await fetch(`/api/ghl/contacts/${contactId}/notes/${editingUrl.noteId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: updated }),
-      });
-      queryClient.invalidateQueries({ queryKey: ["notes", contactId] });
-      setEditingUrl(null);
-    } finally {
-      setSaving(false);
-    }
+  // Group by folder
+  const grouped = new Map<string, ResolvedCustomField[]>();
+  for (const field of resolved) {
+    const key = field.folder ?? "General";
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key)!.push(field);
   }
 
   return (
-    <div className="space-y-3">
-      {qaPairs.map((qa, i) => (
-        <div
-          key={i}
-          className="bg-muted/30 border border-border/60 rounded-[8px] p-3.5"
-        >
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 leading-tight">
-            {qa.question}
-          </p>
+    <div className="space-y-5">
+      {Array.from(grouped.entries()).map(([folder, fields]) => (
+        <section key={folder}>
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2.5 flex items-center gap-1.5">
+            <Layers className="w-3.5 h-3.5" />
+            {folder}
+          </h3>
+          <div className="space-y-2">
+            {fields.map((field, i) => (
+              <div
+                key={i}
+                className="bg-muted/30 border border-border/60 rounded-[8px] p-3.5"
+              >
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 leading-tight">
+                  {field.label}
+                </p>
 
-          {qa.isUrl ? (
-            <div className="space-y-1.5">
-              {editingUrl?.questionIndex === i ? (
-                /* Edit mode */
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={editingUrl.value}
-                    onChange={(e) =>
-                      setEditingUrl({ ...editingUrl, value: e.target.value })
-                    }
-                    className="flex-1 text-sm px-2.5 py-1.5 border border-primary/30 rounded-[6px] bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    autoFocus
-                  />
-                  <button
-                    onClick={saveUrlEdit}
-                    disabled={saving}
-                    className="p-1.5 rounded-[6px] bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-                    title="Save"
+                {field.isUrl && field.cleanedUrl ? (
+                  <a
+                    href={field.cleanedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-primary hover:underline flex items-center gap-1"
                   >
-                    {saving ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Check className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setEditingUrl(null)}
-                    className="p-1.5 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ) : (
-                /* Display mode */
-                <div className="flex items-center gap-2">
-                  {qa.cleanedUrl && (
-                    <a
-                      href={qa.cleanedUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-primary hover:underline flex items-center gap-1 flex-1 min-w-0"
-                    >
-                      <ExternalLink className="w-3 h-3 shrink-0" />
-                      <span className="truncate">{qa.cleanedUrl}</span>
-                    </a>
-                  )}
-                  {/* Show original if it had spaces */}
-                  {qa.answer !== qa.cleanedUrl?.replace("https://", "") &&
-                    qa.answer.includes(" ") && (
-                      <span className="text-xs text-muted-foreground">(corrected)</span>
-                    )}
-                  <button
-                    onClick={() =>
-                      setEditingUrl({
-                        noteId: qualNote!.id,
-                        questionIndex: i,
-                        value: qa.answer,
-                      })
-                    }
-                    className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-                    title="Edit URL"
-                  >
-                    <Edit2 className="w-3 h-3" />
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <p className="text-sm text-foreground leading-relaxed">{qa.answer}</p>
-          )}
-        </div>
+                    <ExternalLink className="w-3 h-3 shrink-0" />
+                    <span className="truncate">{field.cleanedUrl}</span>
+                  </a>
+                ) : (
+                  <p className="text-sm text-foreground leading-relaxed">{field.value}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
       ))}
-
-      {qaPairs.length === 0 && (
-        <div className="text-center py-8 text-sm text-muted-foreground">
-          Could not parse qualification questions from this note.
-        </div>
-      )}
     </div>
   );
 }
@@ -325,13 +340,20 @@ function NotesTab({
 }
 
 /** Messages tab — fetches conversation thread by contactId */
-function MessagesTab({ contactId, stageName, opportunityId, initialDraft }: {
+function MessagesTab({ contactId, stageName, opportunityId, initialDraft, onFieldSaved }: {
   contactId: string;
   stageName: string;
   opportunityId: string;
   initialDraft?: string;
+  onFieldSaved?: (field: string, value: string) => void;
 }) {
   const stageChanges = useStageHistoryStore((s) => s.changes);
+  const [chipSavedKeys, setChipSavedKeys] = useState<Set<string>>(new Set());
+
+  function handleChipOrBannerSaved(field: string, value: string) {
+    setChipSavedKeys((prev) => new Set([...prev, `${field}:${value}`]));
+    onFieldSaved?.(field, value);
+  }
 
   // Step 1: find the conversation for this contact
   const { data: convData, isLoading: convLoading } = useQuery({
@@ -403,8 +425,22 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft }: {
     );
   }
 
+  // Precompute grouping for regular (non-activity, non-email) messages
+  const regularMessages = messages.filter(
+    (m) => m.messageType !== "TYPE_ACTIVITY_OPPORTUNITY" && m.messageType !== "TYPE_EMAIL"
+  );
+  const groupedRegular = groupMessages(regularMessages);
+  const groupedMap = new Map(
+    groupedRegular.map((g) => [g.msg.id, g])
+  );
+
   return (
     <div className="flex flex-col gap-3 h-full">
+      {/* Smart contact enrichment banner */}
+      {!msgsLoading && messages.length > 0 && (
+        <SmartBanner messages={messages} contactId={contactId} onFieldSaved={handleChipOrBannerSaved} externalSavedKeys={chipSavedKeys} />
+      )}
+
       {/* Message thread */}
       <div ref={scrollRef} className="flex flex-col gap-1.5 flex-1 overflow-y-auto min-h-0">
         {msgsLoading && (
@@ -456,7 +492,7 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft }: {
             const emailDir = msg.meta?.email?.direction ?? (isOut ? "outbound" : "inbound");
             const sentByUs = emailDir === "outbound";
             return (
-              <div key={msg.id} className={cn("flex my-0.5", sentByUs ? "justify-end" : "justify-start")}>
+              <div key={msg.id} className={cn("flex my-2", sentByUs ? "justify-end" : "justify-start")}>
                 <div className={cn(
                   "max-w-[78%] flex items-start gap-2 px-3 py-2 rounded-[10px] border",
                   sentByUs
@@ -481,26 +517,18 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft }: {
           }
 
           // ── Regular SMS / custom message ──────────────────────────────
+          const grouped = groupedMap.get(msg.id);
           return (
-            <div key={msg.id} className={cn("flex", isOut ? "justify-end" : "justify-start")}>
-              <div className={cn(
-                "max-w-[78%] px-3 py-2 rounded-[10px] text-sm leading-relaxed",
-                isOut ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
-              )}>
-                <MessageBody
-                  body={msg.body}
-                  linkClassName={isOut ? "text-primary-foreground/80 underline" : "text-primary"}
-                />
-                {msg.dateAdded && (
-                  <p className={cn(
-                    "text-[10px] mt-1",
-                    isOut ? "text-primary-foreground/50 text-right" : "text-muted-foreground/60"
-                  )}>
-                    {relativeTime(msg.dateAdded)}
-                  </p>
-                )}
-              </div>
-            </div>
+            <ChatBubble
+              key={msg.id}
+              body={msg.body ?? ""}
+              direction={isOut ? "outbound" : "inbound"}
+              dateAdded={msg.dateAdded}
+              isGroupedWithPrev={grouped?.isGroupedWithPrev}
+              isGroupedWithNext={grouped?.isGroupedWithNext}
+              contactId={contactId}
+              onFieldSaved={handleChipOrBannerSaved}
+            />
           );
         })}
         {messages.length === 0 && !msgsLoading && (
@@ -545,10 +573,55 @@ export function OpportunityModal({
   queueIndex,
   onNavigate,
 }: OpportunityModalProps) {
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? "overview");
   const inQueue = queue && queue.length >= 2 && queueIndex !== undefined;
 
   const contactId = opportunity.contact?.id ?? "";
+
+  // Fetch full contact data (includes custom fields for website extraction)
+  const { data: fullContactData } = useQuery<{ contact: { website?: string; customFields?: Array<{ id: string; field_value?: string; value?: string }> } | null }>({
+    queryKey: ["ghl-contact", contactId],
+    queryFn: async () => {
+      const res = await fetch(`/api/ghl/contacts/${contactId}`);
+      if (!res.ok) return { contact: null };
+      return res.json();
+    },
+    enabled: !!contactId,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  // Extract website from full contact (standard field or custom fields)
+  const enrichedWebsite = (() => {
+    const c = fullContactData?.contact;
+    if (!c) return null;
+    if (c.website && looksLikeUrl(c.website)) return c.website;
+    const fields = c.customFields ?? [];
+    for (const f of fields) {
+      const val = f.field_value ?? f.value ?? "";
+      if (val && looksLikeUrl(val)) return cleanUrl(val);
+    }
+    return null;
+  })();
+
+  // Local overrides for contact fields saved via enrichment chips (so left panel updates instantly)
+  const [contactOverride, setContactOverride] = useState<Record<string, string>>({});
+  function handleFieldSaved(field: string, value: string) {
+    setContactOverride((prev) => ({ ...prev, [field]: value }));
+  }
+
+  // Track whether any enrichment fields were saved (ref so Escape handler always sees latest)
+  const hasSavedFieldsRef = React.useRef(false);
+  hasSavedFieldsRef.current = Object.keys(contactOverride).length > 0;
+
+  // When modal closes, invalidate contact caches if any fields were saved
+  function handleClose() {
+    if (hasSavedFieldsRef.current) {
+      queryClient.invalidateQueries({ queryKey: ["ghl-contact", contactId] });
+      queryClient.invalidateQueries({ queryKey: ["ghl-opportunities"] });
+    }
+    onClose();
+  }
 
   // Last call + AI insights — fetched lazily on overview tab
   const { data: lastCallData } = useQuery<{
@@ -589,7 +662,7 @@ export function OpportunityModal({
   // Keyboard navigation for queue
   React.useEffect(() => {
     const fn = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { onClose(); return; }
+      if (e.key === "Escape") { handleClose(); return; }
       if (!inQueue || !onNavigate) return;
       const target = document.activeElement;
       const isTyping = target instanceof HTMLElement &&
@@ -600,6 +673,7 @@ export function OpportunityModal({
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onClose, inQueue, onNavigate, queueIndex, queue]);
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [showCreateDemo, setShowCreateDemo] = useState(false);
@@ -613,7 +687,6 @@ export function OpportunityModal({
   const [localStageName, setLocalStageName] = useState(stageName);
   const [localStageId, setLocalStageId] = useState(opportunity.pipelineStageId);
   const [savingStage, setSavingStage] = useState(false);
-  const queryClient = useQueryClient();
 
   // Fetch all stages for this pipeline (lazy — only needed for stage picker)
   const { data: pipelinesData } = useQuery<{ pipelines: Array<{ id: string; stages: Array<{ id: string; name: string; position?: number }> }> }>({
@@ -710,10 +783,10 @@ export function OpportunityModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
         className="absolute inset-0 bg-foreground/25 backdrop-blur-sm"
-        onClick={onClose}
+        onClick={handleClose}
       />
 
-      <div className="relative bg-card border border-border rounded-[10px] shadow-xl w-full max-w-[1080px] z-10 flex flex-col max-h-[85vh]">
+      <div className="relative bg-card border border-border rounded-[10px] shadow-xl w-full max-w-[1080px] z-10 flex flex-col h-[85vh]">
         {/* Header */}
         <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-border shrink-0">
           <div className="min-w-0 flex-1 mr-3">
@@ -769,7 +842,7 @@ export function OpportunityModal({
               </div>
             )}
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             >
               <X className="w-4 h-4" />
@@ -782,55 +855,68 @@ export function OpportunityModal({
 
           {/* Left pane — tabs + scrollable detail content */}
           <div className="w-[40%] flex flex-col min-h-0 border-r border-border">
-            <div className="flex items-center border-b border-border px-5 shrink-0">
+            <div className="flex items-center justify-evenly border-b border-border shrink-0">
               {TABS.map(({ key, label, icon: Icon }) => (
                 <button
                   key={key}
                   onClick={() => setActiveTab(key)}
                   className={cn(
-                    "flex items-center gap-1.5 px-1 py-2.5 mr-5 text-sm font-medium border-b-2 transition-colors",
+                    "flex items-center justify-center flex-1 py-2.5 border-b-2 transition-colors",
                     activeTab === key
                       ? "border-primary text-primary"
                       : "border-transparent text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  <Icon className="w-3.5 h-3.5" />
-                  {label}
+                  <Icon className="w-4 h-4" title={label} />
                 </button>
               ))}
             </div>
-            <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0">
+            <div className="flex-1 overflow-y-auto px-4 py-3 min-h-0 flex flex-col">
           {activeTab === "overview" && (
-            <div className="space-y-5">
+            <div className="space-y-4">
               {/* Contact */}
               <section>
                 <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
                   <User className="w-3.5 h-3.5" />
                   Contact Details
                 </h3>
-                <div className="bg-muted/30 rounded-[8px] p-4 space-y-3 border border-border/60">
+                <div className="bg-muted/30 rounded-[8px] p-3 space-y-2.5 border border-border/60">
                   <Field label="Name" value={name} />
-                  {opportunity.contact?.email && (
+                  {(contactOverride.email ?? opportunity.contact?.email) && (
                     <div>
                       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-0.5">Email</p>
                       <a
-                        href={`mailto:${opportunity.contact.email}`}
+                        href={`mailto:${contactOverride.email ?? opportunity.contact?.email}`}
                         className="text-sm text-primary hover:underline flex items-center gap-1"
                       >
                         <Mail className="w-3 h-3 shrink-0" />
-                        {opportunity.contact.email}
+                        {contactOverride.email ?? opportunity.contact?.email}
                       </a>
                     </div>
                   )}
-                  {opportunity.contact?.phone && (
+                  {(contactOverride.phone ?? opportunity.contact?.phone) && (
                     <div>
                       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-0.5">Phone</p>
                       <a
-                        href={`tel:${opportunity.contact.phone}`}
+                        href={`tel:${contactOverride.phone ?? opportunity.contact?.phone}`}
                         className="text-sm text-primary hover:underline flex items-center gap-1"
                       >
                         <Phone className="w-3 h-3 shrink-0" />
-                        {opportunity.contact.phone}
+                        {contactOverride.phone ?? opportunity.contact?.phone}
+                      </a>
+                    </div>
+                  )}
+                  {(contactOverride.website ?? enrichedWebsite ?? opportunity.contact?.website) && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-0.5">Website</p>
+                      <a
+                        href={contactOverride.website ?? enrichedWebsite ?? opportunity.contact?.website!}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-primary hover:underline flex items-center gap-1"
+                      >
+                        <ExternalLink className="w-3 h-3 shrink-0" />
+                        {(contactOverride.website ?? enrichedWebsite ?? opportunity.contact?.website ?? "").replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}
                       </a>
                     </div>
                   )}
@@ -1047,7 +1133,7 @@ export function OpportunityModal({
           )}
 
           {activeTab === "qualification" && (
-            <QualificationTab contactId={contactId} notes={notes} isLoading={isLoading} />
+            <QualificationTab contactId={contactId} />
           )}
 
           {activeTab === "notes" && (
@@ -1058,10 +1144,8 @@ export function OpportunityModal({
             <ActivityTab entityType="opportunity" entityId={opportunity.id} />
           )}
 
-            </div>
-
-            {/* Quick actions — sticky footer, always visible */}
-            <div className="shrink-0 border-t border-border px-4 py-3 bg-card">
+            {/* Quick actions — inside scroll area, below content */}
+            <div className="px-4 py-3 mt-auto">
               <div className="grid grid-cols-3 gap-2">
                 <button
                   onClick={() => setShowCreateTask(true)}
@@ -1086,6 +1170,7 @@ export function OpportunityModal({
                 </button>
               </div>
             </div>
+            </div>
           </div>
 
           {/* Right pane — messages always visible */}
@@ -1095,6 +1180,7 @@ export function OpportunityModal({
               stageName={localStageName}
               opportunityId={opportunity.id}
               initialDraft={initialDraft}
+              onFieldSaved={handleFieldSaved}
             />
           </div>
 

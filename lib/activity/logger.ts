@@ -17,7 +17,8 @@ export type ActivityAction =
   | "task.updated"
   | "demo.started"
   | "follow_up.sent"
-  | "lead.added";
+  | "lead.added"
+  | "proposal.deposit_override";
 
 export interface LogActivityParams {
   userId: string;

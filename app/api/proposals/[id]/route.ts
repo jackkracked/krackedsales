@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { proposals, proposalInstalments } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
+import { dispatchWorkflowEvent } from "@/lib/workflows/triggers";
 
 export const dynamic = "force-dynamic";
 
@@ -30,13 +31,44 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { id } = await params;
-    const body = await req.json();
+    const body = await req.json() as Record<string, unknown>;
+
+    // Convert any timestamp strings to Date objects — Drizzle requires Date for timestamp columns
+    const sanitized: Record<string, unknown> = { ...body, updatedAt: new Date() };
+    for (const key of ["paidAt", "sentAt", "signedAt", "expiresAt", "startDate", "endDate", "cancelledAt", "lostAt"]) {
+      if (typeof sanitized[key] === "string") {
+        sanitized[key] = new Date(sanitized[key] as string);
+      }
+    }
 
     const [updated] = await db()
       .update(proposals)
-      .set({ ...body, updatedAt: new Date() })
+      .set(sanitized)
       .where(eq(proposals.id, id))
       .returning();
+
+    // Fire workflow trigger when manually marked as paid
+    if (body.status === "paid") {
+      dispatchWorkflowEvent("proposal.paid", {
+        proposalId: updated.id,
+        manuallyMarkedPaid: true,
+        contactName: updated.contactName,
+        contactEmail: updated.contactEmail ?? null,
+        contactId: updated.ghlContactId,
+        opportunityId: updated.opportunityId ?? null,
+        proposalTitle: updated.title,
+        proposalType: updated.type,
+        totalAmount: updated.totalAmount,
+        currency: updated.currency,
+        serviceDescription: updated.serviceDescription ?? null,
+        paymentStructure: updated.paymentStructure,
+        signerTitle: updated.signerTitle ?? null,
+        paidAt: updated.paidAt?.toISOString() ?? new Date().toISOString(),
+        signedAt: updated.signedAt?.toISOString() ?? null,
+        stripeCustomerId: updated.stripeCustomerId ?? null,
+        stripeSubscriptionId: updated.stripeSubscriptionId ?? null,
+      }).catch(() => {});
+    }
 
     return NextResponse.json({ proposal: updated });
   } catch (err) {

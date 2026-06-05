@@ -132,9 +132,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
       return NextResponse.json({ status: proposal.status, title: proposal.title });
     }
 
-    // Fetch instalments if applicable
+    // Fetch instalments if applicable (regular or deposit)
     const instalments =
-      proposal.paymentStructure === "instalment"
+      proposal.paymentStructure === "instalment" || proposal.hasDeposit
         ? await db()
             .select()
             .from(proposalInstalments)
@@ -170,6 +170,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
         endDate: proposal.endDate,
         expiresAt: proposal.expiresAt,
         status: proposal.status,
+        additionalRates: proposal.additionalRates,
+        hasDeposit: proposal.hasDeposit,
+        depositTotal: proposal.depositTotal,
+        depositsPaidTotal: proposal.depositsPaidTotal,
         instalments,
         agreementTerms,
       },

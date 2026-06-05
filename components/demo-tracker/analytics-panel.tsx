@@ -8,6 +8,8 @@ import {
 import { subDays, format, startOfDay, endOfDay, startOfWeek, startOfMonth, startOfQuarter } from "date-fns";
 import type { EnrichedTask } from "@/app/api/clickup/tasks/route";
 import { cn } from "@/lib/utils/cn";
+import { useUserTimezone } from "@/providers/timezone-provider";
+import { toZonedDate } from "@/lib/utils/timezone";
 
 type Period = "today" | "week" | "month" | "quarter";
 
@@ -32,6 +34,7 @@ interface AnalyticsPanelProps {
 }
 
 export function AnalyticsPanel({ tasks }: AnalyticsPanelProps) {
+  const tz = useUserTimezone();
   const [period, setPeriod] = useState<Period>("week");
 
   const stats = useMemo(() => {
@@ -46,7 +49,7 @@ export function AnalyticsPanel({ tasks }: AnalyticsPanelProps) {
     const barDays = period === "today" ? 7 : period === "week" ? 14 : period === "month" ? 30 : 90;
     const barData = Array.from({ length: Math.min(barDays, 30) }).map((_, i) => {
       const day = subDays(new Date(), Math.min(barDays, 30) - 1 - i);
-      const label = format(day, barDays <= 14 ? "dd MMM" : "dd MMM");
+      const label = format(toZonedDate(day, tz), barDays <= 14 ? "dd MMM" : "dd MMM");
       const dayStart = startOfDay(day).getTime();
       const dayEnd = endOfDay(day).getTime();
       const count = tasks.filter((t) => {
@@ -91,7 +94,7 @@ export function AnalyticsPanel({ tasks }: AnalyticsPanelProps) {
       : 0;
 
     return { inPeriod, barData, donutData, slowest, avgTurnaround };
-  }, [tasks, period]);
+  }, [tasks, period, tz]);
 
   const PERIODS: { key: Period; label: string }[] = [
     { key: "today", label: "Today" },

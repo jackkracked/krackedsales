@@ -12,18 +12,23 @@ export function ScrollToTop() {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Walk up from this element to find the first scrollable ancestor
-    let el: HTMLElement | null = ref.current?.parentElement ?? null;
-    while (el) {
-      const overflow = getComputedStyle(el).overflowY;
-      if (overflow === "auto" || overflow === "scroll") {
-        el.scrollTo({ top: 0 });
-        return;
-      }
-      el = el.parentElement;
-    }
-    // Fallback: scroll window
-    window.scrollTo({ top: 0 });
+    // Use two nested rAFs so this runs AFTER Next.js scroll restoration,
+    // which fires on the first paint following a navigation.
+    const id = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        let el: HTMLElement | null = ref.current?.parentElement ?? null;
+        while (el) {
+          const overflow = getComputedStyle(el).overflowY;
+          if (overflow === "auto" || overflow === "scroll") {
+            el.scrollTo({ top: 0 });
+            return;
+          }
+          el = el.parentElement;
+        }
+        window.scrollTo({ top: 0 });
+      });
+    });
+    return () => cancelAnimationFrame(id);
   }, [pathname]);
 
   return <div ref={ref} style={{ display: "none" }} aria-hidden />;

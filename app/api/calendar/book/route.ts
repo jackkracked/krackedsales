@@ -20,15 +20,6 @@ interface GhlAppointmentResponse {
   [key: string]: unknown;
 }
 
-interface GhlConversationSearchResponse {
-  conversations: { id: string; [key: string]: unknown }[];
-}
-
-interface GhlMessageResponse {
-  messageId: string;
-  [key: string]: unknown;
-}
-
 interface GhlContactResponse {
   contact?: { email?: string; [key: string]: unknown };
   [key: string]: unknown;
@@ -134,33 +125,6 @@ export async function POST(req: NextRequest) {
         console.error("[calendar/book] Google Calendar event creation failed:", message);
       }
     }
-  }
-
-  // ── Step 3: Send GHL booking confirmation message ───────────────────────
-  try {
-    // Find the most recent active conversation for this contact
-    const searchRes = await ghl.get<GhlConversationSearchResponse>(
-      `/conversations/search?locationId=${locId}&contactId=${contactId}`
-    );
-
-    const conversation = searchRes.conversations?.[0];
-    if (conversation?.id) {
-      const confirmationText = meetLink
-        ? `Hi ${contactName}, your call has been booked! Join via Google Meet: ${meetLink}`
-        : `Hi ${contactName}, your call has been booked for ${startTime}. We'll be in touch shortly!`;
-
-      await ghl.post<GhlMessageResponse>("/conversations/messages", {
-        type: "SMS",
-        conversationId: conversation.id,
-        message: confirmationText,
-      });
-    } else {
-      console.warn("[calendar/book] No conversation found for contact, skipping confirmation message");
-    }
-  } catch (err) {
-    // Non-fatal — appointment was already created
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[calendar/book] Failed to send confirmation message:", message);
   }
 
   return NextResponse.json({

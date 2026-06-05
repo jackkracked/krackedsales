@@ -18,6 +18,7 @@ interface TeamUser {
   isActive: boolean;
   ghlUserId: string | null;
   commissionPct: number;
+  timezone: string | null;
   createdAt: string;
   targets: {
     dealsPerMonth: number;
@@ -161,6 +162,7 @@ function SlideOver({ user, onClose }: SlideOverProps) {
   const [isActive, setIsActive] = useState(user.isActive);
   const [ghlUserId, setGhlUserId] = useState(user.ghlUserId ?? "");
   const [commissionPct, setCommissionPct] = useState(user.commissionPct ?? 0);
+  const [timezone, setTimezone] = useState(user.timezone ?? "");
   const [dealsPerMonth, setDealsPerMonth] = useState(user.targets?.dealsPerMonth ?? 5);
   const [callsPerDay, setCallsPerDay] = useState(user.targets?.callsPerDay ?? 15);
   const [revenueTarget, setRevenueTarget] = useState(user.targets?.revenueTarget ?? 0);
@@ -209,6 +211,7 @@ function SlideOver({ user, onClose }: SlideOverProps) {
       isActive,
       ghlUserId,
       commissionPct,
+      timezone: timezone || null,
       targets: { dealsPerMonth, callsPerDay, revenueTarget },
       permissionOverrides: overrides,
     });
@@ -412,6 +415,44 @@ function SlideOver({ user, onClose }: SlideOverProps) {
                 Applied to the total proposal value when commission is earned. Payout timing is set globally in Team settings.
               </p>
             </div>
+          </section>
+
+          {/* Timezone */}
+          <section>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+              Timezone
+            </p>
+            <select
+              value={timezone}
+              onChange={(e) => setTimezone(e.target.value)}
+              className={cn(
+                "w-full rounded-[6px] border border-border bg-background px-3 py-2",
+                "text-sm text-foreground",
+                "focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors"
+              )}
+            >
+              <option value="">Auto-detect from browser</option>
+              <option disabled>──────────</option>
+              <option value="America/New_York">Eastern Time (ET)</option>
+              <option value="America/Chicago">Central Time (CT)</option>
+              <option value="America/Denver">Mountain Time (MT)</option>
+              <option value="America/Los_Angeles">Pacific Time (PT)</option>
+              <option value="America/Anchorage">Alaska Time (AKT)</option>
+              <option value="Pacific/Honolulu">Hawaii Time (HT)</option>
+              <option value="America/Phoenix">Arizona (no DST)</option>
+              <option disabled>──────────</option>
+              <option value="America/Toronto">Eastern (Canada)</option>
+              <option value="America/Vancouver">Pacific (Canada)</option>
+              <option value="Europe/London">London (GMT/BST)</option>
+              <option value="Europe/Paris">Central European (CET)</option>
+              <option value="Asia/Dubai">Dubai (GST)</option>
+              <option value="Asia/Kolkata">India (IST)</option>
+              <option value="Asia/Tokyo">Tokyo (JST)</option>
+              <option value="Australia/Sydney">Sydney (AEST)</option>
+            </select>
+            <p className="text-[11px] text-muted-foreground mt-1.5">
+              All dates and times in the app will display in this timezone. If set to auto-detect, we&apos;ll use the browser&apos;s timezone.
+            </p>
           </section>
 
           {/* Permission overrides */}

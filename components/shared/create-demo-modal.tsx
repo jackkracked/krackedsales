@@ -227,12 +227,15 @@ export function CreateDemoModal({
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error("Webhook failed");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Webhook failed");
+      }
       setStatus("sent");
       setTimeout(onClose, 1500);
-    } catch {
+    } catch (err) {
       setStatus("error");
-      setError("Failed to send. Please try again.");
+      setError(err instanceof Error ? err.message : "Failed to send. Please try again.");
       setTimeout(() => setStatus("idle"), 3000);
     }
   }

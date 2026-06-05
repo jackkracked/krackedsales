@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { Pen, RefreshCw, Check, AlertTriangle, Clock, Shield, Download } from "lucide-react";
+import { Pen, RefreshCw, Check, AlertTriangle, Clock, Shield, Download, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
 interface Instalment {
@@ -12,6 +12,8 @@ interface Instalment {
   amount: number;
   dueDate: string;
   status: string;
+  isDeposit?: boolean;
+  stripeHostedUrl?: string | null;
 }
 
 interface ProposalData {
@@ -32,24 +34,31 @@ interface ProposalData {
   status: string;
   instalments: Instalment[];
   agreementTerms: string;
+  additionalRates: string | null;
+  hasDeposit?: boolean;
+  depositTotal?: number | null;
+  depositsPaidTotal?: number | null;
 }
 
 function fmtAmount(amount: number, currency: string) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: currency.toUpperCase(),
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
   }).format(amount);
 }
 
 function fmtDate(d: string | Date | null) {
   if (!d) return null;
-  return format(new Date(d), "d MMM yyyy");
+  const date = new Date(d);
+  return `${date.getUTCDate()} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][date.getUTCMonth()]} ${date.getUTCFullYear()}`;
 }
 
 function fmtDateShort(d: string | Date | null) {
   if (!d) return null;
-  return format(new Date(d), "MM/dd/yyyy");
+  const date = new Date(d);
+  return `${String(date.getUTCMonth() + 1).padStart(2, "0")}/${String(date.getUTCDate()).padStart(2, "0")}/${date.getUTCFullYear()}`;
 }
 
 // ─── Signature Canvas ──────────────────────────────────────────────────────────
@@ -57,9 +66,11 @@ function fmtDateShort(d: string | Date | null) {
 function SignatureCanvas({
   onSign,
   disabled,
+  canSign = true,
 }: {
   onSign: (dataUrl: string) => void;
   disabled?: boolean;
+  canSign?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [drawing, setDrawing] = useState(false);
@@ -153,13 +164,13 @@ function SignatureCanvas({
         <button
           type="button"
           onClick={() => {
-            if (!hasStroke || !canvasRef.current) return;
+            if (!hasStroke || !canvasRef.current || !canSign) return;
             onSign(canvasRef.current.toDataURL("image/png"));
           }}
-          disabled={!hasStroke || disabled}
+          disabled={!hasStroke || disabled || !canSign}
           className={cn(
             "flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-[7px] transition-all",
-            hasStroke && !disabled
+            hasStroke && !disabled && canSign
               ? "bg-primary text-white hover:bg-primary/90"
               : "bg-muted text-muted-foreground cursor-not-allowed"
           )}
@@ -281,8 +292,21 @@ function PricingTable({ proposal }: { proposal: ProposalData }) {
         All costs listed below are based on the scope and assumptions included in this Statement of Work.
       </p>
 
-      {/* Main pricing table */}
-      <table className="w-full border-collapse mb-4 text-sm">
+      {/* ── Mobile pricing card (hidden on sm+) ── */}
+      <div className="sm:hidden border border-foreground/20 rounded-[8px] overflow-hidden mb-4 text-sm">
+        <div className="bg-foreground/5 px-4 py-2.5 flex items-center justify-between border-b border-foreground/20">
+          <span className="font-bold text-foreground text-xs uppercase tracking-wide">{isManagement ? "Services" : "Project"}</span>
+          <span className="font-bold text-foreground">{totalLabel}</span>
+        </div>
+        <div className="px-4 py-3">{serviceCellContent}</div>
+        <div className="bg-foreground/5 px-4 py-3 border-t border-foreground/20 flex items-center justify-between">
+          <span className="font-bold text-foreground">Total</span>
+          <span className="text-xl font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{totalLabel}</span>
+        </div>
+      </div>
+
+      {/* ── Desktop pricing table (hidden on mobile) ── */}
+      <table className="hidden sm:table w-full border-collapse mb-4 text-sm">
         <thead>
           <tr>
             <th className="border border-foreground/20 bg-foreground/8 px-3 py-2 text-left font-bold text-foreground">
@@ -294,57 +318,91 @@ function PricingTable({ proposal }: { proposal: ProposalData }) {
           </tr>
         </thead>
         <tbody>
-          {proposal.paymentStructure === "instalment" ? (
-            proposal.instalments
-              .sort((a, b) => a.instalmentNumber - b.instalmentNumber)
-              .map((inst) => (
-                <tr key={inst.id}>
-                  <td className="border border-foreground/20 px-3 py-2 text-foreground">
-                    {serviceCellContent}
-                    <span className="text-foreground/60 text-xs block mt-1">
-                      Instalment {inst.instalmentNumber} of {proposal.instalments.length} — due {fmtDateShort(inst.dueDate)}
-                    </span>
-                  </td>
-                  <td className="border border-foreground/20 px-3 py-2 text-right font-bold text-foreground align-top">
-                    {fmtAmount(inst.amount, proposal.currency)}
-                  </td>
-                </tr>
-              ))
-          ) : (
-            <tr>
-              <td className="border border-foreground/20 px-3 py-2 text-foreground">
-                {serviceCellContent}
-              </td>
-              <td className="border border-foreground/20 px-3 py-2 text-right font-bold text-foreground align-top">
-                {totalLabel}
-              </td>
-            </tr>
-          )}
+          <tr>
+            <td className="border border-foreground/20 px-3 py-2 text-foreground">{serviceCellContent}</td>
+            <td className="border border-foreground/20 px-3 py-2 text-right font-bold text-foreground align-top">{totalLabel}</td>
+          </tr>
           <tr>
             <td className="border border-foreground/20 px-3 py-2 text-right font-bold text-foreground">Total:</td>
-            <td className="border border-foreground/20 px-3 py-2 text-right font-bold text-foreground">
-              {totalLabel}
-            </td>
+            <td className="border border-foreground/20 px-3 py-2 text-right font-bold text-foreground">{totalLabel}</td>
           </tr>
         </tbody>
       </table>
 
-      {/* Invoice date table */}
-      <table className="w-full border-collapse text-sm">
+      {/* ── Payment schedule ── */}
+      {proposal.paymentStructure === "instalment" && proposal.instalments.length > 0 && (() => {
+        const sorted = [...proposal.instalments].sort((a, b) => a.instalmentNumber - b.instalmentNumber);
+        return (
+          <>
+            {/* Mobile */}
+            <div className="sm:hidden border border-foreground/20 rounded-[8px] overflow-hidden mb-4 text-sm">
+              <div className="bg-foreground/5 px-4 py-2.5 border-b border-foreground/20">
+                <span className="font-bold text-foreground text-xs uppercase tracking-wide">Payment Schedule</span>
+              </div>
+              {sorted.map((inst) => (
+                <div key={inst.id} className="flex items-center justify-between px-4 py-3 border-b border-foreground/10 last:border-0">
+                  <div>
+                    <p className="font-medium text-foreground">Instalment {inst.instalmentNumber} of {proposal.instalments.length}</p>
+                    <p className="text-xs text-foreground/60 mt-0.5">Due {fmtDateShort(inst.dueDate)}</p>
+                  </div>
+                  <span className="font-bold text-foreground">{fmtAmount(inst.amount, proposal.currency)}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop */}
+            <table className="hidden sm:table w-full border-collapse mb-4 text-sm">
+              <thead>
+                <tr>
+                  <th className="border border-foreground/20 bg-foreground/8 px-3 py-2 text-left font-bold text-foreground" colSpan={3}>Payment Schedule</th>
+                </tr>
+                <tr>
+                  <th className="border border-foreground/20 bg-foreground/8 px-3 py-1.5 text-left text-xs font-semibold text-foreground/70">Instalment</th>
+                  <th className="border border-foreground/20 bg-foreground/8 px-3 py-1.5 text-left text-xs font-semibold text-foreground/70">Due Date</th>
+                  <th className="border border-foreground/20 bg-foreground/8 px-3 py-1.5 text-right text-xs font-semibold text-foreground/70">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((inst) => (
+                  <tr key={inst.id}>
+                    <td className="border border-foreground/20 px-3 py-2 text-foreground">{inst.instalmentNumber} of {proposal.instalments.length}</td>
+                    <td className="border border-foreground/20 px-3 py-2 text-foreground">{fmtDateShort(inst.dueDate)}</td>
+                    <td className="border border-foreground/20 px-3 py-2 text-right font-bold text-foreground">{fmtAmount(inst.amount, proposal.currency)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        );
+      })()}
+
+      {/* ── Invoice date + payment options ── */}
+      {/* Mobile */}
+      <div className="sm:hidden border border-foreground/20 rounded-[8px] overflow-hidden text-sm">
+        <div className="px-4 py-3 flex items-center justify-between border-b border-foreground/10">
+          <span className="text-xs font-semibold text-foreground/60 uppercase tracking-wide">Invoice Date</span>
+          <span className="font-medium text-foreground" suppressHydrationWarning>
+            {proposal.startDate ? fmtDateShort(proposal.startDate) : fmtDateShort(new Date())}
+          </span>
+        </div>
+        <div className="px-4 py-3">
+          <span className="text-xs font-semibold text-foreground/60 uppercase tracking-wide block mb-1">Payment</span>
+          <span className="text-foreground/80">Invoice via Stripe, Bank Transfer, or Zelle</span>
+        </div>
+      </div>
+
+      {/* Desktop */}
+      <table className="hidden sm:table w-full border-collapse text-sm">
         <thead>
           <tr>
-            <th className="border border-foreground/20 bg-foreground/8 px-3 py-2 text-left font-bold text-foreground">
-              Invoice Date
-            </th>
-            <th className="border border-foreground/20 bg-foreground/8 px-3 py-2 text-left font-bold text-foreground">
-              Payment Options
-            </th>
+            <th className="border border-foreground/20 bg-foreground/8 px-3 py-2 text-left font-bold text-foreground">Invoice Date</th>
+            <th className="border border-foreground/20 bg-foreground/8 px-3 py-2 text-left font-bold text-foreground">Payment Options</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td className="border border-foreground/20 px-3 py-2 font-medium text-foreground">
-              {proposal.startDate ? fmtDateShort(proposal.startDate) : format(new Date(), "MM/dd/yyyy")}
+            <td className="border border-foreground/20 px-3 py-2 font-medium text-foreground" suppressHydrationWarning>
+              {proposal.startDate ? fmtDateShort(proposal.startDate) : fmtDateShort(new Date())}
             </td>
             <td className="border border-foreground/20 px-3 py-2 text-foreground/80">
               Invoice via Stripe, Bank Transfer, or Zelle
@@ -364,20 +422,56 @@ function LegalHeading({ children }: { children: React.ReactNode }) {
 
 // ─── Additional scope pricing table ───────────────────────────────────────────
 
-function AdditionalScopePricing({ isManagement }: { isManagement: boolean }) {
-  const rows = isManagement
+function AdditionalScopePricing({
+  isManagement,
+  isDraft,
+  proposalId,
+  savedRates,
+}: {
+  isManagement: boolean;
+  isDraft?: boolean;
+  proposalId?: string;
+  savedRates?: string | null;
+}) {
+  const defaults = isManagement
     ? [
-        ["Campaign Emails", "$300 per email"],
-        ["Flow Emails", "$300 per email"],
-        ["Flow Email Edits", "$100 per email"],
-        ["SMS", "$100 per SMS/MMS"],
-        ["Pop-Up", "$150 per Pop-Up"],
+        { item: "Campaign Emails", cost: "$300 per email" },
+        { item: "Flow Emails", cost: "$300 per email" },
+        { item: "Flow Email Edits", cost: "$100 per email" },
+        { item: "SMS", cost: "$100 per SMS/MMS" },
+        { item: "Pop-Up", cost: "$150 per Pop-Up" },
       ]
     : [
-        ["Flow Emails", "$300 per email"],
-        ["SMS", "$100 per SMS/MMS"],
-        ["Pop-Up", "$150 per Pop-Up"],
+        { item: "Flow Emails", cost: "$300 per email" },
+        { item: "SMS", cost: "$100 per SMS/MMS" },
+        { item: "Pop-Up", cost: "$150 per Pop-Up" },
       ];
+
+  const [rows, setRows] = useState<{ item: string; cost: string }[]>(() => {
+    try {
+      return savedRates ? JSON.parse(savedRates) : defaults;
+    } catch {
+      return defaults;
+    }
+  });
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const [savingIdx, setSavingIdx] = useState<number | null>(null);
+
+  async function saveRow(idx: number) {
+    if (!proposalId) return;
+    // Small delay to ensure React state has flushed to the ref
+    await new Promise(r => setTimeout(r, 50));
+    setSavingIdx(idx);
+    const current = rowsRef.current;
+    const res = await fetch(`/api/proposals/${proposalId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ additionalRates: JSON.stringify(current) }),
+    });
+    if (!res.ok) console.error("[saveRow] Failed:", await res.text().catch(() => ""));
+    setSavingIdx(null);
+  }
 
   return (
     <div className="my-4">
@@ -386,18 +480,56 @@ function AdditionalScopePricing({ isManagement }: { isManagement: boolean }) {
           ? "If additional services are requested (e.g., extra campaigns, flow build-outs, or any other additional support), Kracked Retention will pro-rate based on the below table. If a service is not listed, a proposal via Slack or email will be sent upon request outlining the additional scope and cost. Upon written acceptance, work will be completed and prorated at the end of the month."
           : "Any services outside the agreed scope (e.g., Monthly Management, extra flows, or campaigns) will require a separate agreement mutually approved by both parties. If additional items are requested after the kick-off call, they will be pro-rated and invoiced separately per the pricing table below."}
       </p>
-      <table className="w-full border-collapse text-sm">
+      {/* Mobile */}
+      <div className="sm:hidden border border-foreground/20 rounded-[8px] overflow-hidden text-sm mb-1">
+        <div className="bg-foreground/5 px-4 py-2.5 border-b border-foreground/20">
+          <span className="font-bold text-foreground text-xs uppercase tracking-wide">Additional Scope Pricing</span>
+        </div>
+        {rows.map((row, idx) => (
+          <div key={idx} className={cn("flex items-center justify-between px-4 py-2.5 border-b border-foreground/10 last:border-0", savingIdx === idx && "opacity-60")}>
+            <span className="font-medium text-foreground">{row.item}</span>
+            {isDraft ? (
+              <input
+                type="text"
+                value={row.cost}
+                onChange={(e) => { const v = e.target.value; setRows(prev => prev.map((r, i) => i === idx ? { ...r, cost: v } : r)); }}
+                onBlur={() => saveRow(idx)}
+                className="w-32 text-right bg-amber-50/70 hover:bg-amber-50 border border-amber-200 focus:border-amber-400 focus:ring-2 focus:ring-amber-200 rounded-[4px] px-2 py-1 outline-none transition-all text-sm text-foreground/80"
+              />
+            ) : (
+              <span className="text-foreground/70">{row.cost}</span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop */}
+      <table className="hidden sm:table w-full border-collapse text-sm">
         <thead>
           <tr>
             <th className="border border-foreground/20 bg-foreground/8 px-3 py-2 text-left font-bold text-foreground">Additional Scope Pricing</th>
-            <th className="border border-foreground/20 bg-foreground/8 px-3 py-2 text-right font-bold text-foreground w-40">Cost</th>
+            <th className="border border-foreground/20 bg-foreground/8 px-3 py-2 text-right font-bold text-foreground w-40">
+              Cost{isDraft && <span className="ml-1 text-[10px] font-normal text-primary/50">(click to edit)</span>}
+            </th>
           </tr>
         </thead>
         <tbody>
-          {rows.map(([label, cost]) => (
-            <tr key={label}>
-              <td className="border border-foreground/20 px-3 py-2 font-medium text-foreground">{label}</td>
-              <td className="border border-foreground/20 px-3 py-2 text-right text-foreground/80">{cost}</td>
+          {rows.map((row, idx) => (
+            <tr key={idx} className={cn(savingIdx === idx && "opacity-60")}>
+              <td className="border border-foreground/20 px-3 py-2 font-medium text-foreground">{row.item}</td>
+              <td className="border border-foreground/20 px-1 py-1 text-right text-foreground/80">
+                {isDraft ? (
+                  <input
+                    type="text"
+                    value={row.cost}
+                    onChange={(e) => { const v = e.target.value; setRows(prev => prev.map((r, i) => i === idx ? { ...r, cost: v } : r)); }}
+                    onBlur={() => saveRow(idx)}
+                    className="w-full text-right bg-amber-50/70 hover:bg-amber-50 border border-amber-200 focus:border-amber-400 focus:ring-2 focus:ring-amber-200 rounded-[4px] px-2 py-1 outline-none transition-all text-sm text-foreground/80"
+                  />
+                ) : (
+                  <span className="px-2">{row.cost}</span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -408,7 +540,7 @@ function AdditionalScopePricing({ isManagement }: { isManagement: boolean }) {
 
 // ─── Management legal terms ────────────────────────────────────────────────────
 
-function ManagementTerms() {
+function ManagementTerms({ isDraft, proposalId, savedRates }: { isDraft?: boolean; proposalId?: string; savedRates?: string | null }) {
   return (
     <div className="text-sm text-foreground/80 leading-relaxed">
       <p className="mb-3">
@@ -417,7 +549,7 @@ function ManagementTerms() {
         services until payment is received.
       </p>
 
-      <AdditionalScopePricing isManagement={true} />
+      <AdditionalScopePricing isManagement={true} isDraft={isDraft} proposalId={proposalId} savedRates={savedRates} />
 
       <LegalHeading>Clarifications</LegalHeading>
       <p className="mb-2">
@@ -533,10 +665,10 @@ function ManagementTerms() {
 
 // ─── Project legal terms ───────────────────────────────────────────────────────
 
-function ProjectTerms() {
+function ProjectTerms({ isDraft, proposalId, savedRates }: { isDraft?: boolean; proposalId?: string; savedRates?: string | null }) {
   return (
     <div className="text-sm text-foreground/80 leading-relaxed">
-      <AdditionalScopePricing isManagement={false} />
+      <AdditionalScopePricing isManagement={false} isDraft={isDraft} proposalId={proposalId} savedRates={savedRates} />
 
       <LegalHeading>Service Collaboration &amp; Cooperation</LegalHeading>
       <p className="mb-2">
@@ -639,12 +771,200 @@ function AcceptanceText({ isManagement }: { isManagement: boolean }) {
   );
 }
 
+// ─── Admin inline edit components (draft preview only) ─────────────────────────
+
+function InlineEditText({
+  value,
+  proposalId,
+  field,
+  multiline,
+  inputClassName,
+  displayClassName,
+  placeholder,
+  onSave,
+}: {
+  value: string;
+  proposalId: string;
+  field: string;
+  multiline?: boolean;
+  inputClassName?: string;
+  displayClassName?: string;
+  placeholder?: string;
+  onSave?: (newValue: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [localValue, setLocalValue] = useState(value);
+  const [saved, setSaved] = useState(false);
+
+  async function handleBlur() {
+    setEditing(false);
+    if (localValue.trim() === value.trim()) return;
+    const finalValue = localValue.trim() || value;
+    await fetch(`/api/proposals/${proposalId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [field]: finalValue }),
+    });
+    onSave?.(finalValue);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1800);
+  }
+
+  if (editing) {
+    if (multiline) {
+      return (
+        <textarea
+          value={localValue}
+          onChange={(e) => setLocalValue(e.target.value)}
+          onBlur={handleBlur}
+          autoFocus
+          rows={10}
+          className={cn(
+            "w-full text-sm leading-relaxed font-mono border border-primary/40 rounded-[6px] px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 resize-y",
+            inputClassName
+          )}
+        />
+      );
+    }
+    return (
+      <input
+        type="text"
+        value={localValue}
+        onChange={(e) => setLocalValue(e.target.value)}
+        onBlur={handleBlur}
+        autoFocus
+        className={cn(
+          "border-b border-primary/60 bg-transparent focus:outline-none text-foreground w-full",
+          inputClassName
+        )}
+      />
+    );
+  }
+
+  return (
+    <span
+      onClick={() => setEditing(true)}
+      className={cn(
+        "group relative cursor-text rounded-[4px] px-1 -mx-1 py-0.5 transition-all",
+        "bg-amber-50/70 hover:bg-amber-50",
+        displayClassName
+      )}
+      title="Click to edit"
+    >
+      {localValue || placeholder || "—"}
+      <Pencil className="inline-block w-3 h-3 ml-1 text-primary/40 opacity-0 group-hover:opacity-100 transition-opacity align-middle" />
+      {saved && (
+        <span className="absolute -top-5 left-0 text-[10px] text-green-600 font-semibold whitespace-nowrap bg-white px-1 rounded shadow-sm">
+          Saved
+        </span>
+      )}
+    </span>
+  );
+}
+
+function InlineEditScope({
+  value,
+  proposalId,
+}: {
+  value: string;
+  proposalId: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [localValue, setLocalValue] = useState(value);
+  const [saved, setSaved] = useState(false);
+
+  async function handleBlur() {
+    setEditing(false);
+    if (localValue === value) return;
+    await fetch(`/api/proposals/${proposalId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serviceDescription: localValue }),
+    });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1800);
+  }
+
+  if (editing) {
+    return (
+      <textarea
+        value={localValue}
+        onChange={(e) => setLocalValue(e.target.value)}
+        onBlur={handleBlur}
+        autoFocus
+        rows={12}
+        className="w-full text-sm leading-relaxed font-mono border border-primary/40 rounded-[6px] px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 resize-y mb-4"
+        placeholder="Describe the scope of work…"
+      />
+    );
+  }
+
+  return (
+    <div
+      className="group relative cursor-text rounded-[4px] bg-amber-50/70 hover:bg-amber-50 transition-all px-1 -mx-1 py-1"
+      onClick={() => setEditing(true)}
+      title="Click to edit scope"
+    >
+      <ScopeDisplay text={localValue} />
+      <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-white/90 rounded px-1.5 py-0.5 shadow-sm">
+        <Pencil className="w-3 h-3 text-primary/60" />
+        <span className="text-[10px] text-primary/60 font-medium">Edit</span>
+      </div>
+      {saved && (
+        <span className="absolute -top-5 left-0 text-[10px] text-green-600 font-semibold whitespace-nowrap bg-white px-1 rounded shadow-sm">
+          Saved
+        </span>
+      )}
+    </div>
+  );
+}
+
+function InlineEditDate({
+  value,
+  proposalId,
+  className,
+}: {
+  value: string | null;
+  proposalId: string;
+  className?: string;
+}) {
+  const [localValue, setLocalValue] = useState(value ? new Date(value).toISOString().slice(0, 10) : "");
+  const [saved, setSaved] = useState(false);
+
+  async function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const newVal = e.target.value;
+    setLocalValue(newVal);
+    if (!newVal) return;
+    await fetch(`/api/proposals/${proposalId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expiresAt: new Date(newVal).toISOString() }),
+    });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1800);
+  }
+
+  return (
+    <span className={cn("relative inline-flex items-center gap-2", className)}>
+      <input
+        type="date"
+        value={localValue}
+        onChange={handleChange}
+        className="bg-amber-50/70 hover:bg-amber-50 rounded-[4px] px-1 py-0.5 border-b border-current/40 focus:outline-none focus:border-current/70 text-inherit text-xs cursor-pointer transition-all"
+      />
+      <Pencil className="w-3 h-3 opacity-50" />
+      {saved && <span className="text-[10px] text-green-600 font-semibold">Saved</span>}
+    </span>
+  );
+}
+
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export function ProposalSigningPage({ token, preview = false }: { token: string; preview?: boolean }) {
   const [signed, setSigned] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
   const [signerName, setSignerName] = useState("");
+  const [signerTitle, setSignerTitle] = useState("");
   const today = format(new Date(), "MM/dd/yyyy");
 
   const { data, isLoading, isError } = useQuery<
@@ -670,7 +990,7 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
       const res = await fetch(`/api/proposals/${proposal.id}/sign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ signature: signatureDataUrl, signerName: signerName.trim() || proposal.contactName }),
+        body: JSON.stringify({ signature: signatureDataUrl, signerName: signerName.trim() || proposal.contactName, signerTitle: signerTitle.trim() || undefined }),
       });
       if (!res.ok) throw new Error("Failed to sign");
       return res.json() as Promise<{ hostedUrl: string | null }>;
@@ -718,6 +1038,97 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
   }
 
   if (signed) {
+    const proposalData = (data && "proposal" in data) ? (data as { proposal: ProposalData }).proposal : null;
+    const isDepositProposal = proposalData?.hasDeposit;
+    const depositInstalments = proposalData?.instalments?.filter(i => i.isDeposit) ?? [];
+
+    if (isDepositProposal && depositInstalments.length > 0) {
+      // Deposit proposal — show deposit payment schedule instead of redirect
+      const firstUnpaid = depositInstalments.find(i => i.status !== "paid");
+      return (
+        <div className="min-h-screen flex items-center justify-center p-6 bg-background">
+          <div className="max-w-md w-full">
+            <div className="text-center mb-6">
+              <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 text-green-600 bg-green-50">
+                <Check className="w-7 h-7" />
+              </div>
+              <h1 className="text-xl font-bold text-foreground mb-2" style={{ fontFamily: "var(--font-heading)" }}>
+                Proposal signed!
+              </h1>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Pay your deposits to get started{proposalData.startDate ? ` on ${fmtDate(proposalData.startDate)}` : ""}.
+              </p>
+            </div>
+
+            {/* Progress bar */}
+            <div className="mb-4">
+              <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                <span>{fmtAmount(proposalData.depositsPaidTotal ?? 0, proposalData.currency)} paid</span>
+                <span>{fmtAmount(proposalData.depositTotal ?? proposalData.totalAmount, proposalData.currency)} total</span>
+              </div>
+              <div className="h-2 bg-muted rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-green-500 rounded-full transition-all"
+                  style={{ width: `${((proposalData.depositsPaidTotal ?? 0) / ((proposalData.depositTotal ?? proposalData.totalAmount) || 1)) * 100}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Deposit schedule */}
+            <div className="border border-border rounded-[8px] overflow-hidden mb-4">
+              {depositInstalments
+                .sort((a, b) => a.instalmentNumber - b.instalmentNumber)
+                .map((inst) => (
+                  <div key={inst.id} className="flex items-center justify-between px-4 py-3 border-b border-border last:border-0">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        Deposit {inst.instalmentNumber}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Due {fmtDate(inst.dueDate)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-bold text-foreground tabular-nums">
+                        {fmtAmount(inst.amount, proposalData.currency)}
+                      </span>
+                      {inst.status === "paid" ? (
+                        <span className="text-xs font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded">Paid</span>
+                      ) : inst.stripeHostedUrl ? (
+                        <a
+                          href={inst.stripeHostedUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs font-semibold text-white bg-primary px-3 py-1 rounded-[6px] hover:bg-primary/90 transition-colors"
+                        >
+                          Pay Now
+                        </a>
+                      ) : (
+                        <span className="text-xs font-semibold text-muted-foreground bg-muted px-2 py-0.5 rounded">Pending</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+            </div>
+
+            {/* First deposit CTA */}
+            {firstUnpaid?.stripeHostedUrl && (
+              <a
+                href={firstUnpaid.stripeHostedUrl}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-primary text-white text-sm font-medium rounded-[8px] hover:bg-primary/90 transition-colors"
+              >
+                Pay First Deposit — {fmtAmount(firstUnpaid.amount, proposalData.currency)}
+              </a>
+            )}
+
+            <p className="text-[11px] text-muted-foreground text-center mt-4">
+              Recurring billing starts after all deposits are collected.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
     if (redirecting) {
       return (
         <StatusScreen
@@ -742,6 +1153,7 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
   const isPreview = preview || ("preview" in data && data.preview === true);
   const { proposal } = data as { proposal: ProposalData };
   const isManagement = proposal.type === "management";
+  const isDraft = isPreview && proposal.status === "draft";
 
   return (
     <div className="min-h-screen bg-[#f5f5f0]">
@@ -749,25 +1161,39 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
       {isPreview && (
         <div className="bg-primary text-primary-foreground px-6 py-2.5 flex items-center justify-center gap-3 text-sm font-medium print:hidden">
           <span className="px-2 py-0.5 bg-white/20 rounded text-xs font-bold tracking-wide uppercase">Preview</span>
-          <span>This is how your client will see the proposal. Signing is disabled.</span>
+          {isDraft ? (
+            <span>Draft mode — <Pencil className="inline w-3.5 h-3.5 mx-0.5 align-middle" /> click any highlighted field to edit. Changes save automatically.</span>
+          ) : (
+            <span>This is how your client will see the proposal. Signing is disabled.</span>
+          )}
         </div>
       )}
 
-      {/* Expiry banner */}
-      {proposal.expiresAt && (
-        <div className="bg-amber-50 border-b border-amber-200 px-6 py-2 flex items-center justify-end gap-2">
-          <Clock className="w-3.5 h-3.5 text-amber-600" />
-          <span className="text-xs text-amber-700 font-medium">
-            Expires {fmtDate(proposal.expiresAt)}
-          </span>
-        </div>
-      )}
+      {/* Expiry banner — centered, urgency-coloured */}
+      {proposal.expiresAt && (() => {
+        const daysLeft = Math.ceil((new Date(proposal.expiresAt).getTime() - Date.now()) / 86400000);
+        return (
+          <div className="sticky top-0 z-10 border-b px-6 py-2.5 flex items-center justify-center gap-2 bg-slate-50 border-slate-200">
+            <Clock className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+            <span className="text-xs font-semibold tracking-wide text-slate-600">
+              {isDraft ? (
+                <>Expires: <InlineEditDate value={proposal.expiresAt} proposalId={proposal.id} /></>
+              ) : daysLeft <= 0
+                ? `This proposal expires today`
+                : daysLeft === 1
+                ? `This proposal expires tomorrow`
+                : `This proposal expires on ${fmtDate(proposal.expiresAt)}`
+              }
+            </span>
+          </div>
+        );
+      })()}
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 lg:py-12">
-        <div className="flex flex-col lg:flex-row gap-8 lg:gap-10 items-start">
+        <div className="flex flex-col-reverse lg:flex-row gap-6 lg:gap-10 items-start lg:items-stretch">
 
           {/* ── Left: Full SOW document ── */}
-          <div className="flex-1 min-w-0 bg-white shadow-sm border border-black/8 rounded-[4px] px-10 py-10 lg:py-12 print:shadow-none print:border-0 print:px-0">
+          <div className="flex-1 min-w-0 bg-white shadow-sm border border-black/8 rounded-[4px] px-4 py-6 sm:px-8 sm:py-10 lg:py-12 print:shadow-none print:border-0 print:px-0">
 
             {/* Download PDF button — hidden in print */}
             <div className="flex justify-end mb-6 print:hidden">
@@ -791,9 +1217,23 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
             </div>
 
             {/* Document title */}
-            <p className="text-sm font-bold text-foreground mb-4">
+            <p className="text-sm font-bold text-foreground mb-1">
               Service Agreement and Statement of Work
             </p>
+            {isDraft ? (
+              <p className="text-sm text-muted-foreground mb-4">
+                <InlineEditText
+                  value={proposal.title}
+                  proposalId={proposal.id}
+                  field="title"
+                  displayClassName="text-sm text-muted-foreground"
+                  inputClassName="text-sm text-muted-foreground"
+                  placeholder="Proposal title"
+                />
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground mb-4">{proposal.title}</p>
+            )}
 
             <DocDivider />
 
@@ -801,7 +1241,20 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
             <p className="text-sm text-foreground/80 leading-relaxed mb-6">
               This {isManagement ? "Agreement" : "agreement"} is made between Kracked Retention{" "}
               {isManagement ? '("Service Provider")' : ""} and{" "}
-              <strong>{proposal.contactName}</strong> (&ldquo;Client&rdquo;) and becomes effective upon the
+              {isDraft ? (
+                <InlineEditText
+                  value={proposal.contactName}
+                  proposalId={proposal.id}
+                  field="contactName"
+                  displayClassName="font-bold"
+                  inputClassName="font-bold"
+                  placeholder="Client name"
+                  onSave={(newName) => setSignerName(newName)}
+                />
+              ) : (
+                <strong>{proposal.contactName}</strong>
+              )}{" "}
+              (&ldquo;Client&rdquo;) and becomes effective upon the
               execution of this document or the commencement of services, whichever occurs first.
             </p>
 
@@ -812,7 +1265,9 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
               {isManagement ? " services for the Client's brand" : ""}:
             </p>
 
-            {proposal.serviceDescription ? (
+            {isDraft ? (
+              <InlineEditScope value={proposal.serviceDescription ?? ""} proposalId={proposal.id} />
+            ) : proposal.serviceDescription ? (
               <ScopeDisplay text={proposal.serviceDescription} />
             ) : (
               <ul className="text-sm text-foreground/80 leading-relaxed list-disc pl-6 mb-2 space-y-1">
@@ -843,7 +1298,10 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
             <DocDivider />
 
             {/* Agreement terms (legal sections — hardcoded per type to match PDF agreements) */}
-            {isManagement ? <ManagementTerms /> : <ProjectTerms />}
+            {isManagement
+              ? <ManagementTerms isDraft={isDraft} proposalId={proposal.id} savedRates={proposal.additionalRates} />
+              : <ProjectTerms isDraft={isDraft} proposalId={proposal.id} savedRates={proposal.additionalRates} />
+            }
 
             <DocDivider />
 
@@ -852,7 +1310,7 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
             <AcceptanceText isManagement={isManagement} />
 
             {/* Signature block */}
-            <div className="grid grid-cols-2 gap-8 mt-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8 mt-6">
               {/* Kracked Retention side */}
               <div>
                 <p className="text-xs font-bold text-foreground mb-3">Kracked Retention</p>
@@ -878,24 +1336,49 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
               {/* Client side */}
               <div>
                 <p className="text-xs font-bold text-foreground mb-3">Client</p>
-                <div className="space-y-2 text-sm text-foreground/80">
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-semibold shrink-0">Full Name:</span>
-                    <input
-                      type="text"
-                      value={signerName}
-                      onChange={(e) => setSignerName(e.target.value)}
-                      disabled={isPreview || signed}
-                      className="flex-1 min-w-0 border-0 border-b border-foreground/20 focus:border-foreground/60 bg-transparent text-sm text-foreground outline-none pb-0.5 transition-colors disabled:opacity-70 disabled:cursor-default"
-                      placeholder="Full name"
-                    />
+                <div className="space-y-3 text-sm">
+                  {/* Full Name — required fillable field */}
+                  <div>
+                    <p className="text-xs text-foreground/60 mb-1">
+                      Full Name <span className="text-red-500">*</span>
+                    </p>
+                    {signed ? (
+                      <p className="text-sm font-medium text-foreground px-2 py-1.5">{signerName || "—"}</p>
+                    ) : (
+                      <input
+                        type="text"
+                        value={signerName}
+                        onChange={(e) => setSignerName(e.target.value)}
+                        className="w-full text-sm font-medium text-foreground rounded-[4px] px-2 py-1.5 outline-none transition-all bg-amber-50/70 hover:bg-amber-50 border border-amber-200 focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
+                        placeholder="Enter your full legal name"
+                        autoComplete="name"
+                      />
+                    )}
+                  </div>
+
+                  {/* Title/Role — optional */}
+                  <div>
+                    <p className="text-xs text-foreground/60 mb-1">Title / Role <span className="text-foreground/40">(optional)</span></p>
+                    {signed ? (
+                      <p className="text-sm text-foreground/70 px-2 py-1.5">{signerTitle || "—"}</p>
+                    ) : (
+                      <input
+                        type="text"
+                        value={signerTitle}
+                        onChange={(e) => setSignerTitle(e.target.value)}
+                        className="w-full text-sm text-foreground rounded-[4px] px-2 py-1.5 outline-none transition-all bg-amber-50/70 hover:bg-amber-50 border border-amber-200 focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
+                        placeholder="e.g. CEO, Founder, Director"
+                        autoComplete="organization-title"
+                      />
+                    )}
                   </div>
                 </div>
                 <div className="mt-4">
                   <p className="text-xs text-foreground/60 mb-1">Signature:</p>
                   <div className="border-b border-foreground/40 pb-4 mb-2 min-h-[32px]">
                     <span className="text-xs text-foreground/40 italic">
-                      Sign using the panel on the right
+                      <span className="lg:hidden">Sign using the panel above</span>
+                      <span className="hidden lg:inline">Sign using the panel on the right</span>
                     </span>
                   </div>
                   <p className="text-xs text-foreground/60">Date: {today}</p>
@@ -904,16 +1387,18 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
             </div>
 
             {/* Footer */}
-            <div className="mt-10 pt-4 border-t border-foreground/15 flex items-center justify-between text-[11px] text-foreground/40">
-              <span>&copy; 2026 Confidential and Proprietary</span>
-              <span>Statement of Work</span>
-              <span>Customer Service: admin@krackedretention.com</span>
+            <div className="mt-10 pt-4 border-t border-foreground/15 text-[11px] text-foreground/40">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span>&copy; 2026 Confidential and Proprietary</span>
+                <span className="hidden sm:inline">Statement of Work</span>
+                <span>Customer Service: admin@krackedretention.com</span>
+              </div>
             </div>
           </div>
 
           {/* ── Right: Sticky action panel ── */}
-          <div className="lg:w-72 shrink-0 print:hidden">
-            <div className="lg:sticky lg:top-8 space-y-3">
+          <div className="w-full lg:w-72 shrink-0 print:hidden">
+            <div className="lg:sticky lg:top-[52px] space-y-3">
               <div className="bg-white border border-black/8 rounded-[8px] overflow-hidden shadow-sm">
                 {/* Amount */}
                 <div className="px-5 py-4 border-b border-border bg-muted/10">
@@ -934,6 +1419,36 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
                     </p>
                   )}
                 </div>
+
+                {/* Deposit schedule */}
+                {proposal.hasDeposit && (() => {
+                  const depositInstalments = proposal.instalments.filter(i => i.isDeposit);
+                  if (depositInstalments.length === 0) return null;
+                  return (
+                    <div className="px-4 py-3 border-b border-border">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                        Deposit Schedule
+                      </p>
+                      <div className="space-y-1.5">
+                        {depositInstalments
+                          .sort((a, b) => a.instalmentNumber - b.instalmentNumber)
+                          .map((inst) => (
+                            <div key={inst.id} className="flex items-center justify-between">
+                              <span className="text-xs text-muted-foreground">
+                                {inst.instalmentNumber}. {fmtDate(inst.dueDate)}
+                              </span>
+                              <span className="text-xs font-medium text-foreground tabular-nums">
+                                {fmtAmount(inst.amount, proposal.currency)}
+                              </span>
+                            </div>
+                          ))}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-2">
+                        Deposits cover the first billing cycle. Subscription starts when fully paid.
+                      </p>
+                    </div>
+                  );
+                })()}
 
                 {/* Payment schedule */}
                 {proposal.paymentStructure === "instalment" && proposal.instalments.length > 0 && (
@@ -981,6 +1496,7 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
                     <SignatureCanvas
                       onSign={(dataUrl) => signMutation.mutate(dataUrl)}
                       disabled={signMutation.isPending}
+                      canSign={signerName.trim().length > 0}
                     />
                   )}
                 </div>

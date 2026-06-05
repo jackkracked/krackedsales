@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { hasStripe, stripe } from "@/lib/stripe/client";
 import { generateAgreementPdf } from "@/lib/pdf/render";
 import { sendSignedAgreementEmail } from "@/lib/email/resend";
+import { dispatchWorkflowEvent } from "@/lib/workflows/triggers";
 
 const DEFAULT_MANAGEMENT_TERMS = `**Service Collaboration & Cooperation**
 
@@ -72,7 +73,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   try {
     const { id } = await params;
     const body = await req.json();
-    const { signature, signerName } = body;
+    const { signature, signerName, signerTitle } = body;
 
     if (!signature) {
       return NextResponse.json({ error: "Signature required" }, { status: 400 });
@@ -120,8 +121,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             .where(eq(proposalInstalments.id, instalments[0].id));
         }
 
+      } else if (proposal.paymentStructure === "subscription" && proposal.hasDeposit && proposal.stripeCustomerId) {
+        // Deposit proposal — skip Checkout Session, point to first unpaid deposit invoice
+        const depositInstalments = await db()
+          .select()
+          .from(proposalInstalments)
+          .where(eq(proposalInstalments.proposalId, id))
+          .orderBy(proposalInstalments.instalmentNumber);
+
+        const firstUnpaid = depositInstalments.find(i => i.isDeposit && i.status === "pending");
+        if (firstUnpaid?.stripeInvoiceId) {
+          const inv = await stripe().invoices.retrieve(firstUnpaid.stripeInvoiceId);
+          hostedUrl = inv.hosted_invoice_url ?? null;
+          if (hostedUrl) {
+            await db()
+              .update(proposalInstalments)
+              .set({ stripeHostedUrl: hostedUrl })
+              .where(eq(proposalInstalments.id, firstUnpaid.id));
+          }
+        }
+
       } else if (proposal.paymentStructure === "subscription" && proposal.stripeCustomerId) {
-        // Create a Stripe Checkout Session for recurring subscription
+        // Create a Stripe Checkout Session for recurring subscription (no deposit)
         const interval = (proposal.billingInterval ?? "month") as "day" | "week" | "month" | "year";
         const intervalCount = proposal.billingIntervalCount ?? 1;
 
@@ -158,10 +179,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         signedAt: new Date(),
         signedIp: ip,
         signatureData: signature,
+        signerTitle: signerTitle?.trim() || null,
         stripeHostedUrl: hostedUrl,
         updatedAt: new Date(),
       })
       .where(eq(proposals.id, id));
+
+    dispatchWorkflowEvent("proposal.signed", {
+      proposalId: id,
+      contactName: proposal.contactName,
+      contactEmail: proposal.contactEmail ?? null,
+      contactId: proposal.ghlContactId,
+      opportunityId: proposal.opportunityId ?? null,
+      proposalTitle: proposal.title,
+      proposalType: proposal.type,
+      totalAmount: proposal.totalAmount,
+      currency: proposal.currency,
+      serviceDescription: proposal.serviceDescription ?? null,
+      paymentStructure: proposal.paymentStructure,
+      signerTitle: signerTitle?.trim() ?? null,
+      signedAt: new Date().toISOString(),
+      stripeCustomerId: proposal.stripeCustomerId ?? null,
+    }).catch(() => {});
 
     // Fire-and-forget: Slack + email
     (async () => {

@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils/cn";
+import { Avatar } from "@/components/ui/avatar";
 
 interface TeamUser {
   id: string;
@@ -13,20 +14,6 @@ interface TeamUser {
   targets: { dealsPerMonth: number; callsPerDay: number; revenueTarget: number } | null;
 }
 
-function UserInitials({ name }: { name: string }) {
-  const initials = name
-    .split(" ")
-    .map((n) => n[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-
-  return (
-    <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center text-[10px] font-bold text-primary shrink-0">
-      {initials || "?"}
-    </div>
-  );
-}
 
 function RoleBadge({ role }: { role: string }) {
   return (
@@ -81,7 +68,7 @@ export function TeamPerformanceGrid() {
   const users = data?.users ?? [];
 
   return (
-    <div className="bg-card border border-border rounded-[10px] overflow-hidden">
+    <div className="bg-card border border-border rounded-[10px] overflow-hidden shrink-0">
       <div className="px-4 py-3 border-b border-border">
         <h3
           className="text-sm font-semibold text-foreground"
@@ -127,7 +114,7 @@ export function TeamPerformanceGrid() {
                 >
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2.5">
-                      <UserInitials name={u.name} />
+                      <Avatar name={u.name} size={28} variant="rep" />
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-foreground truncate leading-tight">
                           {u.name}

@@ -18,11 +18,18 @@ export interface UnifiedContact {
   commentText: string | null;
   brandCategory: "ecommerce" | "service" | "local" | "b2b" | "other" | null;
   hasDemo: boolean;
+  hasProposal: boolean;
+  proposalStatus: string | null; // "draft" | "sent" | "signed" | "paid" etc.
   awaitingReply: boolean;
   lastChannel: string | null;
   daysSinceLastTouch: number;
+  daysInCurrentStage: number | null;
   lastActivityAt: string;
   createdAt: string;
+  assignedTo: string | null; // GHL user ID
+  dnd: boolean;
+  responseStatus: "awaiting_reply" | "no_response" | "replied" | null;
+  reachableChannels: string[]; // ["email", "sms", "instagram", etc.]
 }
 
 export interface TimelineEvent {
@@ -36,7 +43,10 @@ export interface TimelineEvent {
     | "demo_created"
     | "email_sent"
     | "email_received"
-    | "contacted";
+    | "contacted"
+    | "proposal_sent"
+    | "proposal_signed"
+    | "proposal_paid";
   title: string;
   body?: string;
   occurredAt: string;

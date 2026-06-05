@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { commentLeads } from "@/lib/db/schema";
+import { commentLeads, proposals } from "@/lib/db/schema";
 import { ghl } from "@/lib/ghl/client";
 import type { TimelineEvent } from "@/lib/contacts/types";
 
@@ -117,6 +117,54 @@ export async function GET(
     if (id.startsWith("ghl_")) {
       const contactId = id.slice(4);
       events = await ghlTimeline(contactId, createdAt);
+
+      // Inject proposal lifecycle events from our DB
+      try {
+        const contactProposals = await db()
+          .select({
+            id: proposals.id,
+            title: proposals.title,
+            totalAmount: proposals.totalAmount,
+            sentAt: proposals.sentAt,
+            signedAt: proposals.signedAt,
+            paidAt: proposals.paidAt,
+          })
+          .from(proposals)
+          .where(eq(proposals.ghlContactId, contactId));
+
+        const fmt = (n: number) =>
+          new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+
+        for (const p of contactProposals) {
+          if (p.sentAt) {
+            events.push({
+              id: `prop_sent_${p.id}`,
+              type: "proposal_sent",
+              title: `Proposal sent — ${fmt(p.totalAmount)}`,
+              body: p.title,
+              occurredAt: p.sentAt.toISOString(),
+            });
+          }
+          if (p.signedAt) {
+            events.push({
+              id: `prop_signed_${p.id}`,
+              type: "proposal_signed",
+              title: `Proposal signed — ${fmt(p.totalAmount)}`,
+              body: p.title,
+              occurredAt: p.signedAt.toISOString(),
+            });
+          }
+          if (p.paidAt) {
+            events.push({
+              id: `prop_paid_${p.id}`,
+              type: "proposal_paid",
+              title: `Payment received — ${fmt(p.totalAmount)}`,
+              body: p.title,
+              occurredAt: p.paidAt.toISOString(),
+            });
+          }
+        }
+      } catch { /* ignore — proposals are optional context */ }
     } else if (id.startsWith("cl_")) {
       const clId = id.slice(3);
       const database = db();

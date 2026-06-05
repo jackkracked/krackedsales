@@ -26,6 +26,7 @@ export async function POST(req: NextRequest) {
     repEmail: string;
     ghlCalendarId?: string;
     color?: string;
+    conflictCalendarId?: string;
   };
 
   try {
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { repName, repEmail, ghlCalendarId, color } = body;
+  const { repName, repEmail, ghlCalendarId, color, conflictCalendarId } = body;
 
   if (!repName || !repEmail) {
     return NextResponse.json(
@@ -51,6 +52,7 @@ export async function POST(req: NextRequest) {
         repEmail,
         ...(ghlCalendarId ? { ghlCalendarId } : {}),
         ...(color ? { color } : {}),
+        conflictCalendarId: conflictCalendarId || "primary",
       })
       .returning();
 

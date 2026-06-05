@@ -1,15 +1,17 @@
 import { cn } from "@/lib/utils/cn";
 
-type ProposalStatus = "draft" | "sent" | "signed" | "paid" | "failed" | "void" | "overdue";
+type ProposalStatus = "draft" | "sent" | "signed" | "partial" | "paid" | "failed" | "void" | "overdue" | "lost";
 
 const BADGE_STYLES: Record<ProposalStatus, string> = {
   draft: "bg-muted text-muted-foreground",
   sent: "bg-blue-50 text-blue-700",
   signed: "bg-indigo-50 text-indigo-700",
+  partial: "bg-orange-50 text-orange-700",
   paid: "bg-green-50 text-green-700",
   overdue: "bg-amber-50 text-amber-700",
   failed: "bg-red-50 text-red-700",
   void: "bg-muted text-muted-foreground line-through",
+  lost: "bg-red-50 text-red-600",
 };
 
 export function ProposalStatusBadge({ status }: { status: string }) {

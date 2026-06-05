@@ -11,6 +11,8 @@ import {
 } from "date-fns";
 import { ChevronLeft, ChevronRight, Plus, Calendar } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { useUserTimezone } from "@/providers/timezone-provider";
+import { toZonedDate, isTodayInTz } from "@/lib/utils/timezone";
 import { EventPanel } from "./event-panel";
 import { BookCallDrawer } from "./book-call-drawer";
 
@@ -23,26 +25,29 @@ export interface CalendarEvent {
   start: { dateTime?: string | null; date?: string | null };
   end: { dateTime?: string | null; date?: string | null };
   repEmail: string;
+  repId?: string;
+  contactId?: string | null;
   hangoutLink?: string | null;
   attendees: { email?: string | null; displayName?: string | null }[];
   googleNotConfigured?: boolean;
+  source?: "ghl" | "google";
+  appointmentStatus?: string;
 }
 
-interface UserCalendar {
+interface TeamMember {
   id: string;
-  repName: string;
-  repEmail: string;
-  ghlCalendarId: string | null;
+  name: string;
+  email: string;
+  ghlUserId: string | null;
   color: string;
-  isActive: boolean;
 }
 
 type ViewMode = "week" | "month" | "day";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const HOUR_START = 6;   // 6am
-const HOUR_END   = 22;  // 10pm
+const HOUR_START = 0;   // midnight
+const HOUR_END   = 24;  // midnight (full day)
 const HOUR_COUNT = HOUR_END - HOUR_START;
 const HOUR_PX    = 64;
 const GRID_HEIGHT = HOUR_COUNT * HOUR_PX; // 1024px
@@ -97,15 +102,15 @@ function formatHour(h: number): string {
   return h < 12 ? `${h}am` : `${h - 12}pm`;
 }
 
-function rangeLabel(view: ViewMode, date: Date): string {
-  if (view === "month") return format(date, "MMMM yyyy");
-  if (view === "day")   return format(date, "EEEE, MMM d, yyyy");
+function rangeLabel(view: ViewMode, date: Date, tz: string): string {
+  if (view === "month") return format(toZonedDate(date, tz), "MMMM yyyy");
+  if (view === "day")   return format(toZonedDate(date, tz), "EEEE, MMM d, yyyy");
   const ws = getWeekStart(date);
   const we = getWeekEnd(date);
   if (isSameMonth(ws, we)) {
-    return `${format(ws, "MMM d")} – ${format(we, "d, yyyy")}`;
+    return `${format(toZonedDate(ws, tz), "MMM d")} – ${format(toZonedDate(we, tz), "d, yyyy")}`;
   }
-  return `${format(ws, "MMM d")} – ${format(we, "MMM d, yyyy")}`;
+  return `${format(toZonedDate(ws, tz), "MMM d")} – ${format(toZonedDate(we, tz), "MMM d, yyyy")}`;
 }
 
 // ─── Event block ─────────────────────────────────────────────────────────────
@@ -114,10 +119,12 @@ function EventBlock({
   event,
   color,
   onClick,
+  tz,
 }: {
   event: CalendarEvent;
   color: string;
   onClick: () => void;
+  tz: string;
 }) {
   const start = eventStart(event);
   const end   = eventEnd(event);
@@ -129,13 +136,17 @@ function EventBlock({
   // Clamp to grid
   if (top + height < 0 || top > GRID_HEIGHT) return null;
 
-  const timeLabel = `${format(start, "h:mma")}`;
+  const timeLabel = `${format(toZonedDate(start, tz), "h:mma")}`;
+  const isGoogle = event.source === "google";
 
   return (
     <button
       onClick={onClick}
       title={event.summary}
-      className="absolute left-1 right-1 overflow-hidden rounded-[6px] border-l-2 px-1.5 py-0.5 text-left cursor-pointer hover:brightness-95 transition-all z-10"
+      className={cn(
+        "absolute left-1 right-1 overflow-hidden rounded-[6px] border-l-2 px-1.5 py-0.5 text-left cursor-pointer hover:brightness-95 transition-all z-10",
+        isGoogle && "opacity-40 border-dashed"
+      )}
       style={{
         top,
         height: Math.min(height, GRID_HEIGHT - top),
@@ -153,18 +164,31 @@ function EventBlock({
   );
 }
 
+// ─── Conflict types ─────────────────────────────────────────────────────────
+
+interface ConflictBlock {
+  start: string; // ISO datetime
+  end: string;   // ISO datetime
+}
+
 // ─── Week / Day view ──────────────────────────────────────────────────────────
 
 function TimeGrid({
   days,
   events,
   repColors,
+  conflicts,
   onEventClick,
+  onEmptyClick,
+  tz,
 }: {
   days: Date[];
   events: CalendarEvent[];
   repColors: Record<string, string>;
+  conflicts: ConflictBlock[];
   onEventClick: (ev: CalendarEvent) => void;
+  onEmptyClick: (date: Date, hour: number, minute: number) => void;
+  tz: string;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [nowTop, setNowTop] = useState(nowTopPx());
@@ -183,8 +207,7 @@ function TimeGrid({
     return () => clearInterval(timer);
   }, []);
 
-  const today = new Date();
-  const showNowLine = isToday(days[0]) || days.some((d) => isToday(d));
+  const showNowLine = isTodayInTz(days[0], tz) || days.some((d) => isTodayInTz(d, tz));
 
   return (
     <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
@@ -211,14 +234,33 @@ function TimeGrid({
             return s && isSameDay(s, day);
           });
 
+          const dayConflicts = conflicts.filter((c) => {
+            const s = parseISO(c.start);
+            return isSameDay(s, day);
+          });
+
+          function handleDayClick(e: React.MouseEvent<HTMLDivElement>) {
+            // Only fire on the grid background, not on event buttons
+            if ((e.target as HTMLElement).closest("button")) return;
+            const rect = e.currentTarget.getBoundingClientRect();
+            const offsetY = e.clientY - rect.top;
+            const rawHour = HOUR_START + offsetY / HOUR_PX;
+            // Round to nearest 15 minutes
+            const totalMinutes = Math.round((rawHour * 60) / 15) * 15;
+            const hour = Math.floor(totalMinutes / 60);
+            const minute = totalMinutes % 60;
+            onEmptyClick(day, hour, minute);
+          }
+
           return (
             <div
               key={colIdx}
               className={cn(
-                "flex-1 relative border-l border-border/40",
-                isToday(day) && "bg-primary/[0.025]"
+                "flex-1 relative border-l border-border/40 cursor-pointer",
+                isTodayInTz(day, tz) && "bg-primary/[0.025]"
               )}
               style={{ height: GRID_HEIGHT }}
+              onClick={handleDayClick}
             >
               {/* Hour lines */}
               {Array.from({ length: HOUR_COUNT }, (_, i) => (
@@ -229,18 +271,38 @@ function TimeGrid({
                 />
               ))}
 
+              {/* Conflict busy blocks */}
+              {dayConflicts.map((c, ci) => {
+                const cStart = parseISO(c.start);
+                const cEnd = parseISO(c.end);
+                const cTop = topPx(cStart);
+                const cHeight = heightPx(cStart, cEnd);
+                if (cTop + cHeight < 0 || cTop > GRID_HEIGHT) return null;
+                return (
+                  <div
+                    key={`conflict-${ci}`}
+                    className="absolute left-0 right-0 bg-destructive/[0.08] pointer-events-none z-[1]"
+                    style={{
+                      top: Math.max(0, cTop),
+                      height: Math.min(cHeight, GRID_HEIGHT - Math.max(0, cTop)),
+                    }}
+                  />
+                );
+              })}
+
               {/* Events */}
               {dayEvents.map((ev) => (
                 <EventBlock
                   key={ev.id}
                   event={ev}
-                  color={repColors[ev.repEmail] ?? "#6366f1"}
+                  color={repColors[ev.repId ?? ""] ?? repColors[ev.repEmail] ?? "#6366f1"}
                   onClick={() => onEventClick(ev)}
+                  tz={tz}
                 />
               ))}
 
               {/* Current time line */}
-              {showNowLine && isToday(day) && nowTop >= 0 && nowTop <= GRID_HEIGHT && (
+              {showNowLine && isTodayInTz(day, tz) && nowTop >= 0 && nowTop <= GRID_HEIGHT && (
                 <div
                   className="absolute left-0 right-0 z-20 pointer-events-none"
                   style={{ top: nowTop }}
@@ -266,11 +328,15 @@ function MonthGrid({
   events,
   repColors,
   onEventClick,
+  onDayClick,
+  tz,
 }: {
   currentDate: Date;
   events: CalendarEvent[];
   repColors: Record<string, string>;
   onEventClick: (ev: CalendarEvent) => void;
+  onDayClick: (date: Date) => void;
+  tz: string;
 }) {
   const monthStart = startOfMonth(currentDate);
   const monthEnd   = endOfMonth(currentDate);
@@ -281,9 +347,9 @@ function MonthGrid({
   );
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto">
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
       {/* Day header row */}
-      <div className="grid grid-cols-7 border-b border-border sticky top-0 bg-card z-10">
+      <div className="grid grid-cols-7 border-b border-border shrink-0">
         {DAY_LABELS.map((d) => (
           <div key={d} className="py-2 text-center text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
             {d}
@@ -292,7 +358,7 @@ function MonthGrid({
       </div>
 
       {/* Weeks */}
-      <div className="grid" style={{ gridTemplateRows: `repeat(${weeks.length}, minmax(100px, 1fr))` }}>
+      <div className="flex-1 min-h-0 flex flex-col">
         {weeks.map((weekStart, wi) => {
           const weekDays = eachDayOfInterval({
             start: weekStart,
@@ -300,7 +366,7 @@ function MonthGrid({
           });
 
           return (
-            <div key={wi} className="grid grid-cols-7 border-b border-border/40">
+            <div key={wi} className="flex-1 grid grid-cols-7 border-b border-border/40 min-h-0">
               {weekDays.map((day, di) => {
                 const dayEvents = events.filter((ev) => {
                   const s = eventStart(ev);
@@ -310,11 +376,17 @@ function MonthGrid({
                 const overflow = dayEvents.length - 3;
                 const inMonth = isSameMonth(day, currentDate);
 
+                function handleMonthDayClick(e: React.MouseEvent<HTMLDivElement>) {
+                  if ((e.target as HTMLElement).closest("button")) return;
+                  onDayClick(day);
+                }
+
                 return (
                   <div
                     key={di}
+                    onClick={handleMonthDayClick}
                     className={cn(
-                      "min-h-[100px] p-1.5 border-l border-border/25 first:border-l-0",
+                      "min-h-0 p-1.5 border-l border-border/25 first:border-l-0 cursor-pointer overflow-hidden",
                       !inMonth && "bg-muted/20"
                     )}
                   >
@@ -323,7 +395,7 @@ function MonthGrid({
                       <span
                         className={cn(
                           "w-6 h-6 flex items-center justify-center rounded-full text-xs",
-                          isToday(day)
+                          isTodayInTz(day, tz)
                             ? "bg-primary text-white font-bold ring-2 ring-primary/30"
                             : inMonth
                             ? "text-foreground font-medium"
@@ -337,16 +409,20 @@ function MonthGrid({
                     {/* Events */}
                     <div className="space-y-0.5">
                       {visible.map((ev) => {
-                        const color = repColors[ev.repEmail] ?? "#6366f1";
+                        const color = repColors[ev.repId ?? ""] ?? repColors[ev.repEmail] ?? "#6366f1";
+                        const isGoogle = ev.source === "google";
                         return (
                           <button
                             key={ev.id}
                             onClick={() => onEventClick(ev)}
                             title={ev.summary}
-                            className="w-full text-left px-1.5 py-0.5 rounded text-[10px] font-medium truncate leading-tight"
+                            className={cn(
+                              "w-full text-left px-1.5 py-0.5 rounded text-[10px] font-medium truncate leading-tight",
+                              isGoogle && "opacity-40"
+                            )}
                             style={{
                               backgroundColor: `${color}20`,
-                              borderLeft: `2px solid ${color}`,
+                              borderLeft: `2px ${isGoogle ? "dashed" : "solid"} ${color}`,
                               color: "inherit",
                             }}
                           >
@@ -373,7 +449,7 @@ function MonthGrid({
 
 // ─── Day column headers ───────────────────────────────────────────────────────
 
-function DayHeaders({ days }: { days: Date[] }) {
+function DayHeaders({ days, tz }: { days: Date[]; tz: string }) {
   return (
     <div className="flex border-b border-border shrink-0">
       <div className="w-14 shrink-0" /> {/* align with time labels */}
@@ -382,19 +458,19 @@ function DayHeaders({ days }: { days: Date[] }) {
           key={i}
           className={cn(
             "flex-1 py-2 text-center border-l border-border/40",
-            isToday(day) && "bg-primary/[0.025]"
+            isTodayInTz(day, tz) && "bg-primary/[0.025]"
           )}
         >
           <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            {format(day, "EEE")}
+            {format(toZonedDate(day, tz), "EEE")}
           </p>
           <p
             className={cn(
               "text-sm font-bold mt-0.5",
-              isToday(day) ? "text-primary" : "text-foreground"
+              isTodayInTz(day, tz) ? "text-primary" : "text-foreground"
             )}
           >
-            {format(day, "d")}
+            {format(toZonedDate(day, tz), "d")}
           </p>
         </div>
       ))}
@@ -405,11 +481,14 @@ function DayHeaders({ days }: { days: Date[] }) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export function CalendarClient() {
+  const tz = useUserTimezone();
   const [view, setView]                       = useState<ViewMode>("week");
   const [currentDate, setCurrentDate]         = useState<Date>(new Date());
   const [activeReps, setActiveReps]           = useState<string[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [bookCallOpen, setBookCallOpen]       = useState(false);
+  const [bookCallInitialDate, setBookCallInitialDate]       = useState<string | undefined>();
+  const [bookCallInitialStartTime, setBookCallInitialStartTime] = useState<string | undefined>();
 
   // ── Date range for queries ────────────────────────────────────────────────
   const { since, until, days } = useMemo(() => {
@@ -439,48 +518,81 @@ export function CalendarClient() {
     };
   }, [view, currentDate]);
 
-  // ── Fetch user calendars ──────────────────────────────────────────────────
-  const { data: calData } = useQuery<{ userCalendars: UserCalendar[] }>({
-    queryKey: ["user-calendars"],
-    queryFn: () => fetch("/api/settings/user-calendars").then((r) => r.json()),
+  // ── Fetch team members ────────────────────────────────────────────────────
+  const { data: teamData } = useQuery<{ members: TeamMember[] }>({
+    queryKey: ["calendar-team"],
+    queryFn: () => fetch("/api/calendar/team").then((r) => r.json()),
     staleTime: 5 * 60_000,
   });
 
-  const userCalendars = calData?.userCalendars ?? [];
+  const members = teamData?.members ?? [];
 
-  // Seed activeReps once calendars load
+  // Seed activeReps once members load (using member id as the key)
   useEffect(() => {
-    if (userCalendars.length > 0 && activeReps.length === 0) {
-      setActiveReps(userCalendars.filter((c) => c.isActive).map((c) => c.repEmail));
+    if (members.length > 0 && activeReps.length === 0) {
+      setActiveReps(members.map((m) => m.id));
     }
-  }, [userCalendars]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [members]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Color map: both repId (ghlUserId) and repEmail can be used to look up color
   const repColors = useMemo<Record<string, string>>(() => {
     const map: Record<string, string> = {};
-    for (const uc of userCalendars) {
-      map[uc.repEmail] = uc.color;
+    for (const m of members) {
+      map[m.email] = m.color;
+      if (m.ghlUserId) map[m.ghlUserId] = m.color;
+      map[m.id] = m.color;
     }
     return map;
-  }, [userCalendars]);
+  }, [members]);
 
   // ── Fetch events ──────────────────────────────────────────────────────────
-  const repsParam = activeReps.join(",");
+  const activeMembers = members.filter((m) => activeReps.includes(m.id));
+  const emailsParam = activeMembers.map((m) => m.email).join(",");
+  const userIdsParam = activeMembers.map((m) => m.ghlUserId).filter(Boolean).join(",");
 
   const { data: eventsData, isLoading: eventsLoading } = useQuery<{
     events: CalendarEvent[];
     googleNotConfigured?: boolean;
   }>({
-    queryKey: ["calendar-events", repsParam, since, until],
-    queryFn: () =>
-      fetch(
-        `/api/calendar/events?reps=${encodeURIComponent(repsParam)}&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}`
-      ).then((r) => r.json()),
+    queryKey: ["calendar-events", emailsParam, userIdsParam, since, until],
+    queryFn: () => {
+      const params = new URLSearchParams({ since, until });
+      if (emailsParam) params.set("emails", emailsParam);
+      if (userIdsParam) params.set("userIds", userIdsParam);
+      return fetch(`/api/calendar/events?${params.toString()}`).then((r) => r.json());
+    },
     enabled: activeReps.length > 0,
     staleTime: 60_000,
   });
 
-  const events            = eventsData?.events ?? [];
+  // Filter events to only show those assigned to selected reps.
+  // GHL returns ALL events from calendars where a user is a team member,
+  // including shared calendars — so we filter client-side by repId.
+  const activeGhlIds = new Set(activeMembers.map((m) => m.ghlUserId).filter(Boolean));
+  const events = (eventsData?.events ?? []).filter((ev) => {
+    // If no rep filter or event has no repId, show it
+    if (activeGhlIds.size === 0 || !ev.repId) return true;
+    return activeGhlIds.has(ev.repId);
+  });
   const googleNotConfig   = eventsData?.googleNotConfigured ?? false;
+
+  // ── Fetch conflicts (only when exactly one rep selected) ─────────────────
+  const singleMember = activeReps.length === 1
+    ? members.find((m) => m.id === activeReps[0])
+    : null;
+  const singleRepEmail = singleMember?.email ?? null;
+
+  const { data: conflictsData } = useQuery<{ conflicts: ConflictBlock[] }>({
+    queryKey: ["calendar-conflicts", singleRepEmail, since, until],
+    queryFn: () =>
+      fetch(
+        `/api/calendar/conflicts?repEmail=${encodeURIComponent(singleRepEmail!)}&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}`
+      ).then((r) => r.json()),
+    enabled: !!singleRepEmail && view !== "month",
+    staleTime: 60_000,
+  });
+
+  const conflicts = conflictsData?.conflicts ?? [];
 
   const selectedEvent = useMemo(
     () => events.find((e) => e.id === selectedEventId) ?? null,
@@ -500,10 +612,26 @@ export function CalendarClient() {
     setCurrentDate(new Date());
   }
 
-  function toggleRep(email: string) {
+  function toggleRep(memberId: string) {
     setActiveReps((prev) =>
-      prev.includes(email) ? prev.filter((e) => e !== email) : [...prev, email]
+      prev.includes(memberId) ? prev.filter((e) => e !== memberId) : [...prev, memberId]
     );
+  }
+
+  /** Open BookCallDrawer pre-filled from a clicked time slot */
+  function openBookCallAt(date: Date, hour: number, minute: number) {
+    const dateStr = format(date, "yyyy-MM-dd");
+    const timeStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    setBookCallInitialDate(dateStr);
+    setBookCallInitialStartTime(timeStr);
+    setBookCallOpen(true);
+  }
+
+  /** Open BookCallDrawer pre-filled from a month day click (default 9:00 AM) */
+  function openBookCallForDay(date: Date) {
+    setBookCallInitialDate(format(date, "yyyy-MM-dd"));
+    setBookCallInitialStartTime("09:00");
+    setBookCallOpen(true);
   }
 
   // Week day columns for header (always Mon–Sun)
@@ -568,7 +696,7 @@ export function CalendarClient() {
             className="text-sm font-semibold text-foreground"
             style={{ fontFamily: "var(--font-heading)" }}
           >
-            {rangeLabel(view, currentDate)}
+            {rangeLabel(view, currentDate, tz)}
           </span>
         </div>
 
@@ -576,28 +704,28 @@ export function CalendarClient() {
         <div className="flex items-center gap-2">
 
           {/* Rep filter pills */}
-          {userCalendars.length > 0 && (
+          {members.length > 0 && (
             <div className="flex items-center gap-1.5">
-              {userCalendars.map((uc) => {
-                const active = activeReps.includes(uc.repEmail);
+              {members.map((m) => {
+                const active = activeReps.includes(m.id);
                 return (
                   <button
-                    key={uc.repEmail}
-                    onClick={() => toggleRep(uc.repEmail)}
-                    title={uc.repEmail}
+                    key={m.id}
+                    onClick={() => toggleRep(m.id)}
+                    title={m.email}
                     className={cn(
                       "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all",
                       active
                         ? "border-transparent text-foreground"
                         : "border-border text-muted-foreground opacity-50 hover:opacity-80"
                     )}
-                    style={active ? { backgroundColor: `${uc.color}18`, borderColor: `${uc.color}40` } : {}}
+                    style={active ? { backgroundColor: `${m.color}18`, borderColor: `${m.color}40` } : {}}
                   >
                     <span
                       className="w-2 h-2 rounded-full shrink-0"
-                      style={{ backgroundColor: uc.color }}
+                      style={{ backgroundColor: m.color }}
                     />
-                    {uc.repName.split(" ")[0]}
+                    {m.name.split(" ")[0]}
                   </button>
                 );
               })}
@@ -624,7 +752,11 @@ export function CalendarClient() {
 
           {/* Book call */}
           <button
-            onClick={() => setBookCallOpen(true)}
+            onClick={() => {
+              setBookCallInitialDate(undefined);
+              setBookCallInitialStartTime(undefined);
+              setBookCallOpen(true);
+            }}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-[8px] hover:bg-primary/90 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -640,10 +772,12 @@ export function CalendarClient() {
           events={events}
           repColors={repColors}
           onEventClick={(ev) => setSelectedEventId(ev.id)}
+          onDayClick={openBookCallForDay}
+          tz={tz}
         />
       ) : (
         <>
-          <DayHeaders days={weekDays} />
+          <DayHeaders days={weekDays} tz={tz} />
           {eventsLoading ? (
             <div className="flex-1 flex items-center justify-center">
               <div className="flex flex-col items-center gap-2">
@@ -656,7 +790,10 @@ export function CalendarClient() {
               days={weekDays}
               events={events}
               repColors={repColors}
+              conflicts={conflicts}
               onEventClick={(ev) => setSelectedEventId(ev.id)}
+              onEmptyClick={openBookCallAt}
+              tz={tz}
             />
           )}
         </>
@@ -666,19 +803,33 @@ export function CalendarClient() {
       <EventPanel
         event={selectedEvent}
         repColors={repColors}
-        userCalendars={userCalendars}
+        userCalendars={members.map((m) => ({
+          id: m.id,
+          repName: m.name,
+          repEmail: m.email,
+          color: m.color,
+        }))}
         onClose={() => setSelectedEventId(null)}
         onBook={() => { setSelectedEventId(null); setBookCallOpen(true); }}
+        onCancelled={() => setSelectedEventId(null)}
       />
 
       {/* ── Book call drawer ──────────────────────────────────────────────── */}
       <BookCallDrawer
         open={bookCallOpen}
-        onClose={() => setBookCallOpen(false)}
+        onClose={() => {
+          setBookCallOpen(false);
+          setBookCallInitialDate(undefined);
+          setBookCallInitialStartTime(undefined);
+        }}
         onBooked={() => {
           // Trigger refetch by invalidating — react-query will auto-refetch on next render
           setBookCallOpen(false);
+          setBookCallInitialDate(undefined);
+          setBookCallInitialStartTime(undefined);
         }}
+        initialDate={bookCallInitialDate}
+        initialStartTime={bookCallInitialStartTime}
       />
     </div>
   );

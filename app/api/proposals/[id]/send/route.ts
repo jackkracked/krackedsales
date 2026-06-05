@@ -115,8 +115,46 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           }
           await stripe().invoices.finalizeInvoice(instInvoiceId, { auto_advance: false });
         }
+      } else if (proposal.paymentStructure === "subscription" && proposal.hasDeposit) {
+        // Create + finalize deposit instalment invoices (subscription created when all deposits paid)
+        const depositInstalments = await db()
+          .select()
+          .from(proposalInstalments)
+          .where(eq(proposalInstalments.proposalId, id))
+          .orderBy(proposalInstalments.instalmentNumber);
+
+        for (const inst of depositInstalments.filter(i => i.isDeposit)) {
+          let instInvoiceId = inst.stripeInvoiceId;
+          if (!instInvoiceId) {
+            const inv = await stripe().invoices.create({
+              customer: stripeCustomerId,
+              collection_method: "send_invoice",
+              days_until_due: 7,
+              metadata: {
+                ghl_contact_id: proposal.ghlContactId,
+                proposal_id: proposal.id,
+                instalment_number: String(inst.instalmentNumber),
+                is_deposit: "true",
+              },
+              auto_advance: false,
+            });
+            await stripe().invoiceItems.create({
+              customer: stripeCustomerId,
+              invoice: inv.id,
+              amount: Math.round(inst.amount * 100),
+              currency: proposal.currency,
+              description: `Deposit ${inst.instalmentNumber} of ${depositInstalments.filter(i => i.isDeposit).length} — ${proposal.contactName}`,
+            });
+            instInvoiceId = inv.id;
+            await db()
+              .update(proposalInstalments)
+              .set({ stripeInvoiceId: instInvoiceId })
+              .where(eq(proposalInstalments.id, inst.id));
+          }
+          await stripe().invoices.finalizeInvoice(instInvoiceId, { auto_advance: false });
+        }
       }
-      // Subscription: Stripe Checkout Session created at sign time
+      // Subscription without deposit: Stripe Checkout Session created at sign time
     }
 
     await db()
@@ -150,6 +188,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         title: proposal.title,
         totalAmount: proposal.totalAmount,
         currency: proposal.currency,
+        serviceDescription: proposal.serviceDescription,
         token: proposal.token,
         type: proposal.type,
       });

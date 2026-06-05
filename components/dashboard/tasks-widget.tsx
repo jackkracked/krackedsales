@@ -3,28 +3,29 @@
 import { useState, useEffect } from "react";
 import { ListTodo, Circle, CheckCircle2, CalendarDays, X, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
-import { isToday, isPast, isThisWeek, format } from "date-fns";
+import { format } from "date-fns";
+import { useUserTimezone } from "@/providers/timezone-provider";
+import { toZonedDate, isTodayInTz, isPastInTz } from "@/lib/utils/timezone";
 import { useTasksStore, type Task } from "@/store/tasks-store";
 import { CreateTaskModal } from "@/components/shared/create-task-modal";
 
 // ─── Due badge ────────────────────────────────────────────────────────────────
 
 function DueBadge({ dueDate }: { dueDate: string | null }) {
+  const tz = useUserTimezone();
   if (!dueDate) return null;
   const d = new Date(dueDate);
-  const overdue = isPast(d) && !isToday(d);
-  const today = isToday(d);
-  const thisWeek = isThisWeek(d, { weekStartsOn: 1 });
+  const overdue = isPastInTz(d, tz) && !isTodayInTz(d, tz);
+  const today = isTodayInTz(d, tz);
 
   return (
     <span className={cn(
       "text-[10px] font-medium px-1.5 py-0.5 rounded-full",
       overdue ? "bg-destructive/10 text-destructive" :
       today    ? "bg-amber-50 text-amber-700" :
-      thisWeek ? "bg-blue-50 text-blue-600" :
                  "bg-muted text-muted-foreground"
     )}>
-      {overdue ? "Overdue" : today ? "Today" : format(d, "d MMM")}
+      {overdue ? "Overdue" : today ? "Today" : format(toZonedDate(d, tz), "d MMM")}
     </span>
   );
 }
@@ -32,6 +33,7 @@ function DueBadge({ dueDate }: { dueDate: string | null }) {
 // ─── Task detail modal ────────────────────────────────────────────────────────
 
 function TaskDetailModal({ task, onClose }: { task: Task; onClose: () => void }) {
+  const tz = useUserTimezone();
   const { completeTask, deleteTask } = useTasksStore();
 
   function handleComplete() {
@@ -77,7 +79,7 @@ function TaskDetailModal({ task, onClose }: { task: Task; onClose: () => void })
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-0.5">Due</p>
               <div className="flex items-center gap-2">
                 <p className="text-sm text-foreground">
-                  {format(new Date(task.dueDate), "EEEE, d MMMM yyyy")}
+                  {format(toZonedDate(new Date(task.dueDate), tz), "EEEE, d MMMM yyyy")}
                 </p>
                 <DueBadge dueDate={task.dueDate} />
               </div>
@@ -94,7 +96,7 @@ function TaskDetailModal({ task, onClose }: { task: Task; onClose: () => void })
           <div>
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-0.5">Created</p>
             <p className="text-sm text-muted-foreground">
-              {format(new Date(task.createdAt), "d MMM yyyy 'at' HH:mm")}
+              {format(toZonedDate(new Date(task.createdAt), tz), "d MMM yyyy 'at' HH:mm")}
             </p>
           </div>
         </div>

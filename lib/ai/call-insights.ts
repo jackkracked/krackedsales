@@ -17,6 +17,8 @@ export interface CallInsightResult {
   redFlagsText: string | null;
   sentimentScore: number | null;  // 1–5
   sentimentLabel: string | null;  // "positive" | "neutral" | "negative"
+  suggestedOutcome: string | null; // one of the call disposition outcomes, or null
+  suggestedNotes: string | null;   // brief summary for the rep to confirm
 }
 
 function getClient() {
@@ -41,7 +43,9 @@ Extract the following from the transcript and return ONLY valid JSON. Use null f
   "nextStepsText": "Agreed next steps from the call (1-2 sentences)",
   "redFlagsText": "Any red flags: budget concerns, competitor mentions, disinterest (1-2 sentences, null if none)",
   "sentimentScore": <integer 1–5 where 1=very negative, 3=neutral, 5=very positive>,
-  "sentimentLabel": <"positive" | "neutral" | "negative">
+  "sentimentLabel": <"positive" | "neutral" | "negative">,
+  "suggestedOutcome": "<one of: closed, preparing_proposal, sent_proposal, rebooked, not_interested, budget_objection, needs_time, or null if unclear>",
+  "suggestedNotes": "<1-2 sentence summary of the call outcome for the rep's notes, or null>"
 }
 
 Transcript:
@@ -85,6 +89,8 @@ export async function generateAndStoreInsights(
       redFlagsText: insights.redFlagsText,
       sentimentScore: insights.sentimentScore,
       sentimentLabel: insights.sentimentLabel,
+      suggestedOutcome: insights.suggestedOutcome,
+      suggestedNotes: insights.suggestedNotes,
     });
 
     return insights;

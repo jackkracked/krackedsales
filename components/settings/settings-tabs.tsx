@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { Users, DollarSign, Zap, BarChart2, CalendarDays } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { TeamSettings } from "@/components/settings/team-settings";
@@ -9,7 +10,7 @@ import { CostSettings } from "@/components/settings/cost-settings";
 import { DemoTargets } from "@/components/settings/demo-targets";
 import { IntegrationsGrid } from "@/components/settings/integrations-grid";
 import { UserCalendarsSettings } from "@/components/settings/user-calendars-settings";
-import { BookingRulesSettings } from "@/components/settings/booking-rules-settings";
+import { GhlSyncPanel } from "@/components/settings/GhlSyncPanel";
 
 const TABS = [
   { id: "team",         label: "Team",         icon: Users,         description: "Manage users and access" },
@@ -22,7 +23,20 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 export function SettingsTabs() {
-  const [activeTab, setActiveTab] = useState<TabId>("team");
+  return (
+    <Suspense>
+      <SettingsTabsInner />
+    </Suspense>
+  );
+}
+
+function SettingsTabsInner() {
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get("tab");
+  const initialPanel = searchParams.get("panel");
+  const [activeTab, setActiveTab] = useState<TabId>(
+    TABS.some((t) => t.id === initialTab) ? (initialTab as TabId) : "team"
+  );
 
   const active = TABS.find((t) => t.id === activeTab)!;
 
@@ -93,12 +107,18 @@ export function SettingsTabs() {
           <div className="p-6">
             <div className="max-w-3xl space-y-6">
               <UserCalendarsSettings />
-              <BookingRulesSettings />
             </div>
           </div>
         )}
 
-        {activeTab === "integrations" && <IntegrationsGrid />}
+        {activeTab === "integrations" && (
+          <>
+            <IntegrationsGrid initialPanel={initialPanel as string | undefined} />
+            <div className="px-6 pb-6 max-w-3xl">
+              <GhlSyncPanel />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

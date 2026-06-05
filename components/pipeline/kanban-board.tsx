@@ -39,6 +39,7 @@ function SortableCard({
   opportunity,
   hasUnread,
   isSelected,
+  repName,
   onToggleSelect,
   onCardClick,
   onMessageClick,
@@ -46,6 +47,7 @@ function SortableCard({
   opportunity: GHLOpportunity;
   hasUnread: boolean;
   isSelected?: boolean;
+  repName?: string | null;
   onToggleSelect?: (e: React.MouseEvent) => void;
   onCardClick: (opp: GHLOpportunity) => void;
   onMessageClick: (opp: GHLOpportunity) => void;
@@ -68,6 +70,7 @@ function SortableCard({
         isDragging={isDragging}
         hasUnread={hasUnread}
         isSelected={isSelected}
+        repName={repName}
         onToggleSelect={onToggleSelect}
         onClick={() => !isDragging && onCardClick(opportunity)}
         onMessageClick={() => !isDragging && onMessageClick(opportunity)}
@@ -84,6 +87,7 @@ function KanbanColumn({
   commentLeads,
   unreadContactIds,
   selectedIds,
+  repMap,
   onCardClick,
   onMessageClick,
   onCommentLeadClick,
@@ -97,6 +101,7 @@ function KanbanColumn({
   commentLeads?: CommentLead[];
   unreadContactIds: Set<string>;
   selectedIds: Set<string>;
+  repMap: Map<string, string>;
   onCardClick: (opp: GHLOpportunity) => void;
   onMessageClick: (opp: GHLOpportunity) => void;
   onCommentLeadClick?: (lead: CommentLead) => void;
@@ -156,6 +161,7 @@ function KanbanColumn({
                 opportunity={card.item}
                 hasUnread={unreadContactIds.has(card.item.contact?.id ?? "")}
                 isSelected={selectedIds.has(card.item.id)}
+                repName={card.item.assignedTo ? repMap.get(card.item.assignedTo) ?? null : null}
                 onToggleSelect={(e) => { e.stopPropagation(); onToggleSelect(card.item.id); }}
                 onCardClick={onCardClick}
                 onMessageClick={onMessageClick}
@@ -195,10 +201,11 @@ interface KanbanBoardProps {
   opportunities: GHLOpportunity[];
   commentLeads?: CommentLead[];
   unreadContactIds?: Set<string>;
+  repMap?: Map<string, string>;
   autoOpenContactId?: string;
 }
 
-export function KanbanBoard({ pipeline, opportunities, commentLeads = [], unreadContactIds = new Set(), autoOpenContactId }: KanbanBoardProps) {
+export function KanbanBoard({ pipeline, opportunities, commentLeads = [], unreadContactIds = new Set(), repMap = new Map(), autoOpenContactId }: KanbanBoardProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [selectedOpp, setSelectedOpp] = useState<GHLOpportunity | null>(null);
@@ -377,6 +384,7 @@ export function KanbanBoard({ pipeline, opportunities, commentLeads = [], unread
                 commentLeads={stageIndex === 0 ? commentLeads : undefined}
                 unreadContactIds={unreadContactIds}
                 selectedIds={selectedOppIds}
+                repMap={repMap}
                 onToggleSelect={toggleSelectOpp}
                 onSelectAll={() => selectAllInStage(stage.id)}
                 onCardClick={(opp) => openOpp(opp, "overview")}

@@ -60,6 +60,9 @@ export function PipelineHealthPanel() {
   const stages = data?.stages ?? [];
   const maxCount = stages.reduce((m, s) => Math.max(m, s.count), 1);
 
+  // Don't render empty card shell when no pipelines are configured
+  if (!isLoading && pipelines.length === 0) return null;
+
   return (
     <div className="bg-card border border-border rounded-[10px] overflow-hidden flex flex-col" style={{ height: 320 }}>
       {/* Header — pipeline name + open count */}

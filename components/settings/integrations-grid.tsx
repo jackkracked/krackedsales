@@ -8,11 +8,12 @@ import { MetaSettings } from "@/components/settings/meta-settings";
 import { TikTokSettings } from "@/components/settings/tiktok-settings";
 import { SlackSettings } from "@/components/settings/slack-settings";
 import { N8nSettings } from "@/components/settings/n8n-settings";
+import { FathomConnectCard } from "@/components/fathom/fathom-connect-card";
 import { KeywordManager } from "@/components/settings/keyword-manager";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
-type IntegrationId = "ghl" | "clickup" | "meta" | "tiktok" | "slack" | "n8n";
+type IntegrationId = "ghl" | "clickup" | "meta" | "tiktok" | "slack" | "n8n" | "fathom";
 type StatusVariant = "connected" | "configured" | "not-connected" | "always-on";
 
 // ─── Status fetching ────────────────────────────────────────────────────────────
@@ -59,6 +60,18 @@ function useN8nStatus() {
   });
   const configured = data?.settings?.demoWebhookUrl != null;
   return configured ? "configured" : "not-connected" as StatusVariant;
+}
+
+interface FathomData { connected: boolean }
+
+function useFathomStatus() {
+  const { data } = useQuery<FathomData>({
+    queryKey: ["fathom-status"],
+    queryFn: () => fetch("/api/fathom/status").then(r => r.json()),
+    staleTime: 30_000,
+  });
+  const connected = data?.connected ?? false;
+  return connected ? "connected" : "not-connected" as StatusVariant;
 }
 
 // ─── Icons ──────────────────────────────────────────────────────────────────────
@@ -121,6 +134,13 @@ function N8nLogo() {
       className="w-10 h-10 rounded-[10px] shrink-0"
       aria-hidden="true"
     />
+  );
+}
+
+function FathomLogo() {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src="/fathom-logo.png" alt="Fathom" className="w-10 h-10 rounded-[10px] object-cover shrink-0" />
   );
 }
 
@@ -218,12 +238,17 @@ const PANEL_HEADER: Record<
   tiktok: { logo: <TikTokLogo />, name: "TikTok" },
   slack: { logo: <SlackLogo />, name: "Slack" },
   n8n: { logo: <N8nLogo />, name: "n8n" },
+  fathom: { logo: <FathomLogo />, name: "Fathom" },
 };
 
 // ─── Main component ─────────────────────────────────────────────────────────────
 
-export function IntegrationsGrid() {
-  const [openPanel, setOpenPanel] = useState<IntegrationId | null>(null);
+export function IntegrationsGrid({ initialPanel }: { initialPanel?: string }) {
+  const [openPanel, setOpenPanel] = useState<IntegrationId | null>(
+    initialPanel && ["ghl", "clickup", "meta", "tiktok", "slack", "n8n", "fathom"].includes(initialPanel)
+      ? (initialPanel as IntegrationId)
+      : null
+  );
   const queryClient = useQueryClient();
 
   // Individual status hooks
@@ -231,6 +256,7 @@ export function IntegrationsGrid() {
   const tiktokStatus = useTikTokStatus();
   const slackStatus = useSlackStatus();
   const n8nStatus = useN8nStatus();
+  const fathomStatus = useFathomStatus();
 
   // Meta OAuth — open popup directly from card
   function openMetaOAuth() {
@@ -255,8 +281,8 @@ export function IntegrationsGrid() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* ── Integration cards grid ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+      {/* ── Integration cards — 3-col grid, last row stretches to fill ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 [&>*:nth-last-child(1):nth-child(3n+1)]:sm:col-span-2 [&>*:nth-last-child(1):nth-child(3n+1)]:xl:col-span-3 [&>*:nth-last-child(2):nth-child(3n+1)]:xl:col-span-2 [&>*:nth-last-child(1):nth-child(3n+2)]:xl:col-span-2">
 
         {/* 1. GoHighLevel — always on */}
         <IntegrationCard
@@ -346,6 +372,22 @@ export function IntegrationsGrid() {
             </button>
           }
         />
+
+        {/* 7. Fathom */}
+        <IntegrationCard
+          logo={<FathomLogo />}
+          name="Fathom"
+          description="AI meeting transcription — auto-sync call recordings and transcripts"
+          status={fathomStatus}
+          action={
+            <button
+              onClick={() => setOpenPanel("fathom")}
+              className="border border-border rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
+            >
+              Configure
+            </button>
+          }
+        />
       </div>
 
       {/* ── Keyword Manager ── */}
@@ -403,6 +445,7 @@ export function IntegrationsGrid() {
           {openPanel === "tiktok" && <TikTokSettings />}
           {openPanel === "slack" && <SlackSettings />}
           {openPanel === "n8n" && <N8nSettings />}
+          {openPanel === "fathom" && <FathomConnectCard onClose={() => setOpenPanel(null)} />}
         </div>
       </div>
     </div>

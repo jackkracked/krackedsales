@@ -17,6 +17,7 @@ export async function PUT(
     ghlCalendarId?: string;
     color?: string;
     isActive?: boolean;
+    conflictCalendarId?: string;
   };
 
   try {
@@ -25,7 +26,7 @@ export async function PUT(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { repName, repEmail, ghlCalendarId, color, isActive } = body;
+  const { repName, repEmail, ghlCalendarId, color, isActive, conflictCalendarId } = body;
 
   // Build only the fields that were provided
   const updates: Partial<typeof userCalendars.$inferInsert> = {};
@@ -34,6 +35,7 @@ export async function PUT(
   if (ghlCalendarId !== undefined) updates.ghlCalendarId = ghlCalendarId;
   if (color !== undefined) updates.color = color;
   if (isActive !== undefined) updates.isActive = isActive;
+  if (conflictCalendarId !== undefined) updates.conflictCalendarId = conflictCalendarId;
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No fields provided to update" }, { status: 400 });

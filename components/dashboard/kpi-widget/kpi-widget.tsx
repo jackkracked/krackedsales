@@ -1,15 +1,33 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { BarChart2, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { KpiCard } from "./kpi-card";
 import { KpiEditSheet } from "./kpi-edit-sheet";
+import { KpiDetailSheet } from "@/components/kpis/KpiDetailSheet";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { getDefaults, getKpiDef, getPoolForRole } from "@/lib/dashboard-kpis";
 import type { KpiMetricResult } from "@/app/api/dashboard/kpis/route";
 
-type Period = "day" | "week" | "month";
+interface KpiHealthEntry {
+  status: "ok" | "error";
+  override?: boolean;
+  lastCheckedAt: string | null;
+}
+
+type KpiHealthData = Record<string, KpiHealthEntry>;
+
+function deriveHealthStatus(entry: KpiHealthEntry | undefined): "healthy" | "stale" | "error" | "override" {
+  if (!entry) return "stale";
+  if (entry.override) return "override";
+  if (entry.status === "error") return "error";
+  if (!entry.lastCheckedAt) return "stale";
+  const age = Date.now() - new Date(entry.lastCheckedAt).getTime();
+  if (age > 30 * 60 * 1000) return "stale";
+  return "healthy";
+}
 
 interface KpiWidgetProps {
   role: "admin" | "rep";
@@ -18,16 +36,47 @@ interface KpiWidgetProps {
   email?: string;
 }
 
-const PERIOD_LABELS: { key: Period; label: string }[] = [
-  { key: "day", label: "Day" },
-  { key: "week", label: "Week" },
-  { key: "month", label: "Month" },
-];
+/** Trailing phrase for the delta tooltip, e.g. "X vs Y last month". */
+function compareLabelFor(preset?: string): string {
+  switch (preset) {
+    case "today":     return "yesterday";
+    case "yesterday": return "the prior day";
+    case "7d":        return "the prior 7 days";
+    case "30d":       return "the prior 30 days";
+    case "wtd":       return "last week";
+    case "mtd":       return "last month";
+    case "ytd":       return "last year";
+    default:          return "the prior period";
+  }
+}
+
+/** Human label for the selected range, used in the detail drawer. */
+function periodLabelFor(preset?: string): string {
+  switch (preset) {
+    case "today":     return "Today";
+    case "yesterday": return "Yesterday";
+    case "7d":        return "Last 7 Days";
+    case "30d":       return "Last 30 Days";
+    case "wtd":       return "Week to Date";
+    case "mtd":       return "Month to Date";
+    case "ytd":       return "Year to Date";
+    default:          return "selected range";
+  }
+}
 
 export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
   const queryClient = useQueryClient();
-  const [period, setPeriod] = useState<Period>("month");
+  const now = new Date();
+  const defaultRange = useMemo(() => {
+    const s = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
+    const e = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 1));
+    return { start: s.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10), preset: "mtd" };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [dateRange, setDateRange] = useState<{ start: string; end: string; preset?: string }>(defaultRange);
+  const compareLabel = compareLabelFor(dateRange.preset);
   const [editOpen, setEditOpen] = useState(false);
+  const [detailKey, setDetailKey] = useState<string | null>(null);
 
   // Load saved KPI selections
   const { data: prefsData } = useQuery<{ keys: string[] }>({
@@ -39,18 +88,27 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
   const selectedKeys = prefsData?.keys ?? getDefaults(role);
   const pool = getPoolForRole(role);
 
-  // Build query params for metric data
-  const params = new URLSearchParams({ period, role });
+  // Build query params for metric data — pass the real selected date range
+  const params = new URLSearchParams({ role, start: dateRange.start, end: dateRange.end });
+  if (dateRange.preset) params.set("preset", dateRange.preset);
   selectedKeys.forEach((k) => params.append("keys[]", k));
   if (userId) params.set("userId", userId);
   if (ghlUserId) params.set("ghlUserId", ghlUserId);
   if (email) params.set("email", email);
 
   const { data: kpisData, isLoading } = useQuery<{ metrics: Record<string, KpiMetricResult> }>({
-    queryKey: ["dashboard-kpis", period, selectedKeys.join(","), userId],
+    // start/end are in the key so changing the date filter refetches
+    queryKey: ["dashboard-kpis", dateRange.start, dateRange.end, selectedKeys.join(","), userId],
     queryFn: () => fetch(`/api/dashboard/kpis?${params}`).then((r) => r.json()),
     staleTime: 60_000,
     refetchInterval: 3 * 60_000,
+  });
+
+  const { data: healthData } = useQuery<KpiHealthData>({
+    queryKey: ["kpi-health"],
+    queryFn: () => fetch("/api/kpis/health").then((r) => r.json()),
+    staleTime: 60_000,
+    refetchInterval: 5 * 60_000,
   });
 
   // Save prefs mutation
@@ -83,25 +141,7 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Period toggle */}
-            <div className="flex items-center bg-muted/50 rounded-[7px] p-0.5 gap-0.5">
-              {PERIOD_LABELS.map(({ key, label }) => (
-                <button
-                  key={key}
-                  onClick={() => setPeriod(key)}
-                  className={cn(
-                    "px-3 py-1 text-[11.5px] font-medium rounded-[5px] transition-all duration-150",
-                    period === key
-                      ? "bg-card text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {/* Edit button */}
+            <DateRangePicker value={dateRange} onChange={setDateRange} />
             <button
               onClick={() => setEditOpen(true)}
               className="w-7 h-7 rounded-[6px] flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
@@ -113,7 +153,7 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
         </div>
 
         {/* Cards */}
-        <div className="flex gap-4">
+        <div className="flex gap-4 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
           {selectedKeys.map((key) => {
             const def = getKpiDef(key);
             if (!def) return null;
@@ -123,6 +163,9 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
                 def={def}
                 data={kpisData?.metrics?.[key]}
                 isLoading={isLoading}
+                compareLabel={compareLabel}
+                healthStatus={healthData ? deriveHealthStatus(healthData[key]) : undefined}
+                onClick={() => setDetailKey(key)}
               />
             );
           })}
@@ -136,6 +179,19 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
           onSave={(keys) => saveMutation.mutate(keys)}
           onClose={() => setEditOpen(false)}
           isSaving={saveMutation.isPending}
+        />
+      )}
+
+      {detailKey && (
+        <KpiDetailSheet
+          metric={detailKey}
+          start={dateRange.start}
+          end={dateRange.end}
+          periodLabel={periodLabelFor(dateRange.preset)}
+          userId={userId}
+          ghlUserId={ghlUserId ?? undefined}
+          email={email}
+          onClose={() => setDetailKey(null)}
         />
       )}
     </>

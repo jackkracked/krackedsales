@@ -1,20 +1,23 @@
 "use client";
 
-import { Suspense } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { format, getHours } from "date-fns";
-import { AdminKpiStrip } from "./admin-kpi-strip";
-import { TeamPerformanceGrid } from "./team-performance-grid";
+import { useUserTimezone } from "@/providers/timezone-provider";
+import { toZonedDate } from "@/lib/utils/timezone";
 import { PipelineHealthPanel } from "./pipeline-health-panel";
 import { TasksStrip } from "@/components/dashboard/tasks-strip/tasks-strip";
 import { CallsStrip } from "@/components/dashboard/calls-strip/calls-strip";
-import { FollowUpQueue } from "@/components/dashboard/follow-up-queue";
 import { AiCopilotPanel } from "@/components/dashboard/ai-copilot-panel";
 import { ConversationsStrip } from "@/components/dashboard/conversations-strip/conversations-strip";
 import { KpiWidget } from "@/components/dashboard/kpi-widget/kpi-widget";
+import { GoalProgressBars } from "@/components/dashboard/goal-progress/goal-progress-bars";
+import { RepPerformanceLeaderboard } from "@/components/dashboard/rep-performance/rep-performance-leaderboard";
 import { ScrollToTop } from "@/components/layout/scroll-to-top";
+import { FathomNudgeBanner } from "@/components/fathom/fathom-nudge-banner";
+import { useFathomAutoSync } from "@/lib/fathom/use-fathom-sync";
 
-function getGreeting(): string {
-  const h = getHours(new Date());
+function getGreeting(tz: string): string {
+  const h = getHours(toZonedDate(new Date(), tz));
   if (h < 12) return "Good morning";
   if (h < 17) return "Good afternoon";
   return "Good evening";
@@ -31,27 +34,37 @@ interface AdminDashboardProps {
 }
 
 export function AdminDashboard({ userId, userName }: AdminDashboardProps) {
-  const today = format(new Date(), "EEEE, d MMMM yyyy");
+  const tz = useUserTimezone();
+  useFathomAutoSync();
+  const today = format(toZonedDate(new Date(), tz), "EEEE, d MMMM yyyy");
   const firstName = userName.split(" ")[0] || "";
 
-  const salesContext = `Today: ${today}.`;
+  const { data: summaryData } = useQuery<{ summary: { content: string } | null }>({
+    queryKey: ["weekly-summary"],
+    queryFn: () => fetch("/api/dashboard/weekly-summary").then((r) => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
 
   return (
     <div className="flex flex-col h-full p-6 gap-5 overflow-y-auto">
       <ScrollToTop />
-      {/* Header */}
+      <FathomNudgeBanner />
+
+      {/* Header + Weekly Summary */}
       <div>
         <h1
           className="text-2xl font-bold text-foreground"
           style={{ fontFamily: "var(--font-heading)" }}
         >
-          {getGreeting()}{firstName ? `, ${firstName}` : ""}
+          {getGreeting(tz)}{firstName ? `, ${firstName}` : ""}
         </h1>
         <p className="text-sm text-muted-foreground mt-0.5">{today}</p>
+        {summaryData?.summary?.content && (
+          <p className="text-sm text-foreground/75 leading-relaxed mt-3">
+            {summaryData.summary.content}
+          </p>
+        )}
       </div>
-
-      {/* Admin KPI strip — Cash / Spend / Calls / Leads */}
-      <AdminKpiStrip />
 
       {/* Tasks strip — full width, above calls */}
       <TasksStrip />
@@ -65,21 +78,15 @@ export function AdminDashboard({ userId, userName }: AdminDashboardProps) {
       {/* KPI widget — 3 pinned metrics with period toggle */}
       <KpiWidget role="admin" userId={userId} />
 
-      {/* Second row: Follow-up queue — full width */}
-      <Suspense fallback={<Skeleton className="h-40" />}>
-        <FollowUpQueue />
-      </Suspense>
+      {/* Goal progress bars — 4 bars showing team targets */}
+      <GoalProgressBars />
 
-      {/* Third row: Team grid + Pipeline health */}
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-5">
-        <TeamPerformanceGrid />
-        <PipelineHealthPanel />
-      </div>
+      {/* Rep performance leaderboard */}
+      <RepPerformanceLeaderboard />
 
-      {/* AI Copilot */}
-      <div className="flex-1 min-h-[320px]">
-        <AiCopilotPanel salesContext={salesContext} />
-      </div>
+      {/* Pipeline health */}
+      <PipelineHealthPanel />
+
     </div>
   );
 }

@@ -71,6 +71,7 @@ export interface GHLOpportunity {
     companyName?: string;
     email?: string;
     phone?: string;
+    website?: string;
     tags?: string[];
     dateAdded?: string; // contact creation date — more accurate than opp.createdAt
   };

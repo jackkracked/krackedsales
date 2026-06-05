@@ -1,36 +1,23 @@
 "use client";
 
-import { differenceInDays, differenceInHours, differenceInMinutes } from "date-fns";
-import { ArrowRight } from "lucide-react";
+import { differenceInHours, differenceInMinutes } from "date-fns";
+import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import type { QueueItem } from "@/app/api/inbox/queue/route";
+
+const TEAL = "#1D9E75";
+const RED = "#EF4444";
 
 /** Short relative time: "just now", "23m", "4h", "2d" */
 function shortRelativeTime(date: Date): string {
   const now = new Date();
-  const days = differenceInDays(now, date);
-  if (days >= 1) return `${days}d ago`;
   const hours = differenceInHours(now, date);
+  if (hours >= 24) return `${Math.floor(hours / 24)}d ago`;
   if (hours >= 1) return `${hours}h ago`;
   const mins = differenceInMinutes(now, date);
   if (mins >= 1) return `${mins}m ago`;
   return "just now";
 }
-
-interface ConversationTileProps {
-  item: QueueItem;
-  onReply: () => void;
-}
-
-const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {
-  sms:       { label: "SMS",       className: "bg-slate-100 text-slate-600 border-slate-200" },
-  email:     { label: "Email",     className: "bg-primary/8 text-primary border-primary/15" },
-  instagram: { label: "Instagram", className: "bg-rose-50 text-rose-600 border-rose-200" },
-  facebook:  { label: "Facebook",  className: "bg-blue-50 text-blue-600 border-blue-200" },
-  tiktok:    { label: "TikTok",    className: "bg-slate-800 text-white border-slate-700" },
-  whatsapp:  { label: "WhatsApp",  className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  ghl:       { label: "GHL",       className: "bg-muted text-muted-foreground border-border" },
-};
 
 function getChannelKey(item: QueueItem): string {
   if (item.platform === "instagram") return "instagram";
@@ -43,86 +30,136 @@ function getChannelKey(item: QueueItem): string {
   if (t.includes("fb") || t.includes("facebook")) return "facebook";
   if (t.includes("whatsapp")) return "whatsapp";
   if (t.includes("sms") || t.includes("phone")) return "sms";
-  return "ghl";
+  return "in";
 }
 
-export function ConversationTile({ item, onReply }: ConversationTileProps) {
+const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {
+  sms:       { label: "SMS",      className: "bg-sky-100 text-sky-700" },
+  email:     { label: "Email",    className: "bg-violet-100 text-violet-700" },
+  instagram: { label: "IG",       className: "bg-pink-100 text-pink-700" },
+  facebook:  { label: "FB",       className: "bg-blue-100 text-blue-700" },
+  tiktok:    { label: "TikTok",   className: "bg-slate-100 text-slate-700" },
+  whatsapp:  { label: "WA",       className: "bg-emerald-100 text-emerald-700" },
+  in:        { label: "GHL",      className: "bg-muted text-muted-foreground" },
+};
+
+/** Derive 2-letter initials + consistent color from an assignee string */
+function getRepAvatar(assignedTo: string): { initials: string; color: string } {
+  const parts = assignedTo.trim().split(/\s+/);
+  const initials = parts.length >= 2
+    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    : assignedTo.slice(0, 2).toUpperCase();
+
+  // Hash initials to a color
+  const colors = [
+    { bg: "bg-teal-500",   text: "text-white" },
+    { bg: "bg-blue-500",   text: "text-white" },
+    { bg: "bg-amber-500",  text: "text-white" },
+    { bg: "bg-purple-500", text: "text-white" },
+    { bg: "bg-rose-500",   text: "text-white" },
+    { bg: "bg-indigo-500", text: "text-white" },
+  ];
+  const idx = (initials.charCodeAt(0) + (initials.charCodeAt(1) || 0)) % colors.length;
+  return { initials, color: `${colors[idx].bg} ${colors[idx].text}` };
+}
+
+interface ConversationTileProps {
+  item: QueueItem;
+  onReply: () => void;
+  isLoading?: boolean;
+}
+
+export function ConversationTile({ item, onReply, isLoading }: ConversationTileProps) {
   const channelKey = getChannelKey(item);
-  const badge = CHANNEL_BADGE[channelKey] ?? CHANNEL_BADGE.ghl;
+  const badge = CHANNEL_BADGE[channelKey] ?? CHANNEL_BADGE.in;
   const timeAgo = shortRelativeTime(new Date(item.updatedAt));
 
-  const urgency =
-    item.staleDays >= 3 ? "high" :
-    item.staleDays >= 1 ? "mid" : "low";
+  // Late = over 24h without response
+  const isLate = differenceInHours(new Date(), new Date(item.updatedAt)) >= 24;
 
-  // Guard against literal "undefined" string from API
+  const dotColor  = isLate ? RED : TEAL;
+  const timeColor = isLate ? RED : TEAL;
+
   const preview = item.lastMessage && item.lastMessage !== "undefined"
     ? item.lastMessage
     : null;
 
+  const rep = item.assignedTo ? getRepAvatar(item.assignedTo) : null;
+
   return (
-    <div
+    <button
+      onClick={onReply}
+      disabled={isLoading}
       className={cn(
-        "group relative h-[190px] w-[200px] flex flex-col rounded-[12px] border bg-card p-3.5 select-none",
-        "transition-shadow duration-150 hover:shadow-md",
-        urgency === "high" && "border-destructive/30 bg-destructive/[0.015]",
-        urgency === "mid"  && "border-amber-400/40 bg-amber-50/20",
-        urgency === "low"  && "border-border"
+        "group relative w-[210px] h-[190px] flex flex-col rounded-[12px] bg-card p-3.5 select-none text-left",
+        "transition-all duration-150 hover:shadow-md",
+        isLoading ? "opacity-70 cursor-wait" : "",
+        isLate ? "border border-destructive/40" : "border border-border"
       )}
     >
-      {/* Top row: badge + time — both stay on one line */}
+      {isLoading && (
+        <div className="absolute inset-0 flex items-center justify-center rounded-[12px] bg-card/80 z-10">
+          <Loader2 className="w-5 h-5 animate-spin text-primary" />
+        </div>
+      )}
+      {/* Top row: badge + dot + time */}
       <div className="flex items-center gap-1.5 mb-2.5 min-w-0">
         <span
           className={cn(
-            "shrink-0 text-[10px] font-semibold px-1.5 py-[3px] rounded-[5px] border leading-none uppercase tracking-wide",
+            "shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full leading-none uppercase tracking-widest",
             badge.className
           )}
         >
           {badge.label}
         </span>
+
+        {/* Status dot */}
         <span
-          className={cn(
-            "text-[10px] tabular-nums truncate ml-auto",
-            urgency === "high" ? "text-destructive font-medium" :
-            urgency === "mid"  ? "text-amber-600" :
-            "text-muted-foreground/60"
-          )}
+          className="w-2 h-2 rounded-full shrink-0"
+          style={{ backgroundColor: dotColor }}
+        />
+
+        {/* Timestamp */}
+        <span
+          className="text-[10px] font-bold tabular-nums truncate ml-auto"
+          style={{ color: timeColor }}
         >
           {timeAgo}
         </span>
       </div>
 
       {/* Contact name */}
-      <p className="text-[13.5px] font-semibold text-foreground truncate leading-snug mb-1.5">
+      <p className="text-[13.5px] font-medium text-foreground truncate leading-snug mb-1.5">
         {item.contactName}
       </p>
 
-      {/* Last message — fixed height, proper ellipsis via line-clamp */}
-      <div className="flex-1 overflow-hidden min-h-0">
-        <p className="text-[11.5px] text-muted-foreground leading-[1.45] line-clamp-4">
-          {preview ?? <span className="italic opacity-50">No message preview</span>}
+      {/* Message preview */}
+      <div className="flex-1 overflow-hidden min-h-0 mb-3">
+        <p className="text-[11.5px] font-medium text-foreground/70 leading-[1.45] line-clamp-3">
+          {preview ?? <span className="italic opacity-40">No message preview</span>}
         </p>
       </div>
 
-      {/* Reply button */}
-      <div className="flex justify-end mt-2.5">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onReply();
-          }}
-          className={cn(
-            "flex items-center gap-1 text-[11.5px] font-semibold transition-colors",
-            "px-2 py-1.5 rounded-[6px]",
-            urgency === "high"
-              ? "text-destructive hover:bg-destructive/8"
-              : "text-primary hover:bg-primary/8"
-          )}
-        >
-          Reply
-          <ArrowRight className="w-3 h-3" />
-        </button>
+      {/* Bottom row */}
+      <div className="flex items-end justify-between mt-auto pt-2 border-t border-border/50">
+        <span className="text-[10.5px] text-muted-foreground font-medium">
+          Awaiting reply
+        </span>
+
+        {rep && (
+          <div className="flex flex-col items-center gap-0.5">
+            <span className="text-[8px] font-bold uppercase tracking-widest text-muted-foreground">
+              Rep
+            </span>
+            <div className={cn(
+              "w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold",
+              rep.color
+            )}>
+              {rep.initials}
+            </div>
+          </div>
+        )}
       </div>
-    </div>
+    </button>
   );
 }

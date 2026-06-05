@@ -19,6 +19,7 @@ export async function GET() {
         isActive: users.isActive,
         ghlUserId: users.ghlUserId,
         commissionPct: users.commissionPct,
+        timezone: users.timezone,
         createdAt: users.createdAt,
       })
       .from(users)
@@ -60,14 +61,14 @@ export async function GET() {
  */
 export async function PATCH(req: NextRequest) {
   const body = await req.json();
-  const { userId, role, isActive, ghlUserId, targets, permissionOverrides, name, email, newPassword, commissionPct } = body;
+  const { userId, role, isActive, ghlUserId, targets, permissionOverrides, name, email, newPassword, commissionPct, timezone } = body;
 
   if (!userId) {
     return NextResponse.json({ error: "userId required" }, { status: 400 });
   }
 
   // Update user fields if provided
-  const userUpdates: Partial<{ role: string; isActive: boolean; ghlUserId: string | null; name: string; email: string; passwordHash: string; commissionPct: number }> = {};
+  const userUpdates: Partial<{ role: string; isActive: boolean; ghlUserId: string | null; name: string; email: string; passwordHash: string; commissionPct: number; timezone: string | null }> = {};
   if (role !== undefined) userUpdates.role = role;
   if (isActive !== undefined) userUpdates.isActive = isActive;
   if (ghlUserId !== undefined) userUpdates.ghlUserId = ghlUserId || null;
@@ -78,6 +79,9 @@ export async function PATCH(req: NextRequest) {
   }
   if (commissionPct !== undefined && typeof commissionPct === "number" && commissionPct >= 0) {
     userUpdates.commissionPct = commissionPct;
+  }
+  if (timezone !== undefined) {
+    userUpdates.timezone = timezone || null;
   }
 
   if (Object.keys(userUpdates).length > 0) {

@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { platformReplies } from "@/lib/db/schema";
+import { platformReplies, users } from "@/lib/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { meta } from "@/lib/meta/client";
@@ -32,6 +32,7 @@ export interface QueueItem {
   staleDays: number;
   contactId?: string;   // GHL contactId if available
   recipientId?: string; // Meta: participant ID needed for sending
+  assignedTo?: string;  // Assigned rep name or ID
 }
 
 interface GHLConversation {
@@ -46,6 +47,7 @@ interface GHLConversation {
   dateUpdated?: string;
   dateLastMessage?: string;
   lastMessageDate?: string;
+  assignedTo?: string;
 }
 
 interface GHLConversationsResponse {
@@ -89,6 +91,18 @@ export async function GET(req: NextRequest) {
 
   const items: QueueItem[] = [];
 
+  // Build GHL user ID → rep name map for assigned rep display
+  const ghlUserMap = new Map<string, string>();
+  try {
+    const teamRows = await db()
+      .select({ ghlUserId: users.ghlUserId, name: users.name })
+      .from(users)
+      .where(eq(users.isActive, true));
+    for (const r of teamRows) {
+      if (r.ghlUserId) ghlUserMap.set(r.ghlUserId, r.name);
+    }
+  } catch {}
+
   // ── 1. GHL conversations ─────────────────────────────────────────────────────
   try {
     const loc = locationId();
@@ -118,6 +132,7 @@ export async function GET(req: NextRequest) {
         updatedAt,
         staleDays: staleDays(updatedAt),
         contactId: conv.contactId,
+        assignedTo: conv.assignedTo ? (ghlUserMap.get(conv.assignedTo) ?? undefined) : undefined,
       });
     }
   } catch (err) {

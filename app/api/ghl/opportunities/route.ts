@@ -3,6 +3,7 @@ import { ghl, locationId } from "@/lib/ghl/client";
 import type { GHLOpportunity, GHLPipeline } from "@/lib/ghl/types";
 import { logActivity } from "@/lib/activity/logger";
 
+
 export const dynamic = "force-dynamic";
 
 interface GHLOpportunitiesResponse {

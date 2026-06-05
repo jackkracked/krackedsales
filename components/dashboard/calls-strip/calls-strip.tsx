@@ -76,7 +76,7 @@ export function CallsStrip({ isAdmin }: CallsStripProps) {
             Calls
           </h3>
           {events.length > 0 && (
-            <span className="text-[10px] font-bold bg-primary/10 text-primary px-1.5 py-0.5 rounded-full tabular-nums">
+            <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
               {events.length}
             </span>
           )}
@@ -88,13 +88,13 @@ export function CallsStrip({ isAdmin }: CallsStripProps) {
             <div className="flex items-center gap-1">
               <button
                 onClick={() => scroll("left")}
-                className="p-1 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                className="text-xs font-medium text-muted-foreground hover:text-foreground border border-border rounded-[7px] px-1.5 py-1.5 hover:bg-muted transition-colors flex items-center"
               >
                 <ChevronLeft className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={() => scroll("right")}
-                className="p-1 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                className="text-xs font-medium text-muted-foreground hover:text-foreground border border-border rounded-[7px] px-1.5 py-1.5 hover:bg-muted transition-colors flex items-center"
               >
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
@@ -107,7 +107,7 @@ export function CallsStrip({ isAdmin }: CallsStripProps) {
               <select
                 value={viewMode}
                 onChange={(e) => setViewMode(e.target.value)}
-                className="appearance-none pl-3 pr-7 py-1 text-xs font-medium border border-border rounded-[7px] bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer"
+                className="appearance-none pl-3 pr-7 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground border border-border rounded-[7px] bg-card hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer"
               >
                 <option value="own">My Calls</option>
                 {repOptions.map((r) => (
@@ -143,7 +143,7 @@ export function CallsStrip({ isAdmin }: CallsStripProps) {
         <div
           ref={scrollRef}
           className="flex gap-3 overflow-x-auto scroll-smooth pb-1"
-          style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+          style={{ scrollbarWidth: "thin" }}
         >
           {events.map((event) => (
             <div key={event.id} className="shrink-0 w-[260px]">

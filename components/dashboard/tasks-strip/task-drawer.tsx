@@ -12,8 +12,10 @@ import {
   Loader2,
   Link2Off,
 } from "lucide-react";
-import { format, isPast, isToday } from "date-fns";
+import { format } from "date-fns";
 import { cn } from "@/lib/utils/cn";
+import { useUserTimezone } from "@/providers/timezone-provider";
+import { toZonedDate, isTodayInTz, isPastInTz } from "@/lib/utils/timezone";
 import type { Task } from "./task-tile";
 import { ActivityTab } from "@/components/activity/activity-tab";
 import { OpportunityModal } from "@/components/pipeline/opportunity-modal";
@@ -46,15 +48,16 @@ const PRIORITIES = [
 
 type DateStatus = "overdue" | "today" | "upcoming" | "none";
 
-function getDateStatus(dueDate: string | null): DateStatus {
+function getDateStatus(dueDate: string | null, tz: string): DateStatus {
   if (!dueDate) return "none";
   const d = new Date(dueDate);
-  if (isToday(d)) return "today";
-  if (isPast(d)) return "overdue";
+  if (isTodayInTz(d, tz)) return "today";
+  if (isPastInTz(d, tz)) return "overdue";
   return "upcoming";
 }
 
 export function TaskDrawer({ task, onClose, onComplete, onUpdate }: TaskDrawerProps) {
+  const tz = useUserTimezone();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState(task.title);
   const [notes, setNotes] = useState(task.notes ?? "");
@@ -69,7 +72,7 @@ export function TaskDrawer({ task, onClose, onComplete, onUpdate }: TaskDrawerPr
   const [cardStageName, setCardStageName] = useState("");
   const [cardLoading, setCardLoading] = useState(false);
 
-  const status = getDateStatus(dueDate || null);
+  const status = getDateStatus(dueDate || null, tz);
 
   // Close on Escape
   useEffect(() => {
@@ -170,7 +173,7 @@ export function TaskDrawer({ task, onClose, onComplete, onUpdate }: TaskDrawerPr
     }
   }
 
-  const createdLabel = format(new Date(task.createdAt), "d MMM yyyy");
+  const createdLabel = format(toZonedDate(new Date(task.createdAt), tz), "d MMM yyyy");
 
   return (
     <>

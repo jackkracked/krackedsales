@@ -96,7 +96,7 @@ export function StageHeatmap({ tasks, range }: StageHeatmapProps) {
   return (
     <div className="shrink-0">
       <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-2">
-        Avg time per stage — {range === "all" ? "all time" : "demos sent in period"}
+        Avg time per stage — demos sent in period
       </p>
       <div className="flex flex-wrap gap-2">
         {stages.map(({ stage, label, count, avgDays, threshold, isHistorical, dbCount }) => {

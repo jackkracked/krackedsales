@@ -5,6 +5,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { X, ExternalLink, Copy, Check, Send, Clock, CreditCard, Repeat, Download, Eye, Mail, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils/cn";
+import { useUserTimezone } from "@/providers/timezone-provider";
+import { toZonedDate } from "@/lib/utils/timezone";
 import { ProposalStatusBadge } from "./proposal-status-badge";
 
 interface Instalment {
@@ -14,6 +16,8 @@ interface Instalment {
   dueDate: string;
   status: string;
   paidAt: string | null;
+  isDeposit?: boolean;
+  stripeHostedUrl?: string | null;
 }
 
 interface Proposal {
@@ -40,6 +44,10 @@ interface Proposal {
   billingIntervalCount?: number | null;
   startDate?: string | null;
   expiresAt?: string | null;
+  hasDeposit?: boolean;
+  depositTotal?: number | null;
+  depositsPaidTotal?: number | null;
+  subscriptionCreatedAt?: string | null;
 }
 
 interface ProposalDetailSlideOverProps {
@@ -51,9 +59,16 @@ interface ProposalDetailSlideOverProps {
   initialSendStep?: "idle" | "confirm";
 }
 
-function fmtDate(d: string | null | undefined) {
+function fmtDate(d: string | null | undefined, tz: string) {
   if (!d) return null;
-  return format(new Date(d), "d MMM yyyy");
+  return format(toZonedDate(new Date(d), tz), "d MMM yyyy");
+}
+
+/** Format a calendar date (startDate, dueDate, expiresAt) using UTC — no timezone shift */
+function fmtCalendarDate(d: string | null | undefined) {
+  if (!d) return null;
+  const date = new Date(d);
+  return `${date.getUTCDate()} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][date.getUTCMonth()]} ${date.getUTCFullYear()}`;
 }
 
 function fmtAmount(amount: number, currency: string) {
@@ -119,7 +134,98 @@ function InstalmentBadge({ status }: { status: string }) {
   );
 }
 
+function InstalmentTable({ proposal, onUpdate }: { proposal: Proposal; onUpdate: () => void }) {
+  const tz = useUserTimezone();
+  const canMarkPaid = ["signed", "partial"].includes(proposal.status);
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [localInstalments, setLocalInstalments] = useState(proposal.instalments);
+
+  async function togglePaid(inst: Instalment) {
+    const newStatus = inst.status === "paid" ? "pending" : "paid";
+    setLoadingId(inst.id);
+    try {
+      await fetch(`/api/proposals/${proposal.id}/instalments/${inst.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      setLocalInstalments((prev) =>
+        prev.map((i) => i.id === inst.id ? { ...i, status: newStatus, paidAt: newStatus === "paid" ? new Date().toISOString() : null } : i)
+      );
+      onUpdate();
+    } finally {
+      setLoadingId(null);
+    }
+  }
+
+  const paidCount = localInstalments.filter((i) => i.status === "paid").length;
+
+  return (
+    <div className="bg-muted/30 rounded-[8px] overflow-hidden border border-border/60">
+      {paidCount > 0 && (
+        <div className="px-3 py-2 bg-orange-50 border-b border-orange-100 flex items-center gap-2">
+          <span className="text-[11px] font-semibold text-orange-700">
+            {paidCount} of {localInstalments.length} instalment{localInstalments.length !== 1 ? "s" : ""} paid
+          </span>
+          <div className="flex-1 h-1 bg-orange-200 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-orange-500 rounded-full transition-all"
+              style={{ width: `${(paidCount / localInstalments.length) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border/60">
+            <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">#</th>
+            <th className="text-right px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Amount</th>
+            <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Due</th>
+            <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
+            {canMarkPaid && <th className="px-3 py-2" />}
+          </tr>
+        </thead>
+        <tbody>
+          {localInstalments
+            .sort((a, b) => a.instalmentNumber - b.instalmentNumber)
+            .map((inst) => (
+              <tr key={inst.id} className="border-b border-border/40 last:border-0">
+                <td className="px-3 py-2 text-muted-foreground text-xs">{inst.instalmentNumber}</td>
+                <td className="px-3 py-2 text-right tabular-nums font-medium text-foreground/80 text-xs">
+                  {fmtAmount(inst.amount, proposal.currency)}
+                </td>
+                <td className="px-3 py-2 text-muted-foreground text-xs tabular-nums">
+                  {fmtCalendarDate(inst.dueDate)}
+                </td>
+                <td className="px-3 py-2">
+                  <InstalmentBadge status={inst.status} />
+                </td>
+                {canMarkPaid && (
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      onClick={() => togglePaid(inst)}
+                      disabled={loadingId === inst.id}
+                      className={cn(
+                        "text-[10px] font-semibold px-2 py-0.5 rounded-[4px] transition-colors disabled:opacity-50",
+                        inst.status === "paid"
+                          ? "text-muted-foreground hover:text-foreground hover:bg-muted"
+                          : "text-green-700 bg-green-50 hover:bg-green-100"
+                      )}
+                    >
+                      {loadingId === inst.id ? "…" : inst.status === "paid" ? "Undo" : "Mark Paid"}
+                    </button>
+                  </td>
+                )}
+              </tr>
+            ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDeleted, isAdmin, initialSendStep }: ProposalDetailSlideOverProps) {
+  const tz = useUserTimezone();
   const [copied, setCopied] = useState(false);
   const [sendStep, setSendStep] = useState<"idle" | "confirm">(initialSendStep ?? "idle");
   const [sendEmail, setSendEmail] = useState(proposal.contactEmail ?? "");
@@ -127,6 +233,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
   const [resendSuccess, setResendSuccess] = useState(false);
   const [markPaidStep, setMarkPaidStep] = useState<"idle" | "confirm">("idle");
   const [markPaidDate, setMarkPaidDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [depositOverrideStep, setDepositOverrideStep] = useState<"idle" | "confirm">("idle");
   const [deleteStep, setDeleteStep] = useState<"idle" | "confirm">("idle");
   const queryClient = useQueryClient();
 
@@ -176,6 +283,20 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
     onSuccess: (data) => {
       setSendStep("idle");
       if (data?.emailWarning) setEmailWarning(data.emailWarning);
+      queryClient.invalidateQueries({ queryKey: ["proposals"] });
+      onUpdated();
+    },
+  });
+
+  const depositOverrideMutation = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`/api/proposals/${proposal.id}/deposit-paid`, { method: "POST" });
+      const json = await r.json();
+      if (!r.ok || json.error) throw new Error(json.error ?? "Failed");
+      return json;
+    },
+    onSuccess: () => {
+      setDepositOverrideStep("idle");
       queryClient.invalidateQueries({ queryKey: ["proposals"] });
       onUpdated();
     },
@@ -306,7 +427,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                 <Icon className="w-3 h-3 text-muted-foreground mx-auto mb-1" />
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">{label}</p>
                 <p className="text-xs font-medium text-foreground mt-0.5">
-                  {fmtDate(date) ?? <span className="text-muted-foreground/50">—</span>}
+                  {fmtDate(date, tz) ?? <span className="text-muted-foreground/50">—</span>}
                 </p>
               </div>
             ))}
@@ -326,36 +447,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
               <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                 Instalments
               </p>
-              <div className="bg-muted/30 rounded-[8px] overflow-hidden border border-border/60">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border/60">
-                      <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">#</th>
-                      <th className="text-right px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Amount</th>
-                      <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Due</th>
-                      <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {proposal.instalments
-                      .sort((a, b) => a.instalmentNumber - b.instalmentNumber)
-                      .map((inst) => (
-                        <tr key={inst.id} className="border-b border-border/40 last:border-0">
-                          <td className="px-3 py-2 text-muted-foreground text-xs">{inst.instalmentNumber}</td>
-                          <td className="px-3 py-2 text-right tabular-nums font-medium text-foreground/80 text-xs">
-                            {fmtAmount(inst.amount, proposal.currency)}
-                          </td>
-                          <td className="px-3 py-2 text-muted-foreground text-xs tabular-nums">
-                            {fmtDate(inst.dueDate)}
-                          </td>
-                          <td className="px-3 py-2">
-                            <InstalmentBadge status={inst.status} />
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
+              <InstalmentTable proposal={proposal} onUpdate={() => queryClient.invalidateQueries({ queryKey: ["proposals"] })} />
             </div>
           )}
 
@@ -375,19 +467,104 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                 </span>
                 {proposal.startDate && (
                   <span className="text-xs text-muted-foreground ml-auto">
-                    from {fmtDate(proposal.startDate)}
+                    from {fmtCalendarDate(proposal.startDate)}
                   </span>
                 )}
               </div>
             </div>
           )}
 
+          {/* Deposit progress */}
+          {proposal.hasDeposit && (() => {
+            const depositInstalments = proposal.instalments.filter(i => i.isDeposit);
+            const paidDeposits = depositInstalments.filter(i => i.status === "paid").length;
+            const totalDeposits = depositInstalments.length;
+            const depositTotal = proposal.depositTotal ?? proposal.totalAmount;
+            const depositsPaid = proposal.depositsPaidTotal ?? 0;
+
+            return (
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                  Deposits
+                </p>
+                <div className="bg-muted/30 rounded-[8px] overflow-hidden border border-border/60">
+                  {/* Progress header */}
+                  <div className="px-3 py-2 bg-indigo-50 border-b border-indigo-100 flex items-center gap-2">
+                    <span className="text-[11px] font-semibold text-indigo-700">
+                      {paidDeposits} of {totalDeposits} deposit{totalDeposits !== 1 ? "s" : ""} paid — {fmtAmount(depositsPaid, proposal.currency)} / {fmtAmount(depositTotal, proposal.currency)}
+                    </span>
+                    <div className="flex-1 h-1 bg-indigo-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-indigo-500 rounded-full transition-all"
+                        style={{ width: `${totalDeposits > 0 ? (paidDeposits / totalDeposits) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Deposit rows */}
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border/60">
+                        <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">#</th>
+                        <th className="text-right px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Amount</th>
+                        <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Due</th>
+                        <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
+                        <th className="px-3 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {depositInstalments
+                        .sort((a, b) => a.instalmentNumber - b.instalmentNumber)
+                        .map((inst) => (
+                          <tr key={inst.id} className="border-b border-border/40 last:border-0">
+                            <td className="px-3 py-2 text-muted-foreground text-xs">{inst.instalmentNumber}</td>
+                            <td className="px-3 py-2 text-right tabular-nums font-medium text-foreground/80 text-xs">
+                              {fmtAmount(inst.amount, proposal.currency)}
+                            </td>
+                            <td className="px-3 py-2 text-muted-foreground text-xs tabular-nums">
+                              {fmtCalendarDate(inst.dueDate)}
+                            </td>
+                            <td className="px-3 py-2">
+                              <InstalmentBadge status={inst.status} />
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              {inst.stripeHostedUrl && inst.status !== "paid" && (
+                                <a
+                                  href={inst.stripeHostedUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[10px] font-semibold text-primary hover:text-primary/80 transition-colors"
+                                >
+                                  Pay Link
+                                </a>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+
+                  {/* Subscription status */}
+                  <div className="px-3 py-2 border-t border-border/60 bg-muted/20">
+                    <p className="text-[11px] text-muted-foreground">
+                      <span className="font-semibold">Subscription:</span>{" "}
+                      {proposal.subscriptionCreatedAt
+                        ? `Active since ${fmtDate(proposal.subscriptionCreatedAt, tz)}`
+                        : "Pending deposits"
+                      }
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Expiry */}
           {proposal.expiresAt && !["paid", "void"].includes(proposal.status) && (
             <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200/50 rounded-[7px]">
               <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
               <span className="text-xs text-amber-700 font-medium">
-                Expires {fmtDate(proposal.expiresAt)}
+                Expires {fmtCalendarDate(proposal.expiresAt)}
               </span>
             </div>
           )}
@@ -453,16 +630,27 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
 
         {/* Footer actions */}
         <div className="px-5 py-4 border-t border-border shrink-0 space-y-2">
-          {/* Preview — always available */}
-          <a
-            href={`/p/${proposal.token}?preview=1`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="w-full flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
-          >
-            <Eye className="w-3.5 h-3.5" />
-            Preview Client View
-          </a>
+          {/* Preview + Live link row */}
+          <div className="flex gap-2">
+            <a
+              href={`/p/${proposal.token}?preview=1`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              Preview
+            </a>
+            <a
+              href={publicUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              Live Link
+            </a>
+          </div>
 
           {proposal.status === "draft" && (
             <div className="space-y-2">
@@ -599,7 +787,49 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
           {proposal.status === "paid" && (
             <div className="flex items-center justify-center gap-1.5 text-xs text-green-600 font-medium">
               <Check className="w-3.5 h-3.5" />
-              {fmtDate(proposal.paidAt) ? `Paid on ${fmtDate(proposal.paidAt)}` : "Paid in full"}
+              {fmtDate(proposal.paidAt, tz) ? `Paid on ${fmtDate(proposal.paidAt, tz)}` : "Paid in full"}
+            </div>
+          )}
+
+          {/* Deposit override — admin marks all deposits as paid */}
+          {proposal.hasDeposit && !proposal.subscriptionCreatedAt && ["signed", "partial"].includes(proposal.status) && (
+            <div className="space-y-2">
+              {depositOverrideStep === "idle" ? (
+                <button
+                  onClick={() => setDepositOverrideStep("confirm")}
+                  className="w-full flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium text-indigo-700 border border-indigo-200 bg-indigo-50 rounded-[7px] hover:bg-indigo-100 transition-colors"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  Mark Deposits as Paid
+                </button>
+              ) : (
+                <div className="space-y-2 p-3 bg-indigo-50/50 border border-indigo-200 rounded-[8px]">
+                  <p className="text-xs text-indigo-700 font-medium text-center">
+                    Mark all deposits as paid and start the subscription?
+                  </p>
+                  {depositOverrideMutation.isError && (
+                    <p className="text-[11px] text-red-600 px-1">
+                      {(depositOverrideMutation.error as Error)?.message}
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { setDepositOverrideStep("idle"); depositOverrideMutation.reset(); }}
+                      className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => depositOverrideMutation.mutate()}
+                      disabled={depositOverrideMutation.isPending}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 text-white text-xs font-medium rounded-[7px] hover:bg-indigo-700 transition-colors disabled:opacity-60"
+                    >
+                      <Check className="w-3 h-3" />
+                      {depositOverrideMutation.isPending ? "Processing…" : "Confirm"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

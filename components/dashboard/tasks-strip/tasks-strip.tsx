@@ -2,26 +2,28 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckSquare, CheckCircle2, Plus } from "lucide-react";
-import { isPast, isToday } from "date-fns";
+import { CheckSquare, CheckCircle2, Plus, ArrowRight } from "lucide-react";
+import Link from "next/link";
 import { TaskTile, type Task } from "./task-tile";
+import { useUserTimezone } from "@/providers/timezone-provider";
+import { isTodayInTz, isPastInTz } from "@/lib/utils/timezone";
 import { TaskDrawer } from "./task-drawer";
 import { CreateTaskModal } from "@/components/shared/create-task-modal";
 import { CompleteTaskModal } from "./complete-task-modal";
 
-function statusOrder(t: Task): number {
+function statusOrder(t: Task, tz: string): number {
   if (!t.dueDate) return 3;
   const d = new Date(t.dueDate);
-  if (isToday(d)) return 1;
-  if (isPast(d)) return 0;
+  if (isTodayInTz(d, tz)) return 1;
+  if (isPastInTz(d, tz)) return 0;
   return 2;
 }
 
 const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 
-function sortTasks(list: Task[]): Task[] {
+function sortTasks(list: Task[], tz: string): Task[] {
   return [...list].sort((a, b) => {
-    const so = statusOrder(a) - statusOrder(b);
+    const so = statusOrder(a, tz) - statusOrder(b, tz);
     if (so !== 0) return so;
     const po = (PRIORITY_RANK[a.priority] ?? 1) - (PRIORITY_RANK[b.priority] ?? 1);
     if (po !== 0) return po;
@@ -33,6 +35,7 @@ function sortTasks(list: Task[]): Task[] {
 }
 
 export function TasksStrip() {
+  const tz = useUserTimezone();
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -49,7 +52,7 @@ export function TasksStrip() {
     refetchInterval: 2 * 60_000,
   });
 
-  const tasks = sortTasks(data?.tasks ?? []);
+  const tasks = sortTasks(data?.tasks ?? [], tz);
 
   // ── Circle click: toggle checked state ──────────────────────────────────
   function handleCheck(task: Task, e: React.MouseEvent) {
@@ -145,19 +148,28 @@ export function TasksStrip() {
               Tasks
             </h3>
             {tasks.length > 0 && (
-              <span className="text-[10px] font-bold bg-primary/10 text-primary px-1.5 py-0.5 rounded-full tabular-nums">
+              <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
                 {tasks.length}
               </span>
             )}
           </div>
 
-          <button
-            onClick={() => setShowCreate(true)}
-            className="flex items-center gap-1 text-[12px] font-medium text-primary hover:text-primary/80 transition-colors px-2 py-1 rounded-[6px] hover:bg-primary/5"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/tasks"
+              className="text-xs font-medium text-muted-foreground hover:text-foreground border border-border rounded-[7px] px-2.5 py-1.5 hover:bg-muted transition-colors flex items-center gap-1.5"
+            >
+              See all
+              <ArrowRight className="w-3 h-3" />
+            </Link>
+            <button
+              onClick={() => setShowCreate(true)}
+              className="text-xs font-medium text-muted-foreground hover:text-foreground border border-border rounded-[7px] px-2.5 py-1.5 hover:bg-muted transition-colors flex items-center gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add
+            </button>
+          </div>
         </div>
 
         {/* Content */}
@@ -180,8 +192,8 @@ export function TasksStrip() {
           <>
             {/* Desktop: horizontal scroll */}
             <div
-              className="hidden sm:flex gap-3 overflow-x-auto scroll-smooth pb-1"
-              style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+              className="hidden sm:flex gap-3 overflow-x-auto scroll-smooth pb-2"
+              style={{ scrollbarWidth: "thin" }}
             >
               {tasks.map((task) => (
                 <div key={task.id} className="shrink-0 w-[320px]">

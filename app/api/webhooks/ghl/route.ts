@@ -5,6 +5,8 @@ import { pipelineStageEvents, followupSends, bookingAutomationRules, messageInde
 import { and, eq, gte, desc } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { notifyAdmins } from "@/lib/notifications";
+import { dispatchWorkflowEvent } from "@/lib/workflows/triggers";
+import { upsertContact, upsertOpportunity, upsertConversation, upsertMessage } from "@/lib/ghl/sync";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +62,13 @@ export async function POST(req: NextRequest) {
           oppId ? `/pipeline` : undefined,
           oppId
         ).catch((err) => console.error("[GHL Webhook] notify error:", err));
+        dispatchWorkflowEvent("opportunity.created", {
+          contactName: body?.contactName ?? body?.fullName ?? body?.name ?? "Unknown",
+          pipelineStageName: body?.pipelineStageName ?? null,
+          monetaryValue: body?.monetaryValue ?? null,
+          contactId: body?.contactId ?? null,
+          opportunityId: body?.id ?? body?.opportunityId ?? null,
+        }).catch(() => {});
       }
     }
 
@@ -72,6 +81,112 @@ export async function POST(req: NextRequest) {
         conversationId: body?.conversationId,
         contactId: body?.contactId,
       }).catch((err) => console.error("[GHL Webhook] Pusher error:", err));
+
+      // ── Sync conversation to local DB ────────────────────────────────────────
+      if (body?.conversationId) {
+        upsertConversation({
+          id: body.conversationId,
+          contactId: body?.contactId,
+          contactName: body?.contactName ?? body?.fullName,
+          email: body?.email,
+          phone: body?.phone,
+          lastMessageBody: body?.message ?? body?.body,
+          lastMessageDate: body?.dateAdded,
+          unreadCount: body?.unreadCount,
+          type: body?.messageType ?? body?.type,
+          assignedTo: body?.assignedTo,
+        }).catch(() => {});
+      }
+
+      // ── Sync message to local DB ─────────────────────────────────────────────
+      if ((eventType === "InboundMessage" || eventType === "OutboundMessage") && body?.conversationId) {
+        upsertMessage({
+          id: body?.messageId ?? body?.id,
+          conversationId: body.conversationId,
+          contactId: body?.contactId,
+          direction: eventType === "InboundMessage" ? "inbound" : "outbound",
+          type: body?.messageType ?? body?.type,
+          body: body?.message ?? body?.body,
+          status: body?.status,
+          source: body?.source,
+          attachments: body?.attachments,
+          dateAdded: body?.dateAdded,
+        }).catch(() => {});
+      }
+    }
+
+    // ── Contact sync ──────────────────────────────────────────────────────────
+    if (
+      eventType === "ContactCreate" ||
+      eventType === "ContactUpdate" ||
+      eventType === "contact.create" ||
+      eventType === "contact.update"
+    ) {
+      upsertContact({
+        id: body?.id,
+        locationId: body?.locationId,
+        firstName: body?.firstName,
+        lastName: body?.lastName,
+        name: body?.name ?? body?.fullName,
+        fullNameLowerCase: body?.fullNameLowerCase,
+        email: body?.email,
+        phone: body?.phone,
+        tags: body?.tags,
+        source: body?.source,
+        assignedTo: body?.assignedTo,
+        customFields: body?.customFields,
+        address1: body?.address1,
+        city: body?.city,
+        state: body?.state,
+        country: body?.country,
+        companyName: body?.companyName,
+        website: body?.website,
+        dnd: body?.dnd,
+        dateAdded: body?.dateAdded,
+        dateUpdated: body?.dateUpdated,
+      }).catch(() => {});
+    }
+
+    // ── Sync opportunity to local DB ─────────────────────────────────────────
+    if (
+      eventType === "OpportunityCreate" ||
+      eventType === "OpportunityUpdate" ||
+      eventType === "OpportunityStageUpdate" ||
+      eventType === "OpportunityStatusUpdate"
+    ) {
+      upsertOpportunity({
+        id: body?.id ?? body?.opportunityId,
+        contact: {
+          id: body?.contactId,
+          name: body?.contactName ?? body?.fullName,
+          email: body?.contactEmail,
+          phone: body?.contactPhone,
+        },
+        pipelineId: body?.pipelineId,
+        pipelineStageId: body?.pipelineStageId ?? body?.stageId,
+        pipelineStageName: body?.pipelineStageName ?? body?.stageName,
+        name: body?.name,
+        status: body?.status,
+        monetaryValue: body?.monetaryValue,
+        assignedTo: body?.assignedTo,
+        source: body?.source,
+        lastStageChangeAt: body?.dateUpdated,
+        dateAdded: body?.dateAdded,
+        dateUpdated: body?.dateUpdated,
+      }).catch(() => {});
+    }
+
+    // ── 1b. Opportunity won dispatch ──────────────────────────────────────────
+    if (eventType === "OpportunityStatusUpdate") {
+      const statusVal = String(body?.status ?? body?.statusName ?? "").toLowerCase();
+      if (statusVal === "won") {
+        dispatchWorkflowEvent("opportunity.won", {
+          contactName: body?.contactName ?? body?.fullName ?? "Unknown",
+          contactId: body?.contactId ?? null,
+          opportunityId: body?.id ?? body?.opportunityId ?? null,
+          monetaryValue: body?.monetaryValue ?? null,
+        }).catch(() => {});
+      }
     }
 
     // ── 2. Persist stage entries for tracked stages ────────────────────────────
@@ -111,6 +226,13 @@ export async function POST(req: NextRequest) {
             source:     "webhook",
           });
           console.log(`[GHL Webhook] Recorded stage entry: opp=${opportunityId} stage=${stageId}`);
+          dispatchWorkflowEvent("opportunity.stage_changed", {
+            contactName: body?.contactName ?? body?.fullName ?? "Unknown",
+            newStage: body?.pipelineStageName ?? body?.stageName ?? null,
+            stageId: body?.pipelineStageId ?? body?.stageId ?? null,
+            contactId: body?.contactId ?? null,
+            opportunityId: body?.id ?? body?.opportunityId ?? null,
+          }).catch(() => {});
         } else {
           console.log(`[GHL Webhook] Duplicate stage entry skipped for opp=${opportunityId}`);
         }

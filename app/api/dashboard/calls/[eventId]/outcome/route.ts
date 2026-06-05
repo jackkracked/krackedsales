@@ -11,8 +11,11 @@ const VALID_OUTCOMES = [
   "no_show",
   "closed",
   "preparing_proposal",
+  "sent_proposal",
   "rebooked",
   "not_interested",
+  "budget_objection",
+  "needs_time",
   "follow_up",
 ] as const;
 

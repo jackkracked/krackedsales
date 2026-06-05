@@ -1,8 +1,10 @@
 "use client";
 
 import { Check, X } from "lucide-react";
-import { format, isPast, isToday, differenceInCalendarDays } from "date-fns";
+import { format, differenceInCalendarDays } from "date-fns";
 import { cn } from "@/lib/utils/cn";
+import { useUserTimezone } from "@/providers/timezone-provider";
+import { toZonedDate, isTodayInTz, isPastInTz } from "@/lib/utils/timezone";
 
 export interface Task {
   id: string;
@@ -32,11 +34,11 @@ interface TaskTileProps {
 
 type DateStatus = "overdue" | "today" | "upcoming" | "none";
 
-function getDateStatus(dueDate: string | null): DateStatus {
+function getDateStatus(dueDate: string | null, tz: string): DateStatus {
   if (!dueDate) return "none";
   const d = new Date(dueDate);
-  if (isToday(d)) return "today";
-  if (isPast(d)) return "overdue";
+  if (isTodayInTz(d, tz)) return "today";
+  if (isPastInTz(d, tz)) return "overdue";
   return "upcoming";
 }
 
@@ -61,7 +63,8 @@ export function TaskTile({
   onRequestComplete,
   onCancelCheck,
 }: TaskTileProps) {
-  const status = getDateStatus(task.dueDate);
+  const tz = useUserTimezone();
+  const status = getDateStatus(task.dueDate, tz);
   const dot = PRIORITY_DOT[task.priority];
 
   return (
@@ -148,10 +151,10 @@ export function TaskTile({
                   status === "upcoming" && "text-foreground"
                 )}
               >
-                {format(new Date(task.dueDate), "d")}
+                {format(toZonedDate(new Date(task.dueDate), tz), "d")}
               </span>
               <span className="text-[9.5px] uppercase tracking-wide text-muted-foreground mt-0.5">
-                {format(new Date(task.dueDate), "EEE")}
+                {format(toZonedDate(new Date(task.dueDate), tz), "EEE")}
               </span>
               <span
                 className={cn(
@@ -165,7 +168,7 @@ export function TaskTile({
                   ? overdueText(task.dueDate)
                   : status === "today"
                   ? "Today"
-                  : format(new Date(task.dueDate), "MMM")}
+                  : format(toZonedDate(new Date(task.dueDate), tz), "MMM")}
               </span>
             </>
           ) : (

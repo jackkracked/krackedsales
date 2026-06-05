@@ -2,8 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { format, getHours } from "date-fns";
-import { QuotaRing } from "./quota-ring";
-import { ActivityBars } from "./activity-bars";
+import { useUserTimezone } from "@/providers/timezone-provider";
+import { toZonedDate } from "@/lib/utils/timezone";
 import { TodaysFocus } from "./todays-focus";
 import { GoingColdWidget, type PipelineOpp } from "./going-cold-widget";
 import { TasksStrip } from "@/components/dashboard/tasks-strip/tasks-strip";
@@ -11,10 +11,13 @@ import { CallsStrip } from "@/components/dashboard/calls-strip/calls-strip";
 import { AiCopilotPanel } from "@/components/dashboard/ai-copilot-panel";
 import { ConversationsStrip } from "@/components/dashboard/conversations-strip/conversations-strip";
 import { KpiWidget } from "@/components/dashboard/kpi-widget/kpi-widget";
+import { GoalProgressBars } from "@/components/dashboard/goal-progress/goal-progress-bars";
 import { ScrollToTop } from "@/components/layout/scroll-to-top";
+import { FathomNudgeBanner } from "@/components/fathom/fathom-nudge-banner";
+import { useFathomAutoSync } from "@/lib/fathom/use-fathom-sync";
 
-function getGreeting(): string {
-  const h = getHours(new Date());
+function getGreeting(tz: string): string {
+  const h = getHours(toZonedDate(new Date(), tz));
   if (h < 12) return "Good morning";
   if (h < 17) return "Good afternoon";
   return "Good evening";
@@ -41,11 +44,19 @@ interface RepDashboardProps {
 }
 
 export function RepDashboard({ userId, userName, email, ghlUserId }: RepDashboardProps) {
-  const today = format(new Date(), "EEEE, d MMMM yyyy");
+  const tz = useUserTimezone();
+  useFathomAutoSync();
+  const today = format(toZonedDate(new Date(), tz), "EEEE, d MMMM yyyy");
   const firstName = userName.split(" ")[0];
 
   const params = new URLSearchParams({ userId, email: email ?? "" });
   if (ghlUserId) params.set("ghlUserId", ghlUserId);
+
+  const { data: summaryData } = useQuery<{ summary: { content: string } | null }>({
+    queryKey: ["weekly-summary"],
+    queryFn: () => fetch("/api/dashboard/weekly-summary").then((r) => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const { data: metrics } = useQuery<RepMetrics>({
     queryKey: ["rep-metrics", userId],
@@ -65,32 +76,22 @@ export function RepDashboard({ userId, userName, email, ghlUserId }: RepDashboar
   return (
     <div className="flex flex-col h-full p-6 gap-5 overflow-y-auto">
       <ScrollToTop />
+      <FathomNudgeBanner />
+
       {/* Header */}
       <div>
         <h1
           className="text-2xl font-bold text-foreground"
           style={{ fontFamily: "var(--font-heading)" }}
         >
-          {getGreeting()}, {firstName}
+          {getGreeting(tz)}, {firstName}
         </h1>
         <p className="text-sm text-muted-foreground mt-0.5">{today}</p>
-      </div>
-
-      {/* Hero row: Quota ring + Activity bars */}
-      <div className="grid grid-cols-1 xl:grid-cols-[auto_1fr] gap-5 items-stretch">
-        <div className="bg-card border border-border rounded-[10px] p-5 flex items-center justify-center">
-          <QuotaRing
-            current={metrics?.dealsWon ?? 0}
-            target={targets.dealsPerMonth}
-            label="deals this month"
-            sublabel={targets.revenueTarget > 0
-              ? `$${metrics?.revenueWon?.toLocaleString() ?? 0} / $${targets.revenueTarget.toLocaleString()}`
-              : undefined}
-          />
-        </div>
-        <div className="bg-card border border-border rounded-[10px] p-4 flex flex-col justify-between">
-          <ActivityBars data={activityBars} targetPerDay={targets.callsPerDay} />
-        </div>
+        {summaryData?.summary?.content && (
+          <p className="text-sm text-foreground/75 leading-relaxed mt-3">
+            {summaryData.summary.content}
+          </p>
+        )}
       </div>
 
       {/* Tasks strip — full width, above calls */}
@@ -109,6 +110,9 @@ export function RepDashboard({ userId, userName, email, ghlUserId }: RepDashboar
         ghlUserId={ghlUserId}
         email={email}
       />
+
+      {/* Goal progress bars — personal targets */}
+      <GoalProgressBars />
 
       {/* Commission row — only shown when a commission % is set */}
       {(metrics?.commissionPct ?? 0) > 0 && (
@@ -136,19 +140,6 @@ export function RepDashboard({ userId, userName, email, ghlUserId }: RepDashboar
         </div>
       )}
 
-      {/* Second row: Today's Focus + Going Cold */}
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-5">
-        <TodaysFocus />
-        <GoingColdWidget
-          opps={metrics?.pipelineOpps ?? []}
-          isLoading={!metrics}
-        />
-      </div>
-
-      {/* AI Copilot */}
-      <div className="flex-1 min-h-[320px]">
-        <AiCopilotPanel salesContext={salesContext} />
-      </div>
     </div>
   );
 }

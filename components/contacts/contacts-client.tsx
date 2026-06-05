@@ -1,14 +1,16 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils/cn";
 import {
   Search, X, ChevronUp, ChevronDown, Download, Tag, RefreshCw,
   MessageCircle, ExternalLink, Users, SlidersHorizontal, Plus,
-  ChevronLeft, ChevronRight, Check,
+  ChevronLeft, ChevronRight, Check, Mail, Phone, Ban,
+  FileText, ClipboardCheck, Layers,
 } from "lucide-react";
 import { relativeTime, formatDate } from "@/lib/utils/date";
+import { Avatar } from "@/components/ui/avatar";
 import { ContactModal } from "./contact-modal";
 import { AdvancedFiltersPanel, type FilterRule } from "./advanced-filters-panel";
 import type { UnifiedContact } from "@/lib/contacts/types";
@@ -23,6 +25,22 @@ interface SmartList {
 
 type SortKey = "createdAt" | "lastActivityAt" | "name" | "daysSinceLastTouch" | "source" | "stage";
 
+// ─── Preset smart tabs ───────────────────────────────────────────────────────
+
+interface PresetTab {
+  id: string;
+  label: string;
+  rules: FilterRule[];
+}
+
+const PRESET_TABS: PresetTab[] = [
+  { id: "all", label: "All", rules: [] },
+  { id: "unread", label: "Unread", rules: [{ id: "p-unread", field: "daysSinceLastTouch", operator: "lt", values: ["1"], connector: "and" }] },
+  { id: "no-response-7d", label: "No response 7d+", rules: [{ id: "p-nr7", field: "daysSinceLastTouch", operator: "gt", values: ["7"], connector: "and" }] },
+  { id: "demo-sent", label: "Demo sent", rules: [{ id: "p-demo", field: "hasDemo", operator: "is_any_of", values: ["true"], connector: "and" }] },
+  { id: "proposal-sent", label: "Proposal sent", rules: [{ id: "p-prop", field: "hasDemo", operator: "is_any_of", values: ["true"], connector: "and" }] },
+];
+
 // ─── Design constants ─────────────────────────────────────────────────────────
 
 const PLATFORM_BADGE: Record<string, { label: string; className: string }> = {
@@ -32,22 +50,24 @@ const PLATFORM_BADGE: Record<string, { label: string; className: string }> = {
   tiktok:     { label: "TikTok",  className: "bg-slate-100 text-slate-700" },
 };
 
-const CATEGORY_BADGE: Record<string, { label: string; dot: string }> = {
-  ecommerce: { label: "DTC",     dot: "bg-emerald-500" },
-  service:   { label: "Service", dot: "bg-amber-500" },
-  local:     { label: "Local",   dot: "bg-sky-500" },
-  b2b:       { label: "B2B",     dot: "bg-violet-500" },
-  other:     { label: "Other",   dot: "bg-zinc-400" },
+const STAGE_COLORS: Record<string, string> = {
+  "New Lead":           "bg-blue-50 text-blue-700 border-blue-200",
+  "Initial Contact Made": "bg-amber-50 text-amber-700 border-amber-200",
+  "Intro Call (Booked)": "bg-violet-50 text-violet-700 border-violet-200",
+  "Demo In Progress":   "bg-indigo-50 text-indigo-700 border-indigo-200",
+  "Demo Sent":          "bg-emerald-50 text-emerald-700 border-emerald-200",
+  "Proposal Sent":      "bg-teal-50 text-teal-700 border-teal-200",
+  "Closed (Won)":       "bg-green-50 text-green-700 border-green-200",
+  "Not Qualified":      "bg-muted text-muted-foreground border-border",
 };
 
-const OPP_STATUS: Record<string, { label: string; className: string }> = {
-  open:      { label: "Open",      className: "text-[#0F3A5C]" },
-  won:       { label: "Won",       className: "text-emerald-600" },
-  lost:      { label: "Lost",      className: "text-rose-600" },
-  abandoned: { label: "Abandoned", className: "text-muted-foreground" },
+const RESPONSE_CONFIG: Record<string, { label: string; className: string }> = {
+  awaiting_reply: { label: "Awaiting reply", className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  no_response:    { label: "No response",    className: "bg-red-50 text-red-600 border-red-200" },
+  replied:        { label: "Replied",         className: "bg-muted text-muted-foreground border-border" },
 };
 
-// ─── Rule chip label ──────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function ruleLabel(
   rule: FilterRule,
@@ -59,19 +79,16 @@ function ruleLabel(
     daysSinceLastTouch: "Days Since Touch",
   };
   const opLabels: Record<string, string> = {
-    is_any_of: "is", is_none_of: "is not",
-    is: "is", contains: "contains", not_contains: "doesn't contain",
-    gt: ">", lt: "<",
+    is_any_of: "is", is_none_of: "is not", is: "is", contains: "contains",
+    not_contains: "doesn't contain", gt: ">", lt: "<",
   };
   const staticValueLabels: Record<string, Record<string, string>> = {
-    source:        { ghl: "GHL", comment_lead: "Comment" },
+    source: { ghl: "GHL", comment_lead: "Comment" },
     brandCategory: { ecommerce: "DTC", service: "Service", local: "Local", b2b: "B2B", other: "Other" },
-    hasDemo:       { true: "Yes", false: "No" },
+    hasDemo: { true: "Yes", false: "No" },
   };
-
   const fLabel = fieldLabels[rule.field] ?? rule.field;
   const oLabel = opLabels[rule.operator] ?? rule.operator;
-
   let vLabel: string;
   if (rule.field === "pipelineId") {
     vLabel = rule.values.map((v) => pipelines.find((p) => p.id === v)?.name ?? v).join(", ") || "…";
@@ -81,38 +98,16 @@ function ruleLabel(
   } else {
     vLabel = rule.values.map((v) => staticValueLabels[rule.field]?.[v] ?? v).join(", ") || "…";
   }
-
   return `${fLabel} ${oLabel} ${vLabel}`;
 }
 
-// ─── Avatar ───────────────────────────────────────────────────────────────────
-
-function avatarColor(name: string) {
-  const palette = ["bg-violet-100 text-violet-700","bg-sky-100 text-sky-700","bg-amber-100 text-amber-700","bg-rose-100 text-rose-700","bg-emerald-100 text-emerald-700","bg-orange-100 text-orange-700","bg-indigo-100 text-indigo-700","bg-teal-100 text-teal-700"];
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
-  return palette[Math.abs(h) % palette.length];
-}
-
-function Avatar({ name, size = 28 }: { name: string; size?: number }) {
-  return (
-    <span
-      className={cn("inline-flex items-center justify-center rounded-full font-semibold shrink-0 text-[11px]", avatarColor(name))}
-      style={{ width: size, height: size }}
-    >
-      {name.trim()[0]?.toUpperCase() ?? "?"}
-    </span>
-  );
-}
-
-// ─── Sort header ──────────────────────────────────────────────────────────────
 
 function SortHeader({ label, sortKey, currentSort, currentOrder, onSort }: {
   label: string; sortKey: SortKey; currentSort: SortKey; currentOrder: "asc" | "desc"; onSort: (k: SortKey) => void;
 }) {
   const active = currentSort === sortKey;
   return (
-    <button onClick={() => onSort(sortKey)} className={cn("flex items-center gap-1 text-[11px] font-semibold uppercase tracking-widest transition-colors", active ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
+    <button onClick={() => onSort(sortKey)} className={cn("flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest transition-colors", active ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
       {label}
       <span className="flex flex-col -space-y-0.5">
         <ChevronUp  className={cn("w-2.5 h-2.5 -mb-0.5", active && currentOrder === "asc"  ? "text-primary" : "text-border/70")} />
@@ -122,25 +117,21 @@ function SortHeader({ label, sortKey, currentSort, currentOrder, onSort }: {
   );
 }
 
-// ─── Skeleton row ─────────────────────────────────────────────────────────────
-
 function SkeletonRow({ i }: { i: number }) {
   return (
     <tr className="border-b border-border/30" style={{ animationDelay: `${i * 40}ms` }}>
-      <td className="w-10 px-4 py-3"><div className="w-3.5 h-3.5 rounded bg-muted animate-pulse" /></td>
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-full bg-muted animate-pulse shrink-0" />
-          <div className="space-y-1.5">
-            <div className="h-2.5 w-28 rounded-full bg-muted animate-pulse" />
-            <div className="h-2 w-36 rounded-full bg-muted/60 animate-pulse" />
+      <td className="w-8 px-3 py-2"><div className="w-3.5 h-3.5 rounded bg-muted animate-pulse" /></td>
+      <td className="px-3 py-2">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-full bg-muted animate-pulse shrink-0" />
+          <div className="space-y-1">
+            <div className="h-2.5 w-24 rounded-full bg-muted animate-pulse" />
+            <div className="h-2 w-32 rounded-full bg-muted/60 animate-pulse" />
           </div>
         </div>
       </td>
-      {[40, 80, 50, 30, 60].map((w, j) => (
-        <td key={j} className="px-4 py-3">
-          <div className="h-2.5 rounded-full bg-muted animate-pulse" style={{ width: w }} />
-        </td>
+      {Array.from({ length: 8 }).map((_, j) => (
+        <td key={j} className="px-3 py-2"><div className="h-2.5 w-12 rounded-full bg-muted animate-pulse" /></td>
       ))}
     </tr>
   );
@@ -161,9 +152,12 @@ export function ContactsClient() {
   const [openContactTab, setOpenContactTab]   = useState<"timeline" | undefined>(undefined);
   const [smartLists, setSmartLists]           = useState<SmartList[]>([]);
   const [activeListId, setActiveListId]       = useState<string | null>(null);
+  const [activePreset, setActivePreset]       = useState("all");
   const [savingList, setSavingList]           = useState(false);
   const [listName, setListName]               = useState("");
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
 
   const PAGE_SIZE = 50;
 
@@ -185,6 +179,16 @@ export function ContactsClient() {
   });
   const pipelines = pipelinesData?.pipelines ?? [];
 
+  // Fetch team for rep map
+  const { data: teamData } = useQuery<{ users: Array<{ name: string; ghlUserId: string | null }> }>({
+    queryKey: ["team-settings"],
+    queryFn: () => fetch("/api/settings/team").then((r) => r.json()),
+    staleTime: 10 * 60_000,
+  });
+  const repMap = new Map<string, string>(
+    (teamData?.users ?? []).filter((u) => u.ghlUserId).map((u) => [u.ghlUserId!, u.name])
+  );
+
   const params = new URLSearchParams({
     page: String(page), pageSize: String(PAGE_SIZE), sortBy, sortOrder,
     ...(debounced            && { search: debounced }),
@@ -203,7 +207,6 @@ export function ContactsClient() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const activeRuleCount = advancedRules.length;
 
-  // Cmd+K
   useEffect(() => {
     const fn = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); searchRef.current?.focus(); } };
     window.addEventListener("keydown", fn);
@@ -247,19 +250,48 @@ export function ContactsClient() {
     localStorage.setItem("contacts_smart_lists", JSON.stringify(next));
   }
 
+  function applyPreset(preset: PresetTab) {
+    setActivePreset(preset.id);
+    setAdvancedRules(preset.rules);
+    setActiveListId(null);
+  }
+
   const clearAll = useCallback(() => {
     setAdvancedRules([]);
     setSearch("");
     setActiveListId(null);
+    setActivePreset("all");
   }, []);
 
+  // Quick actions
+  async function handleQuickAction(action: string, contact: UnifiedContact) {
+    if (action === "audit" && contact.ghlContactId) {
+      try {
+        await fetch("/api/clickup/create-audit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contactId: contact.ghlContactId, contactName: contact.name }),
+        });
+      } catch {}
+    }
+    if (action === "demo" && contact.ghlContactId) {
+      // Open the contact modal to the demo tab
+      setOpenContact(contact);
+    }
+  }
+
+  // Stage summary counts
+  const stageCounts = new Map<string, number>();
+  for (const c of contacts) {
+    const s = c.stage ?? "Unknown";
+    stageCounts.set(s, (stageCounts.get(s) ?? 0) + 1);
+  }
+
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-3">
+    <div className="flex flex-col flex-1 min-h-0 gap-2.5">
 
       {/* ── Toolbar ── */}
       <div className="flex items-center gap-2.5 flex-wrap shrink-0">
-
-        {/* Search */}
         <div className={cn("relative flex items-center transition-all duration-200", search ? "w-60" : "w-48 focus-within:w-60")}>
           <Search className="absolute left-2.5 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
           <input
@@ -267,7 +299,7 @@ export function ContactsClient() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search contacts…"
-            className="w-full pl-8 pr-7 py-2 text-sm border border-border rounded-[8px] bg-card placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/15 focus:border-primary/40 transition-all"
+            className="w-full pl-8 pr-7 py-1.5 text-sm border border-border rounded-[8px] bg-card placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/15 focus:border-primary/40 transition-all"
           />
           {search
             ? <button onClick={() => setSearch("")} className="absolute right-2 p-0.5 rounded text-muted-foreground hover:text-foreground"><X className="w-3 h-3" /></button>
@@ -275,44 +307,32 @@ export function ContactsClient() {
           }
         </div>
 
-        {/* Advanced Filters */}
         <button
           onClick={() => setShowAdvancedPanel(true)}
           className={cn(
-            "flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-[8px] border transition-colors",
+            "flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium rounded-[8px] border transition-colors",
             showAdvancedPanel || activeRuleCount > 0
               ? "border-primary/30 bg-primary/5 text-primary"
-              : "border-border text-muted-foreground hover:text-foreground hover:border-border/80"
+              : "border-border text-muted-foreground hover:text-foreground"
           )}
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />
-          Advanced Filters
+          Filters
           {activeRuleCount > 0 && (
-            <span className="ml-0.5 px-1.5 py-px text-[9px] font-bold bg-primary text-white rounded-full leading-tight">
-              {activeRuleCount}
-            </span>
+            <span className="ml-0.5 px-1.5 py-px text-[9px] font-bold bg-primary text-white rounded-full leading-tight">{activeRuleCount}</span>
           )}
         </button>
 
-        {/* Active rule chips */}
         {activeRuleCount > 0 && (
           <div className="flex items-center gap-1.5 flex-wrap">
             {advancedRules.map((rule) => (
-              <Chip
-                key={rule.id}
-                label={ruleLabel(rule, pipelines)}
-                onRemove={() => {
-                  const next = advancedRules.filter((r) => r.id !== rule.id);
-                  setAdvancedRules(next);
-                  setActiveListId(null);
-                }}
-              />
+              <Chip key={rule.id} label={ruleLabel(rule, pipelines)} onRemove={() => { setAdvancedRules(advancedRules.filter((r) => r.id !== rule.id)); setActiveListId(null); }} />
             ))}
             <button onClick={clearAll} className="text-xs text-muted-foreground hover:text-foreground transition-colors px-1">Clear</button>
           </div>
         )}
 
-        <div className="ml-auto flex items-center gap-2.5">
+        <div className="ml-auto flex items-center gap-2">
           {isFetching && !isLoading && (
             <span className="text-xs text-muted-foreground flex items-center gap-1.5">
               <RefreshCw className="w-3 h-3 animate-spin" /> Syncing
@@ -320,20 +340,29 @@ export function ContactsClient() {
           )}
           {selected.size > 0 && (
             <div className="flex items-center gap-1.5 pl-2 border-l border-border">
-              <span className="text-xs text-muted-foreground tabular-nums">{selected.size} selected</span>
-              <button onClick={exportCSV} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border border-border rounded-[7px] hover:bg-muted transition-colors">
+              <span className="text-xs text-muted-foreground tabular-nums font-medium">{selected.size} selected</span>
+              <button onClick={exportCSV} className="flex items-center gap-1 px-2 py-1 text-xs font-medium border border-border rounded-[6px] hover:bg-muted transition-colors">
                 <Download className="w-3 h-3" /> Export
               </button>
-              <button className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border border-border rounded-[7px] hover:bg-muted transition-colors">
+              <button className="flex items-center gap-1 px-2 py-1 text-xs font-medium border border-border rounded-[6px] hover:bg-muted transition-colors">
                 <Tag className="w-3 h-3" /> Tag
               </button>
-              <button onClick={() => setSelected(new Set())} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+              <button className="flex items-center gap-1 px-2 py-1 text-xs font-medium border border-border rounded-[6px] hover:bg-muted transition-colors">
+                <Users className="w-3 h-3" /> Assign Rep
+              </button>
+              <button onClick={() => setSelected(new Set())} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
           )}
-          <button onClick={exportCSV} className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border border-border rounded-[7px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+          <button onClick={exportCSV} className="flex items-center gap-1 px-2 py-1 text-xs font-medium border border-border rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
             <Download className="w-3 h-3" /> CSV
+          </button>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-1 bg-primary text-primary-foreground rounded-[8px] px-3 py-1.5 text-sm font-medium hover:bg-primary/90 transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add Contact
           </button>
           <span className="text-sm font-medium text-foreground tabular-nums">
             {isLoading ? "—" : total.toLocaleString()}
@@ -342,29 +371,31 @@ export function ContactsClient() {
         </div>
       </div>
 
-      {/* ── Smart lists ── */}
+      {/* ── Preset tabs + Smart lists ── */}
       <div className="flex items-center gap-1 shrink-0 overflow-x-auto">
-        {/* All */}
-        <button
-          onClick={() => { setAdvancedRules([]); setActiveListId(null); }}
-          className={cn(
-            "px-3 py-1.5 text-xs font-medium rounded-[7px] transition-colors whitespace-nowrap",
-            advancedRules.length === 0
-              ? "bg-foreground/8 text-foreground"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted"
-          )}
-        >
-          All
-        </button>
+        {PRESET_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => applyPreset(tab)}
+            className={cn(
+              "px-3 py-1 text-xs font-medium rounded-[6px] transition-colors whitespace-nowrap",
+              activePreset === tab.id && activeListId === null
+                ? "bg-foreground/8 text-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted"
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
 
-        {/* Saved lists */}
+        <div className="w-px h-4 bg-border mx-1" />
+
         {smartLists.map((list) => (
           <div key={list.id} className="flex items-center group">
             <button
-              onClick={() => { setAdvancedRules(list.rules); setActiveListId(list.id); }}
+              onClick={() => { setAdvancedRules(list.rules); setActiveListId(list.id); setActivePreset(""); }}
               className={cn(
-                "px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap",
-                smartLists.length > 0 ? "rounded-l-[7px]" : "rounded-[7px]",
+                "px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap rounded-l-[6px]",
                 activeListId === list.id
                   ? "bg-primary/10 text-primary border border-r-0 border-primary/20"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent"
@@ -374,12 +405,9 @@ export function ContactsClient() {
             </button>
             <button
               onClick={() => deleteList(list.id)}
-              title="Delete list"
               className={cn(
-                "px-1.5 py-1.5 rounded-r-[7px] text-muted-foreground hover:text-rose-500 transition-all opacity-0 group-hover:opacity-100 border border-l-0",
-                activeListId === list.id
-                  ? "border-primary/20 bg-primary/10"
-                  : "border-transparent hover:border-border/60"
+                "px-1 py-1 rounded-r-[6px] text-muted-foreground hover:text-rose-500 transition-all opacity-0 group-hover:opacity-100 border border-l-0",
+                activeListId === list.id ? "border-primary/20 bg-primary/10" : "border-transparent"
               )}
             >
               <X className="w-3 h-3" />
@@ -387,64 +415,73 @@ export function ContactsClient() {
           </div>
         ))}
 
-        {/* Add smart list */}
         {savingList ? (
-          <div className="flex items-center gap-1.5 ml-1">
-            <input
-              autoFocus
-              value={listName}
-              onChange={(e) => setListName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") saveList(); if (e.key === "Escape") setSavingList(false); }}
-              placeholder="List name…"
-              className="text-xs px-2 py-1.5 border border-primary/40 rounded-[6px] bg-card focus:outline-none w-28"
-            />
-            <button onClick={saveList} disabled={!listName.trim()} className="p-1 text-primary disabled:opacity-30">
-              <Check className="w-3.5 h-3.5" />
-            </button>
-            <button onClick={() => setSavingList(false)} className="p-1 text-muted-foreground">
-              <X className="w-3.5 h-3.5" />
-            </button>
+          <div className="flex items-center gap-1 ml-1">
+            <input autoFocus value={listName} onChange={(e) => setListName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveList(); if (e.key === "Escape") setSavingList(false); }} placeholder="List name…" className="text-xs px-2 py-1 border border-primary/40 rounded-[5px] bg-card focus:outline-none w-24" />
+            <button onClick={saveList} disabled={!listName.trim()} className="p-0.5 text-primary disabled:opacity-30"><Check className="w-3.5 h-3.5" /></button>
+            <button onClick={() => setSavingList(false)} className="p-0.5 text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
           </div>
         ) : (
-          <button
-            onClick={() => setSavingList(true)}
-            disabled={activeRuleCount === 0}
-            title={activeRuleCount === 0 ? "Apply filters first to save a list" : "Save current filters as a smart list"}
-            className="flex items-center gap-1 ml-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded-[7px] transition-colors whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
-          >
-            <Plus className="w-3 h-3" />
-            Add smart list
+          <button onClick={() => setSavingList(true)} disabled={activeRuleCount === 0} className="flex items-center gap-1 ml-1 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded-[6px] transition-colors whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed">
+            <Plus className="w-3 h-3" /> Save list
           </button>
         )}
       </div>
+
+      {/* ── Stage summary bar ── */}
+      {!isLoading && stageCounts.size > 0 && (
+        <div className="flex items-center gap-2 overflow-x-auto shrink-0">
+          {[...stageCounts.entries()].map(([stage, count]) => {
+            const stageClass = Object.entries(STAGE_COLORS).find(([k]) => stage.toLowerCase().includes(k.toLowerCase()))?.[1] ?? "bg-muted text-muted-foreground border-border";
+            return (
+              <span key={stage} className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border whitespace-nowrap", stageClass)}>
+                {stage}
+                <span className="tabular-nums font-bold">{count}</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
 
       {/* ── Table ── */}
       <div className="flex-1 min-h-0 overflow-auto rounded-[10px] border border-border bg-card">
         <table className="w-full border-collapse text-sm">
           <thead className="sticky top-0 z-10 bg-card border-b border-border">
             <tr>
-              <th className="w-10 px-4 py-3 align-middle">
+              <th className="w-8 px-3 py-2 align-middle">
                 <input type="checkbox" checked={contacts.length > 0 && selected.size === contacts.length} onChange={toggleAll} className="rounded border-border" />
               </th>
-              <th className="px-4 py-3 text-left min-w-[180px] align-middle">
+              <th className="px-3 py-2 text-left min-w-[160px] align-middle">
                 <SortHeader label="Name" sortKey="name" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
               </th>
-              <th className="px-4 py-3 text-left w-24 align-middle">
+              <th className="px-3 py-2 text-left w-16 align-middle">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Rep</span>
+              </th>
+              <th className="px-3 py-2 text-left w-16 align-middle">
                 <SortHeader label="Source" sortKey="source" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
               </th>
-              <th className="px-4 py-3 text-left min-w-[140px] align-middle">
+              <th className="px-3 py-2 text-left min-w-[110px] align-middle">
                 <SortHeader label="Stage" sortKey="stage" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
               </th>
-              <th className="px-4 py-3 text-left w-28 align-middle">
-                <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Channel</span>
+              <th className="px-3 py-2 text-left w-20 align-middle">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Status</span>
               </th>
-              <th className="px-4 py-3 text-left w-32 align-middle">
-                <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Demo</span>
+              <th className="px-3 py-2 text-center w-12 align-middle" title="Reachable channels">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Ch</span>
               </th>
-              <th className="px-4 py-3 text-left w-24 align-middle">
+              <th className="px-3 py-2 text-center w-10 align-middle" title="Demo">
+                <Layers className="w-3 h-3 text-muted-foreground mx-auto" />
+              </th>
+              <th className="px-3 py-2 text-center w-10 align-middle" title="Proposal">
+                <FileText className="w-3 h-3 text-muted-foreground mx-auto" />
+              </th>
+              <th className="px-3 py-2 text-left w-16 align-middle">
                 <SortHeader label="Touch" sortKey="daysSinceLastTouch" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
               </th>
-              <th className="px-4 py-3 text-left w-32 align-middle">
+              <th className="px-3 py-2 text-left w-14 align-middle">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">In stage</span>
+              </th>
+              <th className="px-3 py-2 text-left w-24 align-middle">
                 <SortHeader label="Added" sortKey="createdAt" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
               </th>
             </tr>
@@ -455,8 +492,8 @@ export function ContactsClient() {
               : contacts.length === 0
               ? (
                 <tr>
-                  <td colSpan={8} className="py-20 text-center">
-                    <Users className="w-9 h-9 text-border mx-auto mb-3" />
+                  <td colSpan={12} className="py-16 text-center">
+                    <Users className="w-8 h-8 text-border mx-auto mb-2" />
                     <p className="text-sm font-medium text-foreground mb-0.5">No contacts found</p>
                     {(search || activeRuleCount > 0) && <p className="text-xs text-muted-foreground">Try adjusting your search or filters</p>}
                   </td>
@@ -466,10 +503,12 @@ export function ContactsClient() {
                 <ContactRow
                   key={c.uid}
                   contact={c}
+                  repName={c.assignedTo ? repMap.get(c.assignedTo) ?? null : null}
                   selected={selected.has(c.uid)}
                   onSelect={() => setSelected((prev) => { const n = new Set(prev); n.has(c.uid) ? n.delete(c.uid) : n.add(c.uid); return n; })}
                   onClick={() => { setOpenContactTab(undefined); setOpenContact(c); }}
                   onOpenMessages={() => { setOpenContactTab(undefined); setOpenContact(c); }}
+                  handleQuickAction={handleQuickAction}
                 />
               ))
             }
@@ -479,7 +518,7 @@ export function ContactsClient() {
 
       {/* ── Pagination ── */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between shrink-0 pt-1">
+        <div className="flex items-center justify-between shrink-0 pt-0.5">
           <span className="text-xs text-muted-foreground tabular-nums">
             {((page - 1) * PAGE_SIZE + 1).toLocaleString()}–{Math.min(page * PAGE_SIZE, total).toLocaleString()} of {total.toLocaleString()}
           </span>
@@ -496,12 +535,8 @@ export function ContactsClient() {
       )}
 
       {openContact && (() => {
-        const queueContacts = selected.size >= 2
-          ? contacts.filter((c) => selected.has(c.uid))
-          : undefined;
-        const queueIndex = queueContacts
-          ? queueContacts.findIndex((c) => c.uid === openContact.uid)
-          : undefined;
+        const queueContacts = selected.size >= 2 ? contacts.filter((c) => selected.has(c.uid)) : undefined;
+        const queueIndex = queueContacts ? queueContacts.findIndex((c) => c.uid === openContact.uid) : undefined;
         return (
           <ContactModal
             contact={openContact}
@@ -509,9 +544,7 @@ export function ContactsClient() {
             initialTab={openContactTab}
             queue={queueContacts}
             queueIndex={queueIndex}
-            onNavigate={(i) => {
-              if (queueContacts) setOpenContact(queueContacts[i]);
-            }}
+            onNavigate={(i) => { if (queueContacts) setOpenContact(queueContacts[i]); }}
           />
         );
       })()}
@@ -524,124 +557,389 @@ export function ContactsClient() {
           pipelines={pipelines}
         />
       )}
+
+      {showCreateModal && (
+        <CreateContactModal
+          pipelines={pipelines}
+          onClose={() => setShowCreateModal(false)}
+          onCreated={() => {
+            setShowCreateModal(false);
+            queryClient.invalidateQueries({ queryKey: ["contacts"] });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Create Contact Modal ────────────────────────────────────────────────────
+
+const SOURCES = ["Facebook", "Instagram", "TikTok", "Referral", "Website", "Other"] as const;
+
+function CreateContactModal({
+  pipelines,
+  onClose,
+  onCreated,
+}: {
+  pipelines: Array<{ id: string; name: string; stages: Array<{ id: string; name: string }> }>;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [website, setWebsite] = useState("");
+  const [pipelineId, setPipelineId] = useState("");
+  const [stageId, setStageId] = useState("");
+  const [source, setSource] = useState("");
+  const [monetaryValue, setMonetaryValue] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const selectedPipeline = pipelines.find((p) => p.id === pipelineId);
+  const stages = selectedPipeline?.stages ?? [];
+
+  // Reset stage when pipeline changes
+  useEffect(() => {
+    setStageId("");
+  }, [pipelineId]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!firstName.trim()) return;
+
+    setSubmitting(true);
+    setError("");
+
+    try {
+      const res = await fetch("/api/ghl/contacts/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          firstName: firstName.trim(),
+          lastName: lastName.trim() || undefined,
+          email: email.trim() || undefined,
+          phone: phone.trim() || undefined,
+          website: website.trim() || undefined,
+          pipelineId: pipelineId || undefined,
+          stageId: stageId || undefined,
+          source: source || undefined,
+          monetaryValue: monetaryValue ? Number(monetaryValue) : undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Failed to create contact" }));
+        throw new Error(data.error ?? "Failed to create contact");
+      }
+
+      onCreated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const inputClass = "w-full px-3 py-2 text-sm border border-border rounded-[8px] bg-card focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition-colors";
+  const labelClass = "text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div
+        className="bg-card border border-border rounded-[12px] w-[480px] max-h-[85vh] overflow-y-auto p-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-base font-semibold text-foreground">Create Contact</h2>
+          <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* First / Last name — two columns */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass}>First Name *</label>
+              <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="John" required className={inputClass} />
+            </div>
+            <div>
+              <label className={labelClass}>Last Name</label>
+              <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Doe" className={inputClass} />
+            </div>
+          </div>
+
+          {/* Email */}
+          <div>
+            <label className={labelClass}>Email</label>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="john@example.com" className={inputClass} />
+          </div>
+
+          {/* Phone */}
+          <div>
+            <label className={labelClass}>Phone</label>
+            <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+1 555 123 4567" className={inputClass} />
+          </div>
+
+          {/* Website */}
+          <div>
+            <label className={labelClass}>Website</label>
+            <input value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://example.com" className={inputClass} />
+          </div>
+
+          {/* Pipeline / Stage — two columns */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass}>Pipeline</label>
+              <select value={pipelineId} onChange={(e) => setPipelineId(e.target.value)} className={inputClass}>
+                <option value="">None</option>
+                {pipelines.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelClass}>Stage</label>
+              <select value={stageId} onChange={(e) => setStageId(e.target.value)} disabled={!pipelineId} className={cn(inputClass, !pipelineId && "opacity-50 cursor-not-allowed")}>
+                <option value="">Select stage</option>
+                {stages.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Source */}
+          <div>
+            <label className={labelClass}>Source</label>
+            <select value={source} onChange={(e) => setSource(e.target.value)} className={inputClass}>
+              <option value="">Select source</option>
+              {SOURCES.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Deal Value */}
+          <div>
+            <label className={labelClass}>Deal Value</label>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={monetaryValue}
+              onChange={(e) => setMonetaryValue(e.target.value)}
+              placeholder="0"
+              className={inputClass}
+            />
+          </div>
+
+          {/* Error */}
+          {error && (
+            <p className="text-xs text-red-500 font-medium">{error}</p>
+          )}
+
+          {/* Actions */}
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground rounded-[8px] hover:bg-muted transition-colors">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting || !firstName.trim()}
+              className="flex items-center gap-1.5 bg-primary text-primary-foreground rounded-[8px] px-4 py-1.5 text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {submitting ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                "Create Contact"
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
 
 // ─── Row ──────────────────────────────────────────────────────────────────────
 
-function ContactRow({ contact: c, selected, onSelect, onClick, onOpenMessages }: {
-  contact: UnifiedContact; selected: boolean; onSelect: () => void; onClick: () => void; onOpenMessages: () => void;
+function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMessages, handleQuickAction }: {
+  contact: UnifiedContact; repName: string | null; selected: boolean; onSelect: () => void; onClick: () => void; onOpenMessages: () => void; handleQuickAction: (action: string, contact: UnifiedContact) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const platform = c.platform ?? "lead_form";
   const badge = PLATFORM_BADGE[platform] ?? PLATFORM_BADGE.lead_form;
-  const catBadge = c.brandCategory ? CATEGORY_BADGE[c.brandCategory] : null;
-  const status = c.opportunityStatus && c.opportunityStatus !== "open" ? OPP_STATUS[c.opportunityStatus] : null;
   const isStale = c.daysSinceLastTouch > 14;
   const isMedium = c.daysSinceLastTouch > 6;
+
+  const stageClass = c.stage
+    ? Object.entries(STAGE_COLORS).find(([k]) => c.stage!.toLowerCase().includes(k.toLowerCase()))?.[1] ?? "bg-muted text-muted-foreground border-border"
+    : null;
+
+  const responseConfig = c.responseStatus ? RESPONSE_CONFIG[c.responseStatus] : null;
+
 
   return (
     <tr
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={onClick}
-      className={cn("border-b border-border/30 cursor-pointer transition-colors duration-100", selected ? "bg-primary/[0.04]" : hovered ? "bg-muted/40" : "")}
+      className={cn(
+        "border-b border-border/30 cursor-pointer transition-colors duration-75",
+        selected ? "bg-primary/[0.04]" : hovered ? "bg-muted/40" : "",
+        c.dnd && "opacity-50"
+      )}
     >
       {/* Checkbox */}
-      <td className="w-10 px-4 py-3" onClick={(e) => { e.stopPropagation(); onSelect(); }}>
+      <td className="w-8 px-3 py-1.5" onClick={(e) => { e.stopPropagation(); onSelect(); }}>
         <input type="checkbox" checked={selected} onChange={onSelect} onClick={(e) => e.stopPropagation()} className="rounded border-border" />
       </td>
 
-      {/* Name */}
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-2.5 min-w-0">
+      {/* Name + DNC flag */}
+      <td className="px-3 py-1.5">
+        <div className="flex items-center gap-2 min-w-0">
           <Avatar name={c.name} />
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
-              <p className="text-sm font-medium text-foreground leading-tight truncate max-w-[200px]">{c.name}</p>
-              {c.awaitingReply && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0 animate-pulse" title="Awaiting reply" />}
+              <p className="text-sm font-medium text-foreground leading-tight truncate max-w-[180px]">{c.name}</p>
+              {c.dnd && <span title="Do not contact"><Ban className="w-3 h-3 text-red-500 shrink-0" /></span>}
             </div>
-            {c.email && <p className="text-xs text-muted-foreground truncate max-w-[200px]">{c.email}</p>}
+            {c.email && <p className="text-[11px] text-muted-foreground truncate max-w-[180px] leading-tight">{c.email}</p>}
           </div>
-          {/* Hover actions — always in DOM to prevent layout shift */}
-          <div className={cn("flex items-center gap-0.5 ml-1 shrink-0 transition-opacity duration-100", hovered ? "opacity-100" : "opacity-0 pointer-events-none")}>
-            {c.ghlContactId ? (
-              <button
-                onClick={(e) => { e.stopPropagation(); onOpenMessages(); }}
-                title="Open conversation"
-                className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
-                <MessageCircle className="w-3.5 h-3.5" />
+          {/* Hover actions */}
+          <div className={cn("flex items-center gap-0.5 shrink-0 transition-opacity duration-75", hovered ? "opacity-100" : "opacity-0 pointer-events-none")}>
+            {c.ghlContactId && (
+              <button onClick={(e) => { e.stopPropagation(); onOpenMessages(); }} title="Message" className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                <MessageCircle className="w-3 h-3" />
               </button>
-            ) : (
-              <span className="w-[22px]" />
             )}
-            {c.website ? (
+            {c.ghlContactId && !c.hasDemo && (
+              <button onClick={(e) => { e.stopPropagation(); handleQuickAction("demo", c); }} title="Submit demo" className="p-1 rounded-md text-muted-foreground hover:text-emerald-600 hover:bg-emerald-50 transition-colors">
+                <Layers className="w-3 h-3" />
+              </button>
+            )}
+            {c.ghlContactId && (
+              <button onClick={(e) => { e.stopPropagation(); handleQuickAction("audit", c); }} title="Create audit" className="p-1 rounded-md text-muted-foreground hover:text-violet-600 hover:bg-violet-50 transition-colors">
+                <ClipboardCheck className="w-3 h-3" />
+              </button>
+            )}
+            {c.website && (
               <a href={c.website.startsWith("http") ? c.website : `https://${c.website}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} title={c.website} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
-                <ExternalLink className="w-3.5 h-3.5" />
+                <ExternalLink className="w-3 h-3" />
               </a>
-            ) : (
-              <span className="w-[22px]" />
             )}
           </div>
         </div>
       </td>
 
+      {/* Rep */}
+      <td className="px-3 py-1.5">
+        {repName ? (
+          <Avatar name={repName} size={24} variant="rep" />
+        ) : (
+          <span className="text-muted-foreground/20 text-xs">—</span>
+        )}
+      </td>
+
       {/* Source */}
-      <td className="px-4 py-3">
-        <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium", badge.className)}>
+      <td className="px-3 py-1.5">
+        <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium", badge.className)}>
           {badge.label}
         </span>
       </td>
 
-      {/* Stage */}
-      <td className="px-4 py-3">
+      {/* Stage — color-coded pill */}
+      <td className="px-3 py-1.5">
         {c.stage ? (
-          <div className="min-w-0">
-            <p className="text-xs text-foreground/80 truncate max-w-[140px]">{c.stage}</p>
-            {status && <p className={cn("text-[11px]", status.className)}>{status.label}</p>}
-          </div>
+          <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border truncate max-w-[120px]", stageClass)}>
+            {c.stage}
+          </span>
         ) : (
-          <span className="text-muted-foreground/30 text-sm">—</span>
+          <span className="text-muted-foreground/20 text-xs">—</span>
         )}
       </td>
 
-      {/* Channel */}
-      <td className="px-4 py-3">
-        {c.lastChannel ? (
-          <ChannelBadge channel={c.lastChannel} />
+      {/* Response status */}
+      <td className="px-3 py-1.5">
+        {responseConfig ? (
+          <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium border whitespace-nowrap", responseConfig.className)}>
+            {responseConfig.label}
+          </span>
         ) : (
-          <span className="text-muted-foreground/30 text-sm">—</span>
+          <span className="text-muted-foreground/20 text-xs">—</span>
         )}
+      </td>
+
+      {/* Reachable channels */}
+      <td className="px-3 py-1.5">
+        <div className="flex items-center justify-center gap-1">
+          {c.reachableChannels?.includes("email") && <span title="Email"><Mail className="w-3 h-3 text-sky-500" /></span>}
+          {c.reachableChannels?.includes("sms") && <span title="SMS"><Phone className="w-3 h-3 text-emerald-500" /></span>}
+          {!c.reachableChannels?.length && <span className="text-muted-foreground/20 text-xs">—</span>}
+        </div>
       </td>
 
       {/* Demo */}
-      <td className="px-4 py-3">
+      <td className="px-3 py-1.5 text-center">
         {c.hasDemo ? (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 whitespace-nowrap">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-            Demo sent
-          </span>
+          <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" title="Demo sent" />
         ) : (
-          <span className="text-muted-foreground/30 text-sm">—</span>
+          <span className="text-muted-foreground/20 text-xs">—</span>
         )}
       </td>
 
-      {/* Touch */}
-      <td className="px-4 py-3">
+      {/* Proposal */}
+      <td className="px-3 py-1.5 text-center">
+        {c.hasProposal ? (
+          <span className={cn(
+            "w-2 h-2 rounded-full inline-block",
+            c.proposalStatus === "paid" ? "bg-emerald-500" :
+            c.proposalStatus === "signed" ? "bg-blue-500" :
+            c.proposalStatus === "sent" ? "bg-amber-500" :
+            "bg-muted-foreground"
+          )} title={`Proposal: ${c.proposalStatus}`} />
+        ) : (
+          <span className="text-muted-foreground/20 text-xs">—</span>
+        )}
+      </td>
+
+      {/* Last touch */}
+      <td className="px-3 py-1.5">
         <span className={cn(
           "text-xs font-medium tabular-nums",
           isStale   ? "text-rose-500" :
           isMedium  ? "text-amber-600" :
-          "text-muted-foreground"
+          "text-emerald-600"
         )}>
           {c.daysSinceLastTouch === 0 ? "Today" : `${c.daysSinceLastTouch}d`}
         </span>
       </td>
 
+      {/* Days in stage */}
+      <td className="px-3 py-1.5">
+        {c.daysInCurrentStage != null ? (
+          <span className={cn(
+            "text-xs tabular-nums",
+            c.daysInCurrentStage > 30 ? "text-rose-500 font-medium" :
+            c.daysInCurrentStage > 14 ? "text-amber-600" :
+            "text-muted-foreground"
+          )}>
+            {c.daysInCurrentStage}d
+          </span>
+        ) : (
+          <span className="text-muted-foreground/20 text-xs">—</span>
+        )}
+      </td>
+
       {/* Added */}
-      <td className="px-4 py-3">
+      <td className="px-3 py-1.5">
         <span className="text-xs text-muted-foreground" title={formatDate(c.createdAt)}>
           {relativeTime(c.createdAt)}
         </span>
@@ -651,25 +949,6 @@ function ContactRow({ contact: c, selected, onSelect, onClick, onOpenMessages }:
 }
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
-
-const CHANNEL_STYLE: Record<string, string> = {
-  SMS:       "bg-emerald-50 text-emerald-700",
-  Email:     "bg-sky-50 text-sky-700",
-  Instagram: "bg-pink-50 text-pink-700",
-  Facebook:  "bg-blue-50 text-blue-700",
-  WhatsApp:  "bg-green-50 text-green-700",
-  Call:      "bg-violet-50 text-violet-700",
-  TikTok:    "bg-slate-100 text-slate-700",
-};
-
-function ChannelBadge({ channel }: { channel: string }) {
-  const cls = CHANNEL_STYLE[channel] ?? "bg-muted text-muted-foreground";
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${cls}`}>
-      {channel}
-    </span>
-  );
-}
 
 function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (

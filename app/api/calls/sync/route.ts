@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { calls, userCalendars } from "@/lib/db/schema";
+import { calls, userCalendars, users } from "@/lib/db/schema";
 import { ghl, locationId } from "@/lib/ghl/client";
-import { isGoogleConfigured, meetClient } from "@/lib/google/client";
+import { isGoogleConfigured, meetClient, driveClient } from "@/lib/google/client";
 import { generateAndStoreInsights } from "@/lib/ai/call-insights";
 
 export const dynamic = "force-dynamic";
@@ -64,13 +64,59 @@ interface MeetTranscript {
   state?: string;
 }
 
+// ─── Gemini notes search ───────────────────────────────────────────────────────
+
+/**
+ * Search the organiser's Drive for a Gemini-generated meeting notes doc.
+ * Google Meet saves these as Google Docs named "Notes from [meeting]" shortly
+ * after the call ends. We search within a 3-hour window after the call started.
+ */
+async function findGeminiNotesUrl(repEmail: string, startedAt: Date): Promise<string | null> {
+  try {
+    const drive = await driveClient(repEmail);
+
+    // Search window: from meeting start → 3 hours later
+    const windowStart = startedAt.toISOString();
+    const windowEnd   = new Date(startedAt.getTime() + 3 * 60 * 60 * 1000).toISOString();
+
+    const q = [
+      "mimeType='application/vnd.google-apps.document'",
+      `createdTime >= '${windowStart}'`,
+      `createdTime <= '${windowEnd}'`,
+      "(name contains 'Notes from' or name contains 'Gemini Notes' or name contains 'Meeting notes')",
+    ].join(" and ");
+
+    const res = await (drive as any).files.list({
+      q,
+      fields: "files(id,name,webViewLink,createdTime)",
+      pageSize: 10,
+      orderBy: "createdTime asc",
+    });
+
+    const files: Array<{ id: string; name: string; webViewLink: string }> =
+      res.data?.files ?? [];
+
+    return files[0]?.webViewLink ?? null;
+  } catch (err) {
+    console.warn("[calls/sync] Gemini notes search failed:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
 // ─── Sync logic (shared between POST and cron GET) ────────────────────────────
 
 export async function runSync(): Promise<{ meet: number; dialer: number }> {
   const client = db();
   const loc    = locationId();
 
-  // Load all active rep calendars once — used by both sync paths
+  // Load all active users with a GHL user ID — used for dialer sync
+  const activeUsers = await client.select({
+    email: users.email,
+    name: users.name,
+    ghlUserId: users.ghlUserId,
+  }).from(users).where(eq(users.isActive, true));
+
+  // Load all active rep calendars — used for Google Meet sync
   const activeReps = await client
     .select()
     .from(userCalendars)
@@ -81,26 +127,10 @@ export async function runSync(): Promise<{ meet: number; dialer: number }> {
 
   // ── Source 1: GHL Dialer calls ─────────────────────────────────────────────
 
-  for (const rep of activeReps) {
-    // Resolve GHL user ID for this rep email
-    let ghlUserId: string | null = null;
-    try {
-      const userSearch = await ghl.get<GHLUserSearchResponse>(
-        `/users/search?locationId=${loc}&email=${encodeURIComponent(rep.repEmail)}`
-      );
-      ghlUserId = userSearch.users?.[0]?.id ?? null;
-    } catch (err) {
-      console.error(
-        `[calls/sync] GHL user lookup failed for ${rep.repEmail}:`,
-        err
-      );
-      continue;
-    }
+  const ghlUsers = activeUsers.filter((u) => u.ghlUserId);
 
-    if (!ghlUserId) {
-      console.warn(`[calls/sync] No GHL user found for ${rep.repEmail} — skipping`);
-      continue;
-    }
+  for (const user of ghlUsers) {
+    const ghlUserId = user.ghlUserId!;
 
     // Fetch conversations assigned to this rep
     let conversationCursor: string | undefined;
@@ -121,7 +151,7 @@ export async function runSync(): Promise<{ meet: number; dialer: number }> {
         if (!conversationCursor) break;
       } catch (err) {
         console.error(
-          `[calls/sync] Failed fetching conversations for ${rep.repEmail}:`,
+          `[calls/sync] Failed fetching conversations for ${user.email}:`,
           err
         );
         break;
@@ -170,8 +200,8 @@ export async function runSync(): Promise<{ meet: number; dialer: number }> {
                 direction,
                 contactId:         conv.contactId ?? null,
                 contactName:       conv.contactName ?? null,
-                repEmail:          rep.repEmail,
-                repName:           rep.repName,
+                repEmail:          user.email,
+                repName:           user.name,
                 startedAt,
                 durationSeconds,
                 ghlMessageId:      msg.id,
@@ -285,6 +315,9 @@ export async function runSync(): Promise<{ meet: number; dialer: number }> {
           transcriptAvailable = false;
         }
 
+        // Search the organiser's Drive for a Gemini notes doc (best-effort)
+        const smartNotesUrl = await findGeminiNotesUrl(rep.repEmail, startedAt);
+
         let insertedCallId: string | null = null;
         try {
           const [inserted] = await client
@@ -302,8 +335,13 @@ export async function runSync(): Promise<{ meet: number; dialer: number }> {
               transcriptText,
               transcriptStoredAt:  transcriptText ? new Date() : null,
               recordingAvailable:  false,
+              smartNotesUrl,
             })
-            .onConflictDoNothing()
+            .onConflictDoUpdate({
+              // On re-sync, update notes URL if we found one and the record didn't have one yet
+              target: calls.meetConferenceId,
+              set: { smartNotesUrl },
+            })
             .returning({ id: calls.id });
           insertedCallId = inserted?.id ?? null;
           meetCount++;

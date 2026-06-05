@@ -31,6 +31,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         title: proposal.title,
         totalAmount: proposal.totalAmount,
         currency: proposal.currency,
+        serviceDescription: proposal.serviceDescription,
         token: proposal.token,
         type: proposal.type,
       });

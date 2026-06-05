@@ -32,10 +32,11 @@ interface TranscriptEntryResponse {
 /**
  * GET /api/calls/[id]/transcript
  *
- * Returns the transcript entries for a Google Meet call.
- * Non-Meet calls or calls without a transcript return { entries: [] }.
+ * Returns transcript entries for a call. Checks for Fathom-synced transcript
+ * data first (stored as JSON in transcriptText). Falls back to the Google Meet
+ * API when no stored transcript exists.
  *
- * Response: { entries: Array<{ speaker, text, startTime }> }
+ * Response: { entries: Array<{ speaker, text, startTime }>, fathomSummary?, fathomShareUrl? }
  */
 export async function GET(
   _req: NextRequest,
@@ -60,13 +61,50 @@ export async function GET(
       return NextResponse.json({ error: "Call not found" }, { status: 404 });
     }
 
+    // Base call metadata included in every response so the drawer can render the header
+    const meta = {
+      callId:        call.id,
+      contactName:   call.contactName,
+      repName:       call.repName,
+      startedAt:     call.startedAt,
+      smartNotesUrl: call.smartNotesUrl ?? null,
+      fathomSummary: call.fathomSummary ?? null,
+      fathomShareUrl: call.fathomShareUrl ?? null,
+    };
+
+    // ── Fathom-synced transcript (preferred path) ──────────────────────────
+    // transcriptText is a JSON array of { speaker, text, timestamp } stored
+    // by the Fathom sync process. If present, use it directly.
+    if (call.transcriptText) {
+      try {
+        const items = JSON.parse(call.transcriptText) as Array<{
+          speaker: { display_name: string };
+          text: string;
+          timestamp: string;
+        }>;
+
+        const entries: TranscriptEntryResponse[] = items.map((item) => ({
+          speaker:   item.speaker.display_name,
+          text:      item.text,
+          startTime: item.timestamp,
+        }));
+
+        return NextResponse.json({ ...meta, entries });
+      } catch {
+        // Malformed JSON — fall through to Google Meet path
+        console.warn(`[GET /api/calls/${id}/transcript] Failed to parse stored transcriptText, falling back to Meet API`);
+      }
+    }
+
+    // ── Google Meet transcript (fallback) ──────────────────────────────────
+
     // Only Meet calls with a confirmed transcript can provide entries
     if (call.callType !== "meet" || !call.transcriptAvailable) {
-      return NextResponse.json({ entries: [] });
+      return NextResponse.json({ ...meta, entries: [] });
     }
 
     if (!call.meetConferenceId) {
-      return NextResponse.json({ entries: [] });
+      return NextResponse.json({ ...meta, entries: [] });
     }
 
     if (!call.repEmail) {
@@ -88,7 +126,7 @@ export async function GET(
       (txListRes.data?.transcripts as MeetTranscript[]) ?? [];
 
     if (transcripts.length === 0) {
-      return NextResponse.json({ entries: [] });
+      return NextResponse.json({ ...meta, entries: [] });
     }
 
     // Use the first (most recent / only) transcript
@@ -125,7 +163,7 @@ export async function GET(
       if (!nextPageToken || batch.length < 100) break;
     }
 
-    return NextResponse.json({ entries: allEntries });
+    return NextResponse.json({ ...meta, entries: allEntries });
   } catch (err) {
     console.error(`[GET /api/calls/${id}/transcript]`, err);
     return NextResponse.json(

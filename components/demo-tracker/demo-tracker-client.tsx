@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { RefreshCw, Search, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow, startOfMonth, format } from "date-fns";
 import { useDemoTasks } from "@/lib/hooks/use-demo-tasks";
 import { useDemoGhlLinks } from "@/lib/hooks/use-demo-ghl-links";
 import { DemoBucketColumn } from "./demo-bucket";
@@ -13,7 +13,8 @@ import { RiskAlerts } from "./risk-alerts";
 import type { EnrichedTask } from "@/app/api/clickup/tasks/route";
 import type { DemoBucket } from "@/lib/utils/demo-stage";
 import { getStageRiskDays } from "@/lib/utils/demo-stage";
-import { TIME_RANGE_OPTIONS, getTimeRangeStart, type TimeRange } from "@/lib/utils/time-range";
+import { type TimeRange } from "@/lib/utils/time-range";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 
 // ─── Stage options (only stages that appear on the demo list) ───────────────────
 const DEMO_STAGE_OPTIONS = [
@@ -29,10 +30,8 @@ const DEMO_STAGE_OPTIONS = [
 
 function groupByBucket(
   tasks: EnrichedTask[],
-  range: TimeRange
+  rangeStart: Date | null
 ): Record<DemoBucket, EnrichedTask[]> {
-  const rangeStart = getTimeRangeStart(range);
-
   return {
     // IN_PROGRESS and WAITING_TO_SEND always show current pipeline — no date filter
     IN_PROGRESS: tasks.filter((t) => t.bucket === "IN_PROGRESS"),
@@ -50,29 +49,6 @@ function groupByBucket(
         new Date(a.dateSent ?? a.dateUpdated).getTime()
       ),
   };
-}
-
-// ─── Time range selector ────────────────────────────────────────────────────────
-
-function TimeRangeSelector({ range, onChange }: { range: TimeRange; onChange: (r: TimeRange) => void }) {
-  return (
-    <div className="flex items-center gap-1 p-1 bg-muted rounded-lg shrink-0">
-      {TIME_RANGE_OPTIONS.map((opt) => (
-        <button
-          key={opt.value}
-          onClick={() => onChange(opt.value)}
-          className={cn(
-            "px-3 py-1 rounded-md text-xs font-medium transition-all whitespace-nowrap",
-            range === opt.value
-              ? "bg-card text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          )}
-        >
-          {opt.label}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 // ─── Select (reusable mini select) ─────────────────────────────────────────────
@@ -110,8 +86,38 @@ function FilterSelect({
 
 // ─── Main component ─────────────────────────────────────────────────────────────
 
+/** Map DateRangePicker preset keys to the legacy TimeRange type used by child components. */
+function presetToTimeRange(preset?: string): TimeRange {
+  switch (preset) {
+    case "today":    return "today";
+    case "yesterday": return "today";
+    case "wtd":      return "week";
+    case "last_7":   return "week";
+    case "mtd":      return "month";
+    case "last_30":  return "month";
+    default:         return "custom";
+  }
+}
+
 export function DemoTrackerClient() {
-  const [range, setRange] = useState<TimeRange>("month");
+  const defaultRange = useMemo(() => {
+    const now = new Date();
+    const s = startOfMonth(now);
+    const e = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    return { start: format(s, "yyyy-MM-dd"), end: format(e, "yyyy-MM-dd"), preset: "mtd" };
+  }, []);
+
+  const [dateRange, setDateRange] = useState<{ start: string; end: string; preset?: string }>(defaultRange);
+
+  // Derive the legacy TimeRange for child components that still need it
+  const legacyRange: TimeRange = presetToTimeRange(dateRange.preset);
+
+  // Derive a start Date for groupByBucket
+  const rangeStartDate = useMemo(
+    () => new Date(dateRange.start + "T00:00:00"),
+    [dateRange.start]
+  );
+
   const [search, setSearch] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("");
   const [stageFilter, setStageFilter] = useState("");
@@ -122,7 +128,7 @@ export function DemoTrackerClient() {
   const backfill = data?.backfill;
   const backfillComplete = !backfill || backfill.synced >= backfill.total;
   const backfillPct = backfill ? Math.round((backfill.synced / backfill.total) * 100) : 0;
-  const { data: links = {} } = useDemoGhlLinks(tasks, range);
+  const { data: links = {} } = useDemoGhlLinks(tasks, legacyRange);
 
   // ── Extract unique assignees from loaded tasks ──
   const assigneeOptions = useMemo(() => {
@@ -182,7 +188,7 @@ export function DemoTrackerClient() {
     );
   }
 
-  const buckets = groupByBucket(filtered, range);
+  const buckets = groupByBucket(filtered, rangeStartDate);
 
   return (
     <div className="flex flex-col gap-4 h-full">
@@ -223,7 +229,7 @@ export function DemoTrackerClient() {
 
       {/* ── Controls: time range + search + filters ── */}
       <div className="flex flex-wrap items-center gap-2 shrink-0">
-        <TimeRangeSelector range={range} onChange={setRange} />
+        <DateRangePicker value={dateRange} onChange={setDateRange} />
 
         <div className="flex-1 min-w-0" />
 
@@ -302,10 +308,10 @@ export function DemoTrackerClient() {
       )}
 
       {/* ── Metrics strip ── */}
-      <DemoKpiStrip tasks={filtered} range={range} links={links} />
+      <DemoKpiStrip tasks={filtered} range={legacyRange} links={links} />
 
       {/* ── Stage heatmap ── */}
-      <StageHeatmap tasks={filtered} range={range} />
+      <StageHeatmap tasks={filtered} range={legacyRange} />
 
       {/* ── At-risk alerts ── */}
       <RiskAlerts tasks={filtered} />

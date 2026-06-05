@@ -10,6 +10,7 @@ interface UserCalendar {
   repName: string;
   repEmail: string;
   ghlCalendarId: string | null;
+  conflictCalendarId: string;
   color: string;
   isActive: boolean;
 }
@@ -21,11 +22,28 @@ async function fetchUserCalendars(): Promise<UserCalendar[]> {
   return data.userCalendars;
 }
 
+async function updateUserCalendarField(
+  id: string,
+  field: string,
+  value: string
+): Promise<void> {
+  const res = await fetch(`/api/settings/user-calendars/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ [field]: value }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Failed to update calendar");
+  }
+}
+
 async function createUserCalendar(payload: {
   repName: string;
   repEmail: string;
   ghlCalendarId: string;
   color: string;
+  conflictCalendarId: string;
 }): Promise<UserCalendar> {
   const res = await fetch("/api/settings/user-calendars", {
     method: "POST",
@@ -76,6 +94,7 @@ export function UserCalendarsSettings() {
   const [repEmail, setRepEmail] = useState("");
   const [ghlCalendarId, setGhlCalendarId] = useState("");
   const [color, setColor] = useState("#6366f1");
+  const [conflictCalId, setConflictCalId] = useState("primary");
   const [addSuccess, setAddSuccess] = useState(false);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["user-calendars"] });
@@ -88,6 +107,7 @@ export function UserCalendarsSettings() {
       setRepEmail("");
       setGhlCalendarId("");
       setColor("#6366f1");
+      setConflictCalId("primary");
       setAddSuccess(true);
       setTimeout(() => setAddSuccess(false), 3000);
     },
@@ -104,9 +124,15 @@ export function UserCalendarsSettings() {
     onSuccess: invalidate,
   });
 
+  const updateFieldMutation = useMutation({
+    mutationFn: ({ id, field, value }: { id: string; field: string; value: string }) =>
+      updateUserCalendarField(id, field, value),
+    onSuccess: invalidate,
+  });
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    createMutation.mutate({ repName, repEmail, ghlCalendarId, color });
+    createMutation.mutate({ repName, repEmail, ghlCalendarId, color, conflictCalendarId: conflictCalId });
   }
 
   function handleDelete(id: string, name: string) {
@@ -141,10 +167,11 @@ export function UserCalendarsSettings() {
       ) : calendars.length > 0 ? (
         <div className="mb-5 rounded-[8px] border border-border overflow-hidden">
           {/* Table header */}
-          <div className="grid grid-cols-[1fr_1fr_1fr_auto_auto_auto] items-center gap-3 px-3.5 py-2 border-b border-border bg-muted/30">
+          <div className="grid grid-cols-[1fr_1fr_1fr_minmax(120px,0.7fr)_auto_auto_auto] items-center gap-3 px-3.5 py-2 border-b border-border bg-muted/30">
             <span className="text-xs font-medium text-muted-foreground">Rep Name</span>
             <span className="text-xs font-medium text-muted-foreground">Email</span>
             <span className="text-xs font-medium text-muted-foreground">GHL Calendar ID</span>
+            <span className="text-xs font-medium text-muted-foreground" title="Google Calendar ID to check for scheduling conflicts">Conflict Cal</span>
             <span className="text-xs font-medium text-muted-foreground">Color</span>
             <span className="text-xs font-medium text-muted-foreground">Active</span>
             <span className="w-7" />
@@ -155,7 +182,7 @@ export function UserCalendarsSettings() {
             <div
               key={cal.id}
               className={cn(
-                "grid grid-cols-[1fr_1fr_1fr_auto_auto_auto] items-center gap-3 px-3.5 py-2.5",
+                "grid grid-cols-[1fr_1fr_1fr_minmax(120px,0.7fr)_auto_auto_auto] items-center gap-3 px-3.5 py-2.5",
                 i < calendars.length - 1 && "border-b border-border"
               )}
             >
@@ -164,6 +191,20 @@ export function UserCalendarsSettings() {
               <span className="text-xs text-muted-foreground font-mono truncate">
                 {cal.ghlCalendarId ?? "—"}
               </span>
+
+              {/* Conflict calendar inline edit */}
+              <input
+                type="text"
+                defaultValue={cal.conflictCalendarId ?? "primary"}
+                onBlur={(e) => {
+                  const newVal = e.target.value.trim() || "primary";
+                  if (newVal !== (cal.conflictCalendarId ?? "primary")) {
+                    updateFieldMutation.mutate({ id: cal.id, field: "conflictCalendarId", value: newVal });
+                  }
+                }}
+                title="Google Calendar ID to check for scheduling conflicts"
+                className="text-xs font-mono text-muted-foreground bg-transparent border border-transparent hover:border-border focus:border-primary focus:bg-background rounded px-1.5 py-1 transition-colors focus:outline-none focus:ring-1 focus:ring-primary/30 truncate"
+              />
 
               {/* Color swatch */}
               <span
@@ -243,7 +284,7 @@ export function UserCalendarsSettings() {
           </div>
         </div>
 
-        <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
+        <div className="grid grid-cols-[1fr_1fr] gap-3">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-foreground">GHL Calendar ID</label>
             <input
@@ -255,6 +296,25 @@ export function UserCalendarsSettings() {
             />
           </div>
 
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-foreground">
+              Conflict Calendar
+            </label>
+            <input
+              type="text"
+              value={conflictCalId}
+              onChange={(e) => setConflictCalId(e.target.value)}
+              placeholder="primary"
+              title="Google Calendar ID to check for scheduling conflicts"
+              className={INPUT_CLASS}
+            />
+            <p className="text-[10px] text-muted-foreground">
+              Google Calendar ID to check for conflicts. Defaults to &quot;primary&quot;.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-end gap-3">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-foreground">Color</label>
             <input

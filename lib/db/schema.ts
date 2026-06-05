@@ -8,6 +8,8 @@ import {
   numeric,
   integer,
   doublePrecision,
+  date,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 /** Monthly software subscriptions — summed into the Software Cost KPI */
@@ -37,6 +39,8 @@ export const users = pgTable("users", {
   isActive: boolean("is_active").notNull().default(true),
   ghlUserId: text("ghl_user_id"), // links to GHL user for pipeline/calendar filtering
   commissionPct: doublePrecision("commission_pct").notNull().default(0), // % of proposal value earned as commission
+  fathomApiKey: text("fathom_api_key"),  // user's Fathom API key for meeting sync
+  timezone: text("timezone"), // IANA timezone e.g. "America/Los_Angeles"
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -84,6 +88,7 @@ export const repTargets = pgTable("rep_targets", {
   dealsPerMonth: integer("deals_per_month").notNull().default(5),
   callsPerDay: integer("calls_per_day").notNull().default(15),
   revenueTarget: doublePrecision("revenue_target").notNull().default(0),
+  demosPerMonth: integer("demos_per_month").notNull().default(8),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
@@ -266,6 +271,7 @@ export const kpiOverrides = pgTable("kpi_overrides", {
   metricKey: text("metric_key").notNull(),
   period:    text("period").notNull(),    // "2026-04" | "2026-Q1" | "2026-04-W2"
   value:     doublePrecision("value").notNull(),
+  note:      text("note"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -451,6 +457,11 @@ export const calls = pgTable("calls", {
   ghlMessageId: text("ghl_message_id").unique(),         // dedup key
   ghlConversationId: text("ghl_conversation_id"),
   recordingAvailable: boolean("recording_available").default(false).notNull(),
+  // Fathom-specific
+  fathomRecordingId: integer("fathom_recording_id").unique(), // dedup key for Fathom meetings
+  fathomSummary: text("fathom_summary"),                      // markdown AI summary from Fathom
+  fathomSyncedAt: timestamp("fathom_synced_at"),              // when this call was last synced from Fathom
+  fathomShareUrl: text("fathom_share_url"),                   // link to view recording in Fathom
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -465,6 +476,7 @@ export const userCalendars = pgTable("user_calendars", {
   ghlCalendarId: text("ghl_calendar_id"),
   color: text("color").notNull().default("#6366f1"), // hex color for UI
   isActive: boolean("is_active").notNull().default(true),
+  conflictCalendarId: text("conflict_calendar_id").default("primary"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -530,6 +542,8 @@ export const callInsights = pgTable("call_insights", {
   redFlagsText: text("red_flags_text"),
   sentimentScore: integer("sentiment_score"), // 1–5
   sentimentLabel: text("sentiment_label"),    // "positive" | "neutral" | "negative"
+  suggestedOutcome: text("suggested_outcome"), // AI-suggested call disposition
+  suggestedNotes: text("suggested_notes"),     // AI-drafted disposition notes
   analyzedAt: timestamp("analyzed_at").defaultNow().notNull(),
 });
 
@@ -562,6 +576,11 @@ export const proposals = pgTable("proposals", {
   startDate: timestamp("start_date"),
   endDate: timestamp("end_date"),
   expiresAt: timestamp("expires_at"),
+  // Deposit system — for management proposals collecting upfront deposits before subscription starts
+  hasDeposit: boolean("has_deposit").notNull().default(false),
+  depositTotal: doublePrecision("deposit_total"), // locked to one billing cycle amount
+  depositsPaidTotal: doublePrecision("deposits_paid_total").notNull().default(0),
+  subscriptionCreatedAt: timestamp("subscription_created_at"),
   stripeInvoiceId: text("stripe_invoice_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
   stripeCustomerId: text("stripe_customer_id"),
@@ -569,9 +588,14 @@ export const proposals = pgTable("proposals", {
   signedAt: timestamp("signed_at"),
   signedIp: text("signed_ip"),
   signatureData: text("signature_data"),
+  signerTitle: text("signer_title"),
+  additionalRates: text("additional_rates"), // JSON: [{item: string, cost: string}]
   sentAt: timestamp("sent_at"),
   paidAt: timestamp("paid_at"),
   cancelledAt: timestamp("cancelled_at"),
+  lostAt: timestamp("lost_at"),
+  lostReason: text("lost_reason"),
+  lostBy: text("lost_by"), // user name who marked it lost
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -586,6 +610,7 @@ export const proposalInstalments = pgTable("proposal_instalments", {
   dueDate: timestamp("due_date").notNull(),
   status: text("status").notNull().default("pending"),
   paidAt: timestamp("paid_at"),
+  isDeposit: boolean("is_deposit").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -642,6 +667,26 @@ export const callDispositions = pgTable("call_dispositions", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+/**
+ * AI-generated call preparation briefs — cached per calendar event.
+ * Generated on-demand or pre-generated via cron for calls within 48 hours.
+ * callType is determined by disposition history: "intro" if no prior non-no-show
+ * dispositions exist, "follow_up" otherwise.
+ */
+export const callPreps = pgTable("call_preps", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  calendarEventId: text("calendar_event_id").notNull().unique(),
+  contactId: text("contact_id").notNull(),
+  contactName: text("contact_name"),
+  callType: text("call_type").notNull(), // "intro" | "follow_up"
+  status: text("status").notNull().default("pending"), // "pending" | "generating" | "ready" | "failed"
+  sections: jsonb("sections"), // structured JSON with all prep sections
+  failedSections: jsonb("failed_sections").default([]), // array of section names that failed
+  generatedAt: timestamp("generated_at"),
+  expiresAt: timestamp("expires_at"), // prep becomes stale after this
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 /** Full-text message index — powers inbox search across all channels */
 export const messageIndex = pgTable("message_index", {
   id: text("id").primaryKey(), // GHL/Meta message ID
@@ -679,3 +724,249 @@ export const dashboardKpiPrefs = pgTable("dashboard_kpi_prefs", {
   selectedKeys: text("selected_keys").array().notNull().default([]),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+// ─── Weekly AI Summaries ─────────────────────────────────────────────────────
+
+/** AI-generated weekly summaries — one per user per week, generated Monday 6am */
+export const weeklySummaries = pgTable("weekly_summaries", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  weekStart: timestamp("week_start").notNull(), // Monday 00:00 of the summarised week
+  content: text("content").notNull(),
+  generatedAt: timestamp("generated_at").defaultNow().notNull(),
+});
+
+// ─── KPI Health Log ─────────────────────────────────────────────────────────
+
+/** Tracks the health/status of each KPI data source on every fetch */
+export const kpiHealthLog = pgTable("kpi_health_log", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  metricKey: text("metric_key").notNull(),
+  fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+  value: doublePrecision("value"),
+  sourceStatus: text("source_status").notNull(), // "healthy" | "degraded" | "error"
+  errorMessage: text("error_message"),
+  responseTimeMs: integer("response_time_ms"),
+  sourceSystem: text("source_system").notNull(), // "stripe" | "ghl" | "meta" | "local_db" | "computed"
+});
+
+// ─── Workflow Builder ─────────────────────────────────────────────────────────
+
+export const workflows = pgTable("workflows", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  description: text("description"),
+  enabled: boolean("enabled").notNull().default(false),
+  listenMode: boolean("listen_mode").notNull().default(false),
+  nodes: jsonb("nodes").notNull().default([]),
+  edges: jsonb("edges").notNull().default([]),
+  viewport: jsonb("viewport"),
+  createdBy: uuid("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const workflowRuns = pgTable("workflow_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workflowId: uuid("workflow_id").notNull().references(() => workflows.id, { onDelete: "cascade" }),
+  triggerEvent: text("trigger_event").notNull(),
+  triggerData: jsonb("trigger_data"),
+  status: text("status").notNull().default("running"),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+  error: text("error"),
+});
+
+export const workflowRunLogs = pgTable("workflow_run_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  runId: uuid("run_id").notNull().references(() => workflowRuns.id, { onDelete: "cascade" }),
+  nodeId: text("node_id").notNull(),
+  nodeType: text("node_type").notNull(),
+  nodeName: text("node_name"),
+  status: text("status").notNull(),
+  inputData: jsonb("input_data"),
+  outputData: jsonb("output_data"),
+  error: text("error"),
+  durationMs: integer("duration_ms"),
+  executedAt: timestamp("executed_at").defaultNow().notNull(),
+});
+
+export const workflowWebhooks = pgTable("workflow_webhooks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workflowId: uuid("workflow_id").notNull().references(() => workflows.id, { onDelete: "cascade" }),
+  nodeId: text("node_id").notNull(),
+  slug: text("slug").notNull().unique(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ─── GHL Data Independence ────────────────────────────────────────────────────
+
+/** Local copy of GHL pipelines — synced via /api/ghl/sync */
+export const localPipelines = pgTable("local_pipelines", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  stages: jsonb("stages").notNull().default([]),
+  syncedAt: timestamp("synced_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/** Local copy of GHL contacts — synced via /api/ghl/sync */
+export const localContacts = pgTable("local_contacts", {
+  id: text("id").primaryKey(),
+  locationId: text("location_id"),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  fullName: text("full_name"),
+  email: text("email"),
+  phone: text("phone"),
+  tags: jsonb("tags").default([]),
+  source: text("source"),
+  assignedUserId: text("assigned_user_id"),
+  customFields: jsonb("custom_fields").default([]),
+  address: text("address"),
+  city: text("city"),
+  state: text("state"),
+  country: text("country"),
+  companyName: text("company_name"),
+  website: text("website"),
+  dnd: boolean("dnd").default(false),
+  rawData: jsonb("raw_data"),
+  createdAtGhl: timestamp("created_at_ghl"),
+  updatedAtGhl: timestamp("updated_at_ghl"),
+  syncedAt: timestamp("synced_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/** Local copy of GHL opportunities — synced via /api/ghl/sync */
+export const localOpportunities = pgTable("local_opportunities", {
+  id: text("id").primaryKey(),
+  contactId: text("contact_id"),
+  pipelineId: text("pipeline_id"),
+  pipelineStageId: text("pipeline_stage_id"),
+  pipelineName: text("pipeline_name"),
+  stageName: text("stage_name"),
+  name: text("name"),
+  status: text("status"),
+  monetaryValue: doublePrecision("monetary_value"),
+  assignedTo: text("assigned_to"),
+  source: text("source"),
+  contactName: text("contact_name"),
+  contactEmail: text("contact_email"),
+  contactPhone: text("contact_phone"),
+  contactTags: jsonb("contact_tags").default([]),
+  contactCompanyName: text("contact_company_name"),
+  contactDateAdded: timestamp("contact_date_added"),
+  lastStageChangeAt: timestamp("last_stage_change_at"),
+  rawData: jsonb("raw_data"),
+  createdAtGhl: timestamp("created_at_ghl"),
+  updatedAtGhl: timestamp("updated_at_ghl"),
+  syncedAt: timestamp("synced_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/** Local copy of GHL conversations — synced via /api/ghl/sync */
+export const localConversations = pgTable("local_conversations", {
+  id: text("id").primaryKey(),
+  contactId: text("contact_id"),
+  contactName: text("contact_name"),
+  contactEmail: text("contact_email"),
+  contactPhone: text("contact_phone"),
+  lastMessageBody: text("last_message_body"),
+  lastMessageDate: timestamp("last_message_date"),
+  unreadCount: integer("unread_count").default(0),
+  type: text("type"),
+  assignedTo: text("assigned_to"),
+  inbox: boolean("inbox").default(true),
+  starred: boolean("starred").default(false),
+  rawData: jsonb("raw_data"),
+  syncedAt: timestamp("synced_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/** Local copy of GHL messages — synced via /api/ghl/sync */
+export const localMessages = pgTable("local_messages", {
+  id: text("id").primaryKey(),
+  conversationId: text("conversation_id").notNull(),
+  contactId: text("contact_id"),
+  direction: text("direction"),
+  type: text("type"),
+  body: text("body"),
+  subject: text("subject"),
+  status: text("status"),
+  source: text("source"),
+  attachments: jsonb("attachments").default([]),
+  rawData: jsonb("raw_data"),
+  messageDate: timestamp("message_date"),
+  syncedAt: timestamp("synced_at").defaultNow().notNull(),
+});
+
+/** Audit log for GHL sync operations — one row per sync run per entity type */
+export const ghlSyncLog = pgTable("ghl_sync_log", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  entity: text("entity").notNull(),
+  status: text("status").notNull(),
+  totalRecords: integer("total_records"),
+  syncedRecords: integer("synced_records"),
+  error: text("error"),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+});
+
+// ─── KPI System ──────────────────────────────────────────────────────────────
+
+/**
+ * Offer funnels — configurable metric groups mapped to GHL pipelines.
+ * Each funnel tracks leads, calls, demos, audits, proposals, and ad spend
+ * for its assigned pipelines, filtered by campaign name prefix.
+ */
+export const offerFunnels = pgTable("offer_funnels", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  pipelineIds: jsonb("pipeline_ids").notNull().default([]), // string[] of GHL pipeline IDs
+  campaignFilter: text("campaign_filter"), // e.g. "FDF" — matches Meta/TikTok campaign names
+  adPlatform: text("ad_platform").notNull().default("meta"), // "meta" | "tiktok" | "both"
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
+ * Manual expense entries — name + amount + month.
+ * Used for Total Expenses and Net P/L until QuickBooks integration.
+ */
+export const manualExpenses = pgTable("manual_expenses", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  amount: doublePrecision("amount").notNull(),
+  month: text("month").notNull(), // "YYYY-MM" period
+  category: text("category"), // optional grouping
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/**
+ * KPI visibility — which metrics are shown/hidden per section.
+ * Shared across all users (admin-configured, not per-user).
+ */
+export const kpiVisibility = pgTable("kpi_visibility", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  section: text("section").notNull(), // "business" | "management" | "project" | "sales"
+  metricKey: text("metric_key").notNull(),
+  visible: boolean("visible").notNull().default(true),
+  position: integer("position").notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
+ * Daily snapshots for point-in-time KPIs (e.g. open pipeline value) whose source
+ * system keeps no history. Written once a day by /api/cron/snapshots and read
+ * back as an as-of trend. Self-created at runtime via CREATE TABLE IF NOT EXISTS
+ * (see lib/kpi/snapshots.ts) so deploys need no manual migration.
+ */
+export const metricSnapshots = pgTable("metric_snapshots", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  metricKey: text("metric_key").notNull(),
+  capturedDate: date("captured_date").notNull(), // one row per metric per day
+  value: doublePrecision("value").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("metric_snapshots_key_date_uq").on(t.metricKey, t.capturedDate),
+]);

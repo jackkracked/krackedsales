@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { desc } from "drizzle-orm";
+import { desc, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { commentLeads, brandCategories, demoGhlLinks } from "@/lib/db/schema";
+import { commentLeads, brandCategories, demoGhlLinks, proposals, localContacts } from "@/lib/db/schema";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { daysAgo } from "@/lib/utils/date";
 import type { UnifiedContact } from "@/lib/contacts/types";
@@ -231,16 +231,32 @@ export async function GET(req: NextRequest) {
   try {
     const database = db();
 
-    const [allOpps, clRows, catRows, demoRows, convMap] = await Promise.all([
+    const [allOpps, clRows, catRows, demoRows, convMap, proposalRows, dndRows] = await Promise.all([
       getAllOpportunities(),
       database.select().from(commentLeads).orderBy(desc(commentLeads.createdAt)),
       database.select().from(brandCategories),
       database.select({ ghlContactId: demoGhlLinks.ghlContactId }).from(demoGhlLinks),
       getConversationChannelMap(),
+      database.select({ ghlContactId: proposals.ghlContactId, status: proposals.status }).from(proposals).where(isNotNull(proposals.ghlContactId)),
+      database.select({ id: localContacts.id, dnd: localContacts.dnd }).from(localContacts),
     ]);
 
     const catMap = new Map(catRows.map((r) => [r.domain, r.category]));
     const demoContactIds = new Set(demoRows.map((r) => r.ghlContactId).filter(Boolean) as string[]);
+
+    // Proposal status per contact (best status wins: paid > signed > sent > draft)
+    const proposalMap = new Map<string, string>();
+    const statusPriority: Record<string, number> = { paid: 5, signed: 4, partial: 3, sent: 2, draft: 1 };
+    for (const p of proposalRows) {
+      if (!p.ghlContactId) continue;
+      const existing = proposalMap.get(p.ghlContactId);
+      if (!existing || (statusPriority[p.status] ?? 0) > (statusPriority[existing] ?? 0)) {
+        proposalMap.set(p.ghlContactId, p.status);
+      }
+    }
+
+    // DND map
+    const dndMap = new Map(dndRows.filter((r) => r.dnd).map((r) => [r.id, true]));
 
     // ─── GHL contacts: one UnifiedContact per unique contact from opportunities ─
     const seenContactIds = new Set<string>();
@@ -256,13 +272,28 @@ export async function GET(req: NextRequest) {
       const domain = (c.companyName ?? "").replace(/^https?:\/\/(www\.)?/, "").split("/")[0];
       const category = domain ? (catMap.get(domain) as UnifiedContact["brandCategory"] ?? null) : null;
 
+      const daysSince = daysAgo(lastActivityAt);
+      const stageChangeAt = opp.lastStatusChangeAt ?? opp.createdAt;
+      const daysInStage = daysAgo(stageChangeAt);
+      const channels: string[] = [];
+      if (c.email) channels.push("email");
+      if (c.phone) channels.push("sms");
+
+      // Response status derivation
+      let responseStatus: UnifiedContact["responseStatus"] = null;
+      if (daysSince >= 7) responseStatus = "no_response";
+      else if (daysSince <= 2) responseStatus = "replied";
+      else responseStatus = "awaiting_reply";
+
+      const propStatus = proposalMap.get(c.id) ?? null;
+
       ghlUnified.push({
         uid: `ghl_${c.id}`,
         source: "ghl",
         name: c.name ?? "Unknown",
         email: c.email ?? null,
         phone: c.phone ?? null,
-        website: null, // fetched lazily in the modal from notes
+        website: c.website ?? null,
         platform: "lead_form",
         ghlContactId: c.id,
         opportunityId: opp.id,
@@ -276,11 +307,18 @@ export async function GET(req: NextRequest) {
         commentText: null,
         brandCategory: category,
         hasDemo: demoContactIds.has(c.id),
+        hasProposal: !!propStatus,
+        proposalStatus: propStatus,
         awaitingReply: false,
         lastChannel: convMap.get(c.id) ?? null,
-        daysSinceLastTouch: daysAgo(lastActivityAt),
+        daysSinceLastTouch: daysSince,
+        daysInCurrentStage: daysInStage,
         lastActivityAt,
         createdAt,
+        assignedTo: opp.assignedTo ?? null,
+        dnd: dndMap.has(c.id),
+        responseStatus,
+        reachableChannels: channels,
       });
     }
 
@@ -290,6 +328,11 @@ export async function GET(req: NextRequest) {
       const lastActivityAt = cl.contactedAt?.toISOString() ?? createdAt;
       const domain = (cl.website ?? "").replace(/^https?:\/\/(www\.)?/, "").split("/")[0];
       const category = domain ? (catMap.get(domain) as UnifiedContact["brandCategory"] ?? null) : null;
+
+      const clDaysSince = daysAgo(lastActivityAt);
+      const clChannels: string[] = [];
+      if (cl.email) clChannels.push("email");
+      if (cl.phone) clChannels.push("sms");
 
       return {
         uid: `cl_${cl.id}`,
@@ -311,11 +354,18 @@ export async function GET(req: NextRequest) {
         commentText: cl.commentText,
         brandCategory: category,
         hasDemo: false,
-        awaitingReply: false,
+        hasProposal: false,
+        proposalStatus: null,
+        awaitingReply: !cl.contactedAt,
         lastChannel: null,
-        daysSinceLastTouch: daysAgo(lastActivityAt),
+        daysSinceLastTouch: clDaysSince,
+        daysInCurrentStage: null,
         lastActivityAt,
         createdAt,
+        assignedTo: null,
+        dnd: false,
+        responseStatus: !cl.contactedAt ? "awaiting_reply" : clDaysSince >= 7 ? "no_response" : "replied",
+        reachableChannels: clChannels,
       };
     });
 

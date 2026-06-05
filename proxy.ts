@@ -17,9 +17,12 @@ const PUBLIC_PATHS = [
   "/login",
   "/terms",
   "/privacy",
+  "/p/",                        // Public proposal signing pages — no auth required
+  "/api/proposals/public/",    // API called by the public signing page — no auth required
   "/api/auth/login",
   "/api/cron/",    // Vercel cron runner — routes validate CRON_SECRET themselves
   "/api/webhooks/",
+  "/api/stripe/webhook", // Stripe webhook — verifies its own stripe-signature, must not require a session cookie
   "/api/meta/subscribe-page",
   "/api/tiktok/auth",   // TikTok OAuth start + callback (unauthenticated redirects)
   "/api/meta/auth",     // Meta OAuth start + callback (unauthenticated redirects)
@@ -29,8 +32,10 @@ const PUBLIC_PATHS = [
   "/api/ghl/opportunities/no-show-calls",
   "/api/ghl/opportunities/no-show-backfill",
   "/api/ghl/opportunities/demo-in-progress",
+  "/api/workflows/webhook/",
   "/_next/",       // CSS, JS, fonts — must load before auth check
   "/favicon.ico",
+  "/kracked-logo.png", // Used in transactional emails — must be publicly accessible
   "/tiktok",       // TikTok domain verification files
 ];
 
@@ -39,6 +44,11 @@ export function proxy(request: NextRequest) {
 
   // Allow public paths through
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
+    return NextResponse.next();
+  }
+
+  // Allow client-facing proposal actions — signing and PDF download are unauthenticated
+  if (/^\/api\/proposals\/[^/]+\/(sign|pdf)$/.test(pathname)) {
     return NextResponse.next();
   }
 

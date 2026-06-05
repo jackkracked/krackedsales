@@ -7,9 +7,12 @@ import {
   RefreshCw, Plus, Pencil, Trash2, Check, Globe, Phone, Mail,
   Tag, TrendingUp, GitMerge, Calendar, Star, AlertCircle, ArrowDown,
   ArrowUp, FileText, MessageSquare, ChevronDown, ChevronLeft, ChevronRight,
+  Receipt, Send, PenLine, DollarSign,
 } from "lucide-react";
 import { MessageComposer } from "@/components/shared/message-composer";
+import { ChatBubble, SmartBanner, groupMessages } from "@/components/shared/chat-bubble";
 import { cn } from "@/lib/utils/cn";
+import { Avatar } from "@/components/ui/avatar";
 import { formatDate, formatDateTime, relativeTime } from "@/lib/utils/date";
 import { parseQualificationNote, isQualificationNote, looksLikeUrl, cleanUrl } from "@/lib/utils/url";
 import type { UnifiedContact, TimelineEvent } from "@/lib/contacts/types";
@@ -20,10 +23,11 @@ interface CustomField { id: string; contactUid: string; fieldName: string; field
 interface GHLNote { id: string; body: string; dateAdded?: string; createdAt?: string; }
 interface GHLMessage { id: string; emailMessageId?: string; body?: string; direction?: "inbound" | "outbound"; messageType?: string; dateAdded: string; meta?: { email?: { subject?: string; messageIds?: string[] } }; }
 
-type RightTab = "timeline" | "notes" | "qualification";
+type RightTab = "timeline" | "notes" | "qualification" | "proposals";
 
 const RIGHT_TABS: Array<{ id: RightTab; label: string; icon: React.ElementType; ghlOnly?: boolean }> = [
   { id: "timeline",      label: "Timeline",      icon: Clock },
+  { id: "proposals",     label: "Proposals",     icon: Receipt,       ghlOnly: true },
   { id: "notes",         label: "Notes",         icon: StickyNote,    ghlOnly: true },
   { id: "qualification", label: "Qualification", icon: ClipboardList, ghlOnly: true },
 ];
@@ -36,13 +40,10 @@ const CAT_CONFIG: Record<string, { label: string; className: string }> = {
   other:     { label: "Other",   className: "bg-muted text-muted-foreground" },
 };
 
-function avatarColor(name: string): string {
-  const p = ["bg-violet-100 text-violet-700","bg-sky-100 text-sky-700","bg-amber-100 text-amber-700","bg-rose-100 text-rose-700","bg-emerald-100 text-emerald-700","bg-orange-100 text-orange-700","bg-indigo-100 text-indigo-700","bg-teal-100 text-teal-700"];
-  let h = 0; for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
-  return p[Math.abs(h) % p.length];
-}
 
 // ─── Left panel: contact info + pipeline + tags + custom fields ────────────────
+
+interface ContactProposalSummary { ltv: number; paidCount: number; }
 
 function LeftPanel({ contact }: { contact: UnifiedContact }) {
   const [editingField, setEditingField] = useState<string | null>(null);
@@ -51,6 +52,17 @@ function LeftPanel({ contact }: { contact: UnifiedContact }) {
   const [newName, setNewName] = useState("");
   const [newValue, setNewValue] = useState("");
   const queryClient = useQueryClient();
+
+  const { data: proposalSummary } = useQuery<ContactProposalSummary>({
+    queryKey: ["contact-proposals-summary", contact.uid],
+    queryFn: async () => {
+      const res = await fetch(`/api/contacts/${contact.uid}/proposals`);
+      const json = await res.json();
+      return { ltv: json.ltv ?? 0, paidCount: json.paidCount ?? 0 };
+    },
+    enabled: contact.source === "ghl",
+    staleTime: 5 * 60 * 1000,
+  });
 
   // Fetch website from qualification note for GHL contacts
   const { data: notesData } = useQuery<{ notes: GHLNote[] }>({
@@ -172,6 +184,21 @@ function LeftPanel({ contact }: { contact: UnifiedContact }) {
           </section>
         )}
 
+        {/* LTV */}
+        {proposalSummary && proposalSummary.ltv > 0 && (
+          <section>
+            <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em] mb-2.5">Lifetime Value</p>
+            <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/40 rounded-[8px] px-3 py-2.5">
+              <p className="text-lg font-bold text-emerald-700 dark:text-emerald-400 tabular-nums leading-none">
+                {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(proposalSummary.ltv)}
+              </p>
+              <p className="text-[11px] text-emerald-600/70 dark:text-emerald-500/70 mt-0.5">
+                {proposalSummary.paidCount} paid proposal{proposalSummary.paidCount !== 1 ? "s" : ""}
+              </p>
+            </div>
+          </section>
+        )}
+
         {/* Comment context */}
         {contact.commentText && (
           <section>
@@ -250,15 +277,18 @@ function LeftPanel({ contact }: { contact: UnifiedContact }) {
 function TLIcon({ type }: { type: TimelineEvent["type"] }) {
   const cls = "w-3.5 h-3.5";
   const map: Record<TimelineEvent["type"], React.ReactNode> = {
-    lead_captured:    <Star        className={cn(cls, "text-amber-500")} />,
-    stage_change:     <GitMerge   className={cn(cls, "text-primary")} />,
-    message_sent:     <ArrowUp    className={cn(cls, "text-muted-foreground")} />,
-    message_received: <ArrowDown  className={cn(cls, "text-primary")} />,
-    note_added:       <FileText   className={cn(cls, "text-slate-500")} />,
-    demo_created:     <Calendar   className={cn(cls, "text-emerald-500")} />,
-    email_sent:       <Mail       className={cn(cls, "text-muted-foreground")} />,
-    email_received:   <Mail       className={cn(cls, "text-primary")} />,
-    contacted:        <MessageSquare className={cn(cls, "text-emerald-500")} />,
+    lead_captured:    <Star           className={cn(cls, "text-amber-500")} />,
+    stage_change:     <GitMerge       className={cn(cls, "text-primary")} />,
+    message_sent:     <ArrowUp        className={cn(cls, "text-muted-foreground")} />,
+    message_received: <ArrowDown      className={cn(cls, "text-primary")} />,
+    note_added:       <FileText       className={cn(cls, "text-slate-500")} />,
+    demo_created:     <Calendar       className={cn(cls, "text-emerald-500")} />,
+    email_sent:       <Mail           className={cn(cls, "text-muted-foreground")} />,
+    email_received:   <Mail           className={cn(cls, "text-primary")} />,
+    contacted:        <MessageSquare  className={cn(cls, "text-emerald-500")} />,
+    proposal_sent:    <Send           className={cn(cls, "text-blue-500")} />,
+    proposal_signed:  <PenLine        className={cn(cls, "text-violet-500")} />,
+    proposal_paid:    <DollarSign     className={cn(cls, "text-emerald-500")} />,
   };
   return <>{map[type] ?? <AlertCircle className={cn(cls, "text-muted-foreground")} />}</>;
 }
@@ -266,6 +296,7 @@ function TLIcon({ type }: { type: TimelineEvent["type"] }) {
 // ─── Right tabs ────────────────────────────────────────────────────────────────
 
 function TimelineTab({ contact }: { contact: UnifiedContact }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
   // Pass the contact's known createdAt as fallback for lead_captured timestamp
   const createdAt = encodeURIComponent(contact.createdAt);
   const { data, isLoading } = useQuery<{ events: TimelineEvent[] }>({
@@ -276,6 +307,13 @@ function TimelineTab({ contact }: { contact: UnifiedContact }) {
 
   // Show oldest-first (chronological) — do NOT reverse
   const events = data?.events ?? [];
+
+  // Auto-scroll to bottom to show newest activity
+  useEffect(() => {
+    if (events.length > 0 && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [events.length]);
 
   if (isLoading) {
     return (
@@ -298,7 +336,7 @@ function TimelineTab({ contact }: { contact: UnifiedContact }) {
   }
 
   return (
-    <div className="p-4 overflow-y-auto flex-1">
+    <div ref={scrollRef} className="p-4 overflow-y-auto flex-1">
       <div className="relative pl-8">
         <div className="absolute left-3 top-3 bottom-3 w-px bg-border/50" />
         <div className="space-y-5">
@@ -470,8 +508,16 @@ function EmailCard({ message }: { message: GHLMessage }) {
   );
 }
 
-function MessagesTab({ contact }: { contact: UnifiedContact }) {
+function MessagesTab({ contact, onFieldSaved }: { contact: UnifiedContact; onFieldSaved?: (field: string, value: string) => void }) {
+  const queryClient = useQueryClient();
   const endRef = useRef<HTMLDivElement>(null);
+
+  function handleFieldSaved(field: string, value: string) {
+    // Refresh the contact data on the left panel
+    queryClient.invalidateQueries({ queryKey: ["contact-detail", contact.uid] });
+    queryClient.invalidateQueries({ queryKey: ["contacts"] });
+    onFieldSaved?.(field, value);
+  }
 
   const { data: convData, isLoading: convLoading } = useQuery<{ conversations: Array<{ id: string }> }>({
     queryKey: ["contact-conv-id", contact.ghlContactId],
@@ -512,26 +558,39 @@ function MessagesTab({ contact }: { contact: UnifiedContact }) {
     );
   }
 
+  const regularMessages = messages.filter((m) => !(m.messageType ?? "").includes("EMAIL"));
+  const groupedRegular = groupMessages(regularMessages);
+  const groupedMap = new Map(groupedRegular.map((g) => [g.msg.id, g]));
+
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
+      <div className="flex-1 overflow-y-auto px-4 py-4">
+        {/* Smart contact enrichment banner */}
+        {messages.length > 0 && contact.ghlContactId && (
+          <SmartBanner messages={messages} contactId={contact.ghlContactId} onFieldSaved={(f, v) => handleFieldSaved(f, v)} />
+        )}
+
         {!messages.length
           ? <EmptyState icon={MessageCircle} message="No messages yet" />
           : messages.map((m) => {
-              const inbound = m.direction === "inbound";
               const isEmail = (m.messageType ?? "").includes("EMAIL");
 
               if (isEmail) {
                 return <EmailCard key={m.id} message={m} />;
               }
 
+              const grouped = groupedMap.get(m.id);
               return (
-                <div key={m.id} className={cn("flex", inbound ? "justify-start" : "justify-end")}>
-                  <div className={cn("max-w-[82%] px-3 py-2 rounded-[10px] text-sm", inbound ? "bg-muted/70 text-foreground" : "bg-primary text-primary-foreground")}>
-                    <p className="leading-snug whitespace-pre-wrap">{m.body}</p>
-                    <p className={cn("text-[10px] mt-1 opacity-50", inbound ? "" : "text-right")}>{formatDateTime(m.dateAdded)}</p>
-                  </div>
-                </div>
+                <ChatBubble
+                  key={m.id}
+                  body={m.body ?? ""}
+                  direction={m.direction === "inbound" ? "inbound" : "outbound"}
+                  dateAdded={m.dateAdded}
+                  isGroupedWithPrev={grouped?.isGroupedWithPrev}
+                  isGroupedWithNext={grouped?.isGroupedWithNext}
+                  contactId={contact.ghlContactId ?? undefined}
+                  onFieldSaved={(f, v) => handleFieldSaved(f, v)}
+                />
               );
             })
         }
@@ -646,6 +705,153 @@ function QualificationTab({ contact }: { contact: UnifiedContact }) {
   );
 }
 
+// ─── Proposals tab ────────────────────────────────────────────────────────────
+
+type ProposalStatus = "draft" | "sent" | "signed" | "paid" | "failed" | "void" | "overdue";
+
+interface ProposalRow {
+  id: string;
+  title: string;
+  status: string;
+  totalAmount: number;
+  paymentStructure: string;
+  sentAt: string | null;
+  signedAt: string | null;
+  paidAt: string | null;
+  createdAt: string;
+}
+
+interface InstalmentRow {
+  id: string;
+  instalmentNumber: number;
+  amount: number;
+  status: string;
+  dueDate: string;
+  paidAt: string | null;
+}
+
+interface ContactProposalsData {
+  proposals: ProposalRow[];
+  instalments: Record<string, InstalmentRow[]>;
+  ltv: number;
+  paidCount: number;
+}
+
+const STATUS_STYLES: Record<string, string> = {
+  draft:    "bg-muted text-muted-foreground",
+  sent:     "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400",
+  signed:   "bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-400",
+  paid:     "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400",
+  failed:   "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-400",
+  void:     "bg-muted text-muted-foreground",
+  overdue:  "bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-400",
+};
+
+function fmtMoney(n: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+}
+
+function ProposalsTab({ contact }: { contact: UnifiedContact }) {
+  const { data, isLoading } = useQuery<ContactProposalsData>({
+    queryKey: ["contact-proposals", contact.uid],
+    queryFn: () => fetch(`/api/contacts/${contact.uid}/proposals`).then((r) => r.json()),
+    enabled: contact.source === "ghl",
+    staleTime: 2 * 60 * 1000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="p-4 space-y-3">
+        {Array.from({ length: 3 }, (_, i) => (
+          <div key={i} className="h-20 rounded-[8px] bg-muted animate-pulse" style={{ animationDelay: `${i * 80}ms` }} />
+        ))}
+      </div>
+    );
+  }
+
+  const proposals = data?.proposals ?? [];
+
+  if (!proposals.length) {
+    return <EmptyState icon={Receipt} message="No proposals yet" />;
+  }
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
+      {/* LTV summary bar */}
+      {(data?.ltv ?? 0) > 0 && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-emerald-50/60 dark:bg-emerald-950/20 border-b border-emerald-100 dark:border-emerald-900/30 shrink-0">
+          <DollarSign className="w-4 h-4 text-emerald-600 shrink-0" />
+          <div>
+            <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
+              {fmtMoney(data!.ltv)} lifetime value
+            </p>
+            <p className="text-[11px] text-emerald-600/70">{data!.paidCount} paid proposal{data!.paidCount !== 1 ? "s" : ""}</p>
+          </div>
+        </div>
+      )}
+
+      <div className="p-4 space-y-3">
+        {proposals.map((p) => {
+          const instalments = data?.instalments?.[p.id] ?? [];
+          const statusStyle = STATUS_STYLES[p.status] ?? STATUS_STYLES.draft;
+
+          return (
+            <div key={p.id} className="border border-border rounded-[10px] overflow-hidden bg-card">
+              <div className="px-3.5 py-3 flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide shrink-0", statusStyle)}>
+                      {p.status}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground capitalize">
+                      {p.paymentStructure}
+                    </span>
+                  </div>
+                  <p className="text-sm font-semibold text-foreground truncate leading-snug">{p.title}</p>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5">
+                    {p.sentAt && (
+                      <span className="text-[11px] text-muted-foreground">Sent {formatDate(p.sentAt)}</span>
+                    )}
+                    {p.signedAt && (
+                      <span className="text-[11px] text-muted-foreground">Signed {formatDate(p.signedAt)}</span>
+                    )}
+                    {p.paidAt && (
+                      <span className="text-[11px] text-emerald-600">Paid {formatDate(p.paidAt)}</span>
+                    )}
+                  </div>
+                </div>
+                <p className="text-base font-bold text-foreground tabular-nums shrink-0">{fmtMoney(p.totalAmount)}</p>
+              </div>
+
+              {/* Instalments breakdown */}
+              {instalments.length > 1 && (
+                <div className="border-t border-border/60 px-3.5 py-2 space-y-1 bg-muted/20">
+                  {instalments.map((inst) => (
+                    <div key={inst.id} className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">
+                        Instalment {inst.instalmentNumber} · due {formatDate(inst.dueDate)}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={cn(
+                          "text-[10px] font-medium",
+                          inst.status === "paid" ? "text-emerald-600" : "text-muted-foreground"
+                        )}>
+                          {inst.status === "paid" ? `Paid ${inst.paidAt ? formatDate(inst.paidAt) : ""}` : "Pending"}
+                        </span>
+                        <span className="font-medium tabular-nums">{fmtMoney(inst.amount)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function EmptyState({ icon: Icon, message }: { icon: React.ElementType; message: string }) {
   return (
     <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
@@ -672,15 +878,33 @@ export function ContactModal({
   queueIndex?: number;
   onNavigate?: (index: number) => void;
 }) {
+  const queryClient = useQueryClient();
   const isGHL = contact.source === "ghl";
   const tabs = RIGHT_TABS.filter((t) => !t.ghlOnly || isGHL);
   const [activeTab, setActiveTab] = useState<RightTab>(initialTab && tabs.find((t) => t.id === initialTab) ? initialTab : tabs[0].id);
+  const [fieldOverrides, setFieldOverrides] = useState<Record<string, string>>({});
+  const hasSavedRef = useRef(false);
+
+  // Build a contact with overrides applied so the left panel updates instantly
+  const enrichedContact = { ...contact, ...fieldOverrides } as UnifiedContact;
+
+  function handleFieldSaved(field: string, value: string) {
+    setFieldOverrides((prev) => ({ ...prev, [field]: value }));
+    hasSavedRef.current = true;
+  }
+
+  function handleClose() {
+    if (hasSavedRef.current) {
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+    }
+    onClose();
+  }
 
   const inQueue = queue && queue.length >= 2 && queueIndex !== undefined;
 
   useEffect(() => {
     const fn = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { onClose(); return; }
+      if (e.key === "Escape") { handleClose(); return; }
       if (!inQueue || !onNavigate) return;
       const target = document.activeElement;
       const isTyping = target instanceof HTMLElement &&
@@ -694,7 +918,7 @@ export function ContactModal({
   }, [onClose, inQueue, onNavigate, queueIndex, queue]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.35)" }} onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.35)" }} onClick={handleClose}>
       <div
         className="bg-card border border-border rounded-[14px] shadow-2xl flex flex-col overflow-hidden"
         style={{ width: "min(1080px, calc(100vw - 32px))", height: "min(680px, calc(100vh - 32px))" }}
@@ -703,9 +927,7 @@ export function ContactModal({
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <div className={cn("w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0", avatarColor(contact.name))}>
-              {contact.name.trim()[0]?.toUpperCase() ?? "?"}
-            </div>
+            <Avatar name={contact.name} size={40} />
             <div className="min-w-0">
               <p className="text-sm font-semibold text-foreground truncate">{contact.name}</p>
               <div className="flex items-center gap-2 mt-0.5 flex-wrap">
@@ -749,7 +971,7 @@ export function ContactModal({
               </button>
             </div>
           )}
-          <button onClick={onClose} className="p-1.5 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors ml-1 shrink-0">
+          <button onClick={handleClose} className="p-1.5 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors ml-1 shrink-0">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -757,21 +979,21 @@ export function ContactModal({
         {/* Three-pane body: contact info | detail tabs | messages */}
         <div className="flex flex-1 min-h-0">
           {/* Left: static contact info */}
-          <LeftPanel contact={contact} />
+          <LeftPanel contact={enrichedContact} />
 
           {/* Middle: tabbed detail content */}
           <div className="flex flex-col flex-[2_2_0] min-w-0 min-h-0 border-r border-border">
             {/* Tab bar */}
-            <div className="flex items-center border-b border-border px-4 shrink-0">
+            <div className="flex items-center justify-evenly border-b border-border shrink-0">
               {tabs.map((t) => {
                 const Icon = t.icon;
                 const active = activeTab === t.id;
                 return (
                   <button key={t.id} onClick={() => setActiveTab(t.id)}
-                    className={cn("flex items-center gap-1.5 px-1 py-3 text-xs font-medium border-b-2 mr-5 last:mr-0 transition-colors whitespace-nowrap",
+                    className={cn("flex items-center justify-center flex-1 py-3 border-b-2 transition-colors",
                       active ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
                     )}>
-                    <Icon className="w-3.5 h-3.5" />{t.label}
+                    <Icon className="w-4 h-4" title={t.label} />
                   </button>
                 );
               })}
@@ -780,6 +1002,7 @@ export function ContactModal({
             {/* Tab content */}
             <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
               {activeTab === "timeline"      && <TimelineTab      contact={contact} />}
+              {activeTab === "proposals"     && <ProposalsTab     contact={contact} />}
               {activeTab === "notes"         && <NotesTab         contact={contact} />}
               {activeTab === "qualification" && <QualificationTab contact={contact} />}
             </div>
@@ -788,7 +1011,7 @@ export function ContactModal({
           {/* Right: messages always visible */}
           <div className="flex flex-col flex-[3_3_0] min-w-0 min-h-0">
             {contact.ghlContactId
-              ? <MessagesTab contact={contact} />
+              ? <MessagesTab contact={contact} onFieldSaved={handleFieldSaved} />
               : <EmptyState icon={MessageCircle} message="No GHL contact linked" />
             }
           </div>
