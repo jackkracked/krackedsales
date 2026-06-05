@@ -32,7 +32,8 @@ export interface QueueItem {
   staleDays: number;
   contactId?: string;   // GHL contactId if available
   recipientId?: string; // Meta: participant ID needed for sending
-  assignedTo?: string;  // Assigned rep name or ID
+  assignedTo?: string;  // Assigned rep display name (resolved)
+  assignedToId?: string; // Raw GHL user id of the assigned rep (for filtering)
 }
 
 interface GHLConversation {
@@ -133,6 +134,7 @@ export async function GET(req: NextRequest) {
         staleDays: staleDays(updatedAt),
         contactId: conv.contactId,
         assignedTo: conv.assignedTo ? (ghlUserMap.get(conv.assignedTo) ?? undefined) : undefined,
+        assignedToId: conv.assignedTo ?? undefined,
       });
     }
   } catch (err) {
@@ -215,5 +217,18 @@ export async function GET(req: NextRequest) {
   // Rank: stalest first (most urgent)
   items.sort((a, b) => b.staleDays - a.staleDays);
 
-  return NextResponse.json({ items, total: items.length });
+  // Personalised dashboard view (scope=mine): a rep sees only conversations
+  // assigned to them; admins still see everything (full overview). The full
+  // inbox page does NOT pass scope=mine, so it is unaffected.
+  // Reps without a linked GHL user id fall back to all (can't scope safely).
+  // TODO(phase 2): also include conversations the rep last responded to, once we
+  // capture message authors (see lastRespondedBy plan).
+  const scope = req.nextUrl.searchParams.get("scope");
+  const isRep = user.role !== "admin";
+  const visibleItems =
+    scope === "mine" && isRep && user.ghlUserId
+      ? items.filter((it) => it.assignedToId === user.ghlUserId)
+      : items;
+
+  return NextResponse.json({ items: visibleItems, total: visibleItems.length });
 }

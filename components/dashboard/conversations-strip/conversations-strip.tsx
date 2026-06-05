@@ -205,7 +205,8 @@ export function ConversationsStrip() {
 
   const { data, isLoading } = useQuery<{ items: QueueItem[]; total: number }>({
     queryKey: ["inbox-queue-dashboard"],
-    queryFn: () => fetch("/api/inbox/queue").then((r) => r.json()),
+    // scope=mine → reps see only their assigned conversations; admins see all.
+    queryFn: () => fetch("/api/inbox/queue?scope=mine").then((r) => r.json()),
     staleTime: 60_000,
     refetchInterval: 60_000,
   });
