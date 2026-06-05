@@ -13,6 +13,7 @@ import { MessageComposer } from "@/components/shared/message-composer";
 import { ChatBubble, SmartBanner, groupMessages } from "@/components/shared/chat-bubble";
 import { cn } from "@/lib/utils/cn";
 import { Avatar } from "@/components/ui/avatar";
+import { DemoLinksRow } from "@/components/shared/demo-links-row";
 import { formatDate, formatDateTime, relativeTime } from "@/lib/utils/date";
 import { parseQualificationNote, isQualificationNote, looksLikeUrl, cleanUrl } from "@/lib/utils/url";
 import type { UnifiedContact, TimelineEvent } from "@/lib/contacts/types";
@@ -180,6 +181,7 @@ function LeftPanel({ contact }: { contact: UnifiedContact }) {
                   <span className="text-xs text-foreground/80">${contact.monetaryValue.toLocaleString()}</span>
                 </div>
               )}
+              <DemoLinksRow contactId={contact.ghlContactId} />
             </div>
           </section>
         )}

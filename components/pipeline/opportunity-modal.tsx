@@ -18,6 +18,7 @@ import { formatDateTime, relativeTime } from "@/lib/utils/date";
 import { cn } from "@/lib/utils/cn";
 import { cleanUrl, looksLikeUrl, isQualificationNote } from "@/lib/utils/url";
 import { useStageHistoryStore, findStageChange } from "@/store/stage-history-store";
+import { DemoLinksRow } from "@/components/shared/demo-links-row";
 import type { GHLOpportunity, GHLMessage } from "@/lib/ghl/types";
 import { MessageBody } from "@/components/shared/message-body";
 import { ChatBubble, SmartBanner, groupMessages } from "@/components/shared/chat-bubble";
@@ -807,6 +808,9 @@ export function OpportunityModal({
             <p className="text-xs text-muted-foreground mt-0.5">
               Created {relativeTime(opportunity.createdAt)}
             </p>
+            <div className="mt-2">
+              <DemoLinksRow contactId={opportunity.contact?.id} />
+            </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <span
