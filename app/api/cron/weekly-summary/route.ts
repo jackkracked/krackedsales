@@ -8,7 +8,8 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import {
   startOfWeek, endOfWeek, subWeeks, format,
 } from "date-fns";
-import { ghl, locationId } from "@/lib/ghl/client";
+import { locationId } from "@/lib/ghl/client";
+import { fetchAllOpportunities } from "@/lib/ghl/paginate";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 
 export const dynamic = "force-dynamic";
@@ -71,11 +72,9 @@ export async function POST(req: NextRequest) {
   // Fetch GHL opportunities
   let allOpps: GHLOpportunity[] = [];
   try {
-    const locId = locationId();
-    const res = await ghl.get<{ opportunities: GHLOpportunity[] }>(
-      `/opportunities/search?location_id=${locId}&limit=100&page=1`
+    allOpps = await fetchAllOpportunities(
+      `/opportunities/search?location_id=${locationId()}`
     );
-    allOpps = res.opportunities ?? [];
   } catch {}
 
   const newLeads = allOpps.filter(

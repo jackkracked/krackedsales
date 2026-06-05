@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { calls, repTargets, users, proposals, proposalInstalments, commissionSettings } from "@/lib/db/schema";
 import { and, eq, gte, lte, isNotNull } from "drizzle-orm";
-import { ghl, locationId } from "@/lib/ghl/client";
+import { locationId } from "@/lib/ghl/client";
+import { fetchAllOpportunities } from "@/lib/ghl/paginate";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 import { startOfMonth, endOfMonth, startOfDay, endOfDay, subDays, startOfWeek, startOfYear, format } from "date-fns";
 
@@ -55,10 +56,10 @@ export async function GET(req: NextRequest) {
           )
       : Promise.resolve([]),
     ghlUserId
-      ? ghl.get<{ opportunities: GHLOpportunity[] }>(
-          `/opportunities/search?location_id=${locationId()}&assigned_to=${ghlUserId}&limit=100`
+      ? fetchAllOpportunities(
+          `/opportunities/search?location_id=${locationId()}&assigned_to=${ghlUserId}`
         )
-      : Promise.resolve({ opportunities: [] }),
+      : Promise.resolve([] as GHLOpportunity[]),
     userId
       ? db()
           .select({ commissionPct: users.commissionPct })
@@ -75,7 +76,7 @@ export async function GET(req: NextRequest) {
 
   const callLogs = callsRows.status === "fulfilled" ? callsRows.value : [];
   const opps: GHLOpportunity[] = oppsResult.status === "fulfilled"
-    ? oppsResult.value.opportunities ?? []
+    ? oppsResult.value ?? []
     : [];
 
   const commissionPct = repRow.status === "fulfilled" && repRow.value[0]

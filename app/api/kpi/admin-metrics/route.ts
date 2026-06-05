@@ -2,17 +2,15 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { softwareCosts, calls } from "@/lib/db/schema";
 import { and, eq, gte, lte } from "drizzle-orm";
-import { ghl, locationId } from "@/lib/ghl/client";
+import { locationId } from "@/lib/ghl/client";
+import { fetchAllOpportunities } from "@/lib/ghl/paginate";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 import { startOfMonth, endOfMonth } from "date-fns";
 
 async function getOpportunities(): Promise<GHLOpportunity[]> {
-  // Single page fetch — enough for monthly KPI calculations on most accounts
-  const locId = locationId();
-  const data = await ghl.get<{ opportunities: GHLOpportunity[] }>(
-    `/opportunities/search?location_id=${locId}&limit=100`
-  );
-  return data.opportunities ?? [];
+  // Fetch EVERY opportunity, not just the first 100 — monthly KPI counts
+  // (cash, leads) must include the whole account or they undercount.
+  return fetchAllOpportunities(`/opportunities/search?location_id=${locationId()}`);
 }
 
 /**

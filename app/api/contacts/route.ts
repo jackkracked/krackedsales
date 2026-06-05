@@ -3,6 +3,7 @@ import { desc, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { commentLeads, brandCategories, demoGhlLinks, proposals, localContacts } from "@/lib/db/schema";
 import { ghl, locationId } from "@/lib/ghl/client";
+import { fetchAllOpportunities } from "@/lib/ghl/paginate";
 import { daysAgo } from "@/lib/utils/date";
 import type { UnifiedContact } from "@/lib/contacts/types";
 import type { GHLOpportunity, GHLPipeline } from "@/lib/ghl/types";
@@ -184,17 +185,9 @@ async function getAllOpportunities(): Promise<EnrichedOpp[]> {
       }
     }
 
-    // Fetch all opportunities (across all pipelines), paginated
-    const allOpps: GHLOpportunity[] = [];
-    const MAX_PAGES = 20;
-    for (let page = 1; page <= MAX_PAGES; page++) {
-      const data = await ghl.get<{ opportunities: GHLOpportunity[]; meta?: { total?: number } }>(
-        `/opportunities/search?location_id=${locId}&limit=100&page=${page}`
-      );
-      const batch = data.opportunities ?? [];
-      allOpps.push(...batch);
-      if (batch.length < 100) break;
-    }
+    // Fetch EVERY opportunity across all pipelines (all pages) — the contacts
+    // list and its total count must not silently cap at the first N.
+    const allOpps = await fetchAllOpportunities(`/opportunities/search?location_id=${locId}`);
 
     _opps = allOpps.map((o) => ({
       ...o,

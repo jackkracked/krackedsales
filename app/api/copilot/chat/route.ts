@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth/session";
 import { GoogleGenerativeAI, SchemaType, type Tool, type Part } from "@google/generative-ai";
 import { ghl, locationId } from "@/lib/ghl/client";
+import { fetchAllOpportunities } from "@/lib/ghl/paginate";
 import { clickup, demoListId } from "@/lib/clickup/client";
 import { mapStageToBucket } from "@/lib/utils/demo-stage";
 import type { ClickUpTasksResponse } from "@/lib/clickup/types";
@@ -176,10 +177,10 @@ async function getPipeline() {
     const results = await Promise.all(
       pipelines.slice(0, 3).map(async (p) => {
         try {
-          const oppsData = await ghl.get<{
-            opportunities: Array<{ pipelineStageId: string; status: string; monetaryValue?: number }>;
-          }>(`/opportunities/search?location_id=${locationId()}&pipeline_id=${p.id}&limit=100`);
-          const open = (oppsData.opportunities ?? []).filter((o) => o.status === "open");
+          const opps = await fetchAllOpportunities(
+            `/opportunities/search?location_id=${locationId()}&pipeline_id=${p.id}`,
+          );
+          const open = opps.filter((o) => o.status === "open");
           const stageCounts = new Map<string, number>();
           let totalValue = 0;
           for (const o of open) {

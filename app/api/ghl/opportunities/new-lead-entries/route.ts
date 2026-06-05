@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ghl, locationId } from "@/lib/ghl/client";
+import { fetchAllOpportunities } from "@/lib/ghl/paginate";
 import { db } from "@/lib/db";
 import { pipelineStageEvents } from "@/lib/db/schema";
 import { and, eq, gte, lte, ilike } from "drizzle-orm";
@@ -63,29 +64,15 @@ export async function GET(req: NextRequest) {
 
     // Fetch pipeline stages and all current opps in one pass to avoid N+1 calls.
     const loc = locationId();
-    const [pipelinesData, ...oppPages] = await Promise.all([
+    // Fetch pipeline stages and EVERY opportunity in the pipeline (all pages).
+    const [pipelinesData, allOpps] = await Promise.all([
       ghl.get<{ pipelines: GHLPipeline[] }>(`/opportunities/pipelines?locationId=${loc}`),
-      ghl.get<GHLOpportunitiesResponse>(
-        `/opportunities/search?location_id=${loc}&pipeline_id=${pipelineId}&limit=100&page=1`
-      ),
+      fetchAllOpportunities(`/opportunities/search?location_id=${loc}&pipeline_id=${pipelineId}`),
     ]);
 
     const stageMap: Record<string, string> = {};
     const pipeline = pipelinesData.pipelines?.find((p) => p.id === pipelineId);
     for (const s of pipeline?.stages ?? []) stageMap[s.id] = s.name;
-
-    const allOpps: GHLOpportunity[] = [...(oppPages[0]?.opportunities ?? [])];
-    // Paginate if needed
-    let page = 2;
-    while (oppPages[0]?.opportunities?.length === 100) {
-      const res = await ghl.get<GHLOpportunitiesResponse>(
-        `/opportunities/search?location_id=${loc}&pipeline_id=${pipelineId}&limit=100&page=${page}`
-      );
-      const batch = res.opportunities ?? [];
-      allOpps.push(...batch);
-      if (batch.length < 100) break;
-      page++;
-    }
 
     const oppMap = new Map(allOpps.map((o) => [o.id, o]));
 
