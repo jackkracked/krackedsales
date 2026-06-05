@@ -188,11 +188,11 @@ function LeftPanel({ contact }: { contact: UnifiedContact }) {
         {proposalSummary && proposalSummary.ltv > 0 && (
           <section>
             <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em] mb-2.5">Lifetime Value</p>
-            <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/40 rounded-[8px] px-3 py-2.5">
-              <p className="text-lg font-bold text-emerald-700 dark:text-emerald-400 tabular-nums leading-none">
+            <div className="bg-emerald-50 border border-emerald-200/60 rounded-[8px] px-3 py-2.5">
+              <p className="text-lg font-bold text-emerald-700 tabular-nums leading-none">
                 {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(proposalSummary.ltv)}
               </p>
-              <p className="text-[11px] text-emerald-600/70 dark:text-emerald-500/70 mt-0.5">
+              <p className="text-[11px] text-emerald-600/70 mt-0.5">
                 {proposalSummary.paidCount} paid proposal{proposalSummary.paidCount !== 1 ? "s" : ""}
               </p>
             </div>
@@ -739,12 +739,12 @@ interface ContactProposalsData {
 
 const STATUS_STYLES: Record<string, string> = {
   draft:    "bg-muted text-muted-foreground",
-  sent:     "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400",
-  signed:   "bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-400",
-  paid:     "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400",
-  failed:   "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-400",
+  sent:     "bg-blue-50 text-blue-700",
+  signed:   "bg-violet-50 text-violet-700",
+  paid:     "bg-emerald-50 text-emerald-700",
+  failed:   "bg-red-50 text-red-700",
   void:     "bg-muted text-muted-foreground",
-  overdue:  "bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-400",
+  overdue:  "bg-orange-50 text-orange-700",
 };
 
 function fmtMoney(n: number) {
@@ -779,10 +779,10 @@ function ProposalsTab({ contact }: { contact: UnifiedContact }) {
     <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
       {/* LTV summary bar */}
       {(data?.ltv ?? 0) > 0 && (
-        <div className="flex items-center gap-3 px-4 py-3 bg-emerald-50/60 dark:bg-emerald-950/20 border-b border-emerald-100 dark:border-emerald-900/30 shrink-0">
+        <div className="flex items-center gap-3 px-4 py-3 bg-emerald-50/60 border-b border-emerald-100 shrink-0">
           <DollarSign className="w-4 h-4 text-emerald-600 shrink-0" />
           <div>
-            <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
+            <p className="text-xs font-bold text-emerald-700 tabular-nums">
               {fmtMoney(data!.ltv)} lifetime value
             </p>
             <p className="text-[11px] text-emerald-600/70">{data!.paidCount} paid proposal{data!.paidCount !== 1 ? "s" : ""}</p>

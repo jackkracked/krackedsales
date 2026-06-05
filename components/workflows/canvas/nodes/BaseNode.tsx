@@ -195,11 +195,11 @@ export const BaseNode = memo(function BaseNode({
       {/* Pinned output badge — rendered outside main div so it doesn't clip */}
       {data.pinnedOutput && (
         <div className="absolute left-0 right-0 translate-y-1 pt-1 pointer-events-none" style={{ top: "100%" }}>
-          <div className="bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-lg px-2 py-1.5">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
             <p className="text-[9px] font-bold text-amber-600 uppercase tracking-widest mb-1 flex items-center gap-1">
               <span>📌</span> Pinned Output
             </p>
-            <pre className="text-[9px] font-mono text-amber-700 dark:text-amber-400 max-h-16 overflow-hidden">
+            <pre className="text-[9px] font-mono text-amber-700 max-h-16 overflow-hidden">
               {JSON.stringify(data.pinnedOutput, null, 1).slice(0, 200)}
             </pre>
           </div>

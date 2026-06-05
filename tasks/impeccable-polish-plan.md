@@ -64,4 +64,20 @@ Constraints: no behavior removal, no functionality changes outside the named UI 
 - **N3:** Reliable gate is `npx tsc --noEmit` (0 errors). Use `npx eslint .` for a comparable lint count.
 
 ## Outcome log
-(updated as steps complete)
+
+### Commit `9bec95f` — Tier 1 (partial, the high-value safe wins)
+DONE & verified (tsc 0 errors, lint errors unchanged at 57, warnings 130→128):
+- T1.1 side-stripes: calendar-widget, reply-queue, conversations-strip (late→bg wash), stage-heatmap + calendar-client (3px stripe→full colored border, color meaning kept). KpiDetailSheet:170 left (legit vertical-tab active indicator, not decoration).
+- T1.2 copy: follow-up-queue (em-dash+🎉), calendar-widget (—→·), opportunity-modal activity labels. contact-modal em-dashes = FALSE POSITIVE (empty-value placeholders + comments), left.
+- T1.3 emoji: opportunity-modal activity labels de-emoji'd. **Workflow-canvas emoji (BaseNode 📦📌👂, WorkflowCanvas ⚡) NOT done — needs lucide mapping, deferred (in-progress feature, low traffic).**
+- T1.4 a11y: sidebar aria-current, opportunity-modal tabs aria-label + active-tab text label. **Remaining: card message buttons, proposals row actions, contact-modal tabs (992) aria-labels; toggle role="switch" (team-settings, user-calendars) — NOT done.**
+- T1.5 contact-modal img alt + onerror. DONE.
+- T1.6 transition:width = FALSE POSITIVE (SVG stroke-width, not CSS layout). Left intentionally.
+- T1.7 dead AiCopilotPanel imports removed. DONE.
+- T1.8 opportunity-modal tabs labelled. DONE.
+- FLAG: dead "Play recording" button still flagged for owner decision.
+
+### REMAINING
+- Tier 1 tail: workflow-canvas emoji→lucide; broader icon-button aria sweep; toggle role="switch".
+- ALL of Tier 2 (tokens → strip dead dark: → build Modal+ConfirmDialog → color sweep → incremental modal migration → confirm swaps).
+- Tier 3 = plan only (untouched, as agreed).

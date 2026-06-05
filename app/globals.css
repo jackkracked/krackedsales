@@ -18,6 +18,16 @@
   --accent-green-foreground: #FFFFFF;
   --destructive: #DC2626;
   --destructive-foreground: #FFFFFF;
+  --success: #047857;
+  --success-foreground: #FFFFFF;
+  --success-subtle: #ECFDF5;
+  --warning: #B45309;
+  --warning-foreground: #FFFFFF;
+  --warning-subtle: #FFFBEB;
+  --info: #1D4ED8;
+  --info-foreground: #FFFFFF;
+  --info-subtle: #EFF6FF;
+  --overlay: rgba(28, 35, 51, 0.45);
   --input: #FFFFFF;
   --ring: #0F3A5C;
 
@@ -44,6 +54,16 @@
   --color-accent-green-foreground: var(--accent-green-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-subtle: var(--success-subtle);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-subtle: var(--info-subtle);
+  --color-overlay: var(--overlay);
   --color-input: var(--input);
   --color-ring: var(--ring);
 

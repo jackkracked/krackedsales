@@ -81,17 +81,17 @@ function SentimentBadge({
   const config: Record<string, { bg: string; text: string; ring: string }> = {
     positive: {
       bg: "bg-emerald-500/15",
-      text: "text-emerald-600 dark:text-emerald-400",
+      text: "text-emerald-600",
       ring: "ring-emerald-500/25",
     },
     neutral: {
       bg: "bg-amber-500/15",
-      text: "text-amber-600 dark:text-amber-400",
+      text: "text-amber-600",
       ring: "ring-amber-500/25",
     },
     negative: {
       bg: "bg-rose-500/15",
-      text: "text-rose-600 dark:text-rose-400",
+      text: "text-rose-600",
       ring: "ring-rose-500/25",
     },
   };
@@ -449,7 +449,7 @@ export function TranscriptDrawer({ callId, onClose }: TranscriptDrawerProps) {
                     href={data.fathomShareUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-violet-600 dark:text-violet-400 hover:underline"
+                    className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-violet-600 hover:underline"
                   >
                     Open in Fathom
                     <ExternalLink className="w-3 h-3" />

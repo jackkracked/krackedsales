@@ -559,7 +559,7 @@ function CallRow({
           {call.transcriptAvailable && call.fathomRecordingId != null && (
             <span
               title="Fathom transcript available"
-              className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400 mr-1"
+              className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-violet-100 text-violet-700 mr-1"
             >
               F
             </span>
@@ -606,19 +606,19 @@ function CallTypeBadge({ type }: { type: "meet" | "dialer" | "scheduled" }) {
     );
   }
   return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-400">
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
       Dialer
     </span>
   );
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  booked:    "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400",
-  confirmed: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400",
-  showed:    "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400",
-  completed: "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400",
-  noshow:    "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400",
-  cancelled: "bg-zinc-100 text-zinc-500 dark:bg-zinc-500/15 dark:text-zinc-400",
+  booked:    "bg-sky-100 text-sky-700",
+  confirmed: "bg-emerald-100 text-emerald-700",
+  showed:    "bg-green-100 text-green-700",
+  completed: "bg-green-100 text-green-700",
+  noshow:    "bg-red-100 text-red-700",
+  cancelled: "bg-zinc-100 text-zinc-500",
 };
 
 function AppointmentStatusBadge({ status }: { status: string }) {

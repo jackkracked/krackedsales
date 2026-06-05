@@ -51,7 +51,7 @@ function EnrichChip({ type, value, contactId, onSaved }: EnrichChipProps) {
         "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold",
         "transition-all duration-200 border max-w-full select-none",
         state === "done"
-          ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 cursor-default"
+          ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-600 cursor-default"
           : state === "loading"
           ? "bg-primary/10 border-primary/20 text-primary/60 cursor-wait"
           : state === "error"
@@ -70,7 +70,7 @@ function EnrichChip({ type, value, contactId, onSaved }: EnrichChipProps) {
         {state === "done" ? "Saved" : state === "error" ? "Failed — retry" : value}
       </span>
       {state === "idle" && (
-        <span className="shrink-0 flex items-center gap-0.5 text-blue-400 dark:text-blue-500 opacity-70">
+        <span className="shrink-0 flex items-center gap-0.5 text-blue-400 opacity-70">
           <Plus className="w-2.5 h-2.5" />
         </span>
       )}
@@ -153,7 +153,7 @@ export function SmartBanner({ messages, contactId, onFieldSaved, externalSavedKe
               "text-[10.5px] font-bold uppercase tracking-widest",
               unsavedItems.length > 0 ? "mb-2" : "",
               allDone
-                ? "text-emerald-600 dark:text-emerald-400"
+                ? "text-emerald-600"
                 : "text-primary"
             )}
           >
@@ -293,7 +293,7 @@ export function ChatBubble({
           "max-w-[78%] px-3 py-2 text-sm leading-relaxed",
           isOut
             ? "bg-primary text-primary-foreground"
-            : "bg-white dark:bg-card border border-border/70 shadow-[0_1px_4px_rgba(0,0,0,0.06)] text-foreground",
+            : "bg-white border border-border/70 shadow-[0_1px_4px_rgba(0,0,0,0.06)] text-foreground",
           // Directional speech-tail via border-radius
           isOut
             ? showTail

@@ -73,28 +73,28 @@ const STATUS_CONFIG: Record<
     icon: CheckCircle2,
     label: "All good",
     iconClass: "text-emerald-500",
-    labelClass: "text-emerald-600 dark:text-emerald-400",
+    labelClass: "text-emerald-600",
     dotClass: "bg-emerald-500",
   },
   stale: {
     icon: Clock,
     label: "Not checked recently",
     iconClass: "text-amber-500",
-    labelClass: "text-amber-600 dark:text-amber-400",
+    labelClass: "text-amber-600",
     dotClass: "bg-amber-500",
   },
   error: {
     icon: XCircle,
     label: "Problem",
     iconClass: "text-red-500",
-    labelClass: "text-red-600 dark:text-red-400",
+    labelClass: "text-red-600",
     dotClass: "bg-red-500",
   },
   override: {
     icon: Pencil,
     label: "Manual value",
     iconClass: "text-blue-500",
-    labelClass: "text-blue-600 dark:text-blue-400",
+    labelClass: "text-blue-600",
     dotClass: "bg-blue-500",
   },
 };
@@ -266,10 +266,10 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
           {/* Error section */}
           {status === "error" && metric.error && (
             <div className="rounded-lg bg-red-500/5 border border-red-500/10 p-4">
-              <p className="text-[10px] font-bold tracking-widest uppercase text-red-600 dark:text-red-400 mb-1">
+              <p className="text-[10px] font-bold tracking-widest uppercase text-red-600 mb-1">
                 What went wrong
               </p>
-              <p className="text-sm text-red-600 dark:text-red-400 leading-relaxed">
+              <p className="text-sm text-red-600 leading-relaxed">
                 {metric.error}
               </p>
               <p className="text-xs text-muted-foreground mt-2">
@@ -283,7 +283,7 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
           {/* Override section */}
           {status === "override" && metric.override && (
             <div className="rounded-lg bg-blue-500/5 border border-blue-500/10 p-4">
-              <p className="text-[10px] font-bold tracking-widest uppercase text-blue-600 dark:text-blue-400 mb-1">
+              <p className="text-[10px] font-bold tracking-widest uppercase text-blue-600 mb-1">
                 This value was set manually
               </p>
               <p className="text-sm text-foreground">
@@ -300,7 +300,7 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
               <button
                 onClick={() => removeOverride.mutate()}
                 disabled={removeOverride.isPending}
-                className="mt-3 text-xs font-medium text-red-600 dark:text-red-400 hover:underline disabled:opacity-50"
+                className="mt-3 text-xs font-medium text-red-600 hover:underline disabled:opacity-50"
               >
                 {removeOverride.isPending
                   ? "Removing..."
@@ -367,8 +367,8 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
               className={cn(
                 "rounded-lg p-3 text-sm",
                 verify.data.match
-                  ? "bg-emerald-500/5 border border-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                  : "bg-amber-500/5 border border-amber-500/10 text-amber-700 dark:text-amber-400",
+                  ? "bg-emerald-500/5 border border-emerald-500/10 text-emerald-700"
+                  : "bg-amber-500/5 border border-amber-500/10 text-amber-700",
               )}
             >
               {verify.data.match
@@ -378,7 +378,7 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
           )}
 
           {verify.isError && (
-            <div className="rounded-lg bg-red-500/5 border border-red-500/10 p-3 text-sm text-red-600 dark:text-red-400">
+            <div className="rounded-lg bg-red-500/5 border border-red-500/10 p-3 text-sm text-red-600">
               Error: {(verify.error as Error).message}
             </div>
           )}
@@ -426,7 +426,7 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
                   : "Save override"}
               </button>
               {saveOverride.isError && (
-                <p className="text-xs text-red-600 dark:text-red-400">
+                <p className="text-xs text-red-600">
                   Failed to save override. Please try again.
                 </p>
               )}

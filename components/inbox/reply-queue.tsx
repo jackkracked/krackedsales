@@ -21,9 +21,9 @@ interface QueueResponse {
 // ── Channel badge ──────────────────────────────────────────────────────────────
 
 function channelBadge(item: QueueItem) {
-  if (item.platform === "instagram") return { label: "IG", className: "bg-pink-50 dark:bg-pink-950/20 text-pink-600 dark:text-pink-400 ring-1 ring-pink-200/60 dark:ring-pink-800/40" };
-  if (item.platform === "facebook") return { label: "FB", className: "bg-blue-50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 ring-1 ring-blue-200/60 dark:ring-blue-800/40" };
-  if (item.channel === "TikTok") return { label: "TT", className: "bg-slate-50 dark:bg-slate-950/20 text-slate-600 dark:text-slate-400 ring-1 ring-slate-200/60 dark:ring-slate-800/40" };
+  if (item.platform === "instagram") return { label: "IG", className: "bg-pink-50 text-pink-600 ring-1 ring-pink-200/60" };
+  if (item.platform === "facebook") return { label: "FB", className: "bg-blue-50 text-blue-600 ring-1 ring-blue-200/60" };
+  if (item.channel === "TikTok") return { label: "TT", className: "bg-slate-50 text-slate-600 ring-1 ring-slate-200/60" };
   return { label: "GHL", className: "bg-muted text-muted-foreground ring-1 ring-border" };
 }
 
