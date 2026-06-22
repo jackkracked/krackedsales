@@ -12,7 +12,16 @@ import {
 import { relativeTime, formatDate } from "@/lib/utils/date";
 import { Avatar } from "@/components/ui/avatar";
 import { ContactModal } from "./contact-modal";
-import { AdvancedFiltersPanel, type FilterRule } from "./advanced-filters-panel";
+import { FilterSheet } from "./filter-sheet";
+import {
+  type ContactFilters,
+  EMPTY_FILTERS,
+  UNASSIGNED,
+  filtersToRules,
+  filtersToParams,
+  parseFilters,
+  countActive,
+} from "@/lib/contacts/filters";
 import type { UnifiedContact } from "@/lib/contacts/types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -20,25 +29,25 @@ import type { UnifiedContact } from "@/lib/contacts/types";
 interface SmartList {
   id: string;
   name: string;
-  rules: FilterRule[];
+  filters: ContactFilters;
 }
 
 type SortKey = "createdAt" | "lastActivityAt" | "name" | "daysSinceLastTouch" | "source" | "stage";
+
+const SMART_LISTS_KEY = "contacts_smart_lists_v2";
 
 // ─── Preset smart tabs ───────────────────────────────────────────────────────
 
 interface PresetTab {
   id: string;
   label: string;
-  rules: FilterRule[];
+  filters: ContactFilters;
 }
 
 const PRESET_TABS: PresetTab[] = [
-  { id: "all", label: "All", rules: [] },
-  { id: "unread", label: "Unread", rules: [{ id: "p-unread", field: "daysSinceLastTouch", operator: "lt", values: ["1"], connector: "and" }] },
-  { id: "no-response-7d", label: "No response 7d+", rules: [{ id: "p-nr7", field: "daysSinceLastTouch", operator: "gt", values: ["7"], connector: "and" }] },
-  { id: "demo-sent", label: "Demo sent", rules: [{ id: "p-demo", field: "hasDemo", operator: "is_any_of", values: ["true"], connector: "and" }] },
-  { id: "proposal-sent", label: "Proposal sent", rules: [{ id: "p-prop", field: "hasDemo", operator: "is_any_of", values: ["true"], connector: "and" }] },
+  { id: "all", label: "All", filters: EMPTY_FILTERS },
+  { id: "unread", label: "Unread", filters: { ...EMPTY_FILTERS, urgency: "today" } },
+  { id: "no-response-7d", label: "No response 7d+", filters: { ...EMPTY_FILTERS, urgency: "7plus" } },
 ];
 
 // ─── Design constants ─────────────────────────────────────────────────────────
@@ -68,39 +77,6 @@ const RESPONSE_CONFIG: Record<string, { label: string; className: string }> = {
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function ruleLabel(
-  rule: FilterRule,
-  pipelines: Array<{ id: string; name: string; stages: Array<{ id: string; name: string }> }>
-): string {
-  const fieldLabels: Record<string, string> = {
-    name: "Name", email: "Email", source: "Source", pipelineId: "Pipeline",
-    stageId: "Stage", brandCategory: "Category", hasDemo: "Has Demo",
-    daysSinceLastTouch: "Days Since Touch",
-  };
-  const opLabels: Record<string, string> = {
-    is_any_of: "is", is_none_of: "is not", is: "is", contains: "contains",
-    not_contains: "doesn't contain", gt: ">", lt: "<",
-  };
-  const staticValueLabels: Record<string, Record<string, string>> = {
-    source: { ghl: "GHL", comment_lead: "Comment" },
-    brandCategory: { ecommerce: "DTC", service: "Service", local: "Local", b2b: "B2B", other: "Other" },
-    hasDemo: { true: "Yes", false: "No" },
-  };
-  const fLabel = fieldLabels[rule.field] ?? rule.field;
-  const oLabel = opLabels[rule.operator] ?? rule.operator;
-  let vLabel: string;
-  if (rule.field === "pipelineId") {
-    vLabel = rule.values.map((v) => pipelines.find((p) => p.id === v)?.name ?? v).join(", ") || "…";
-  } else if (rule.field === "stageId") {
-    const allStages = pipelines.flatMap((p) => p.stages);
-    vLabel = rule.values.map((v) => allStages.find((s) => s.id === v)?.name ?? v).join(", ") || "…";
-  } else {
-    vLabel = rule.values.map((v) => staticValueLabels[rule.field]?.[v] ?? v).join(", ") || "…";
-  }
-  return `${fLabel} ${oLabel} ${vLabel}`;
-}
-
 
 function SortHeader({ label, sortKey, currentSort, currentOrder, onSort }: {
   label: string; sortKey: SortKey; currentSort: SortKey; currentOrder: "asc" | "desc"; onSort: (k: SortKey) => void;
@@ -142,11 +118,12 @@ function SkeletonRow({ i }: { i: number }) {
 export function ContactsClient() {
   const [search, setSearch]                   = useState("");
   const [debounced, setDebounced]             = useState("");
-  const [advancedRules, setAdvancedRules]     = useState<FilterRule[]>([]);
+  const [filters, setFilters]                 = useState<ContactFilters>(EMPTY_FILTERS);
+  const [baselineCount, setBaselineCount]     = useState(0);
   const [sortBy, setSortBy]                   = useState<SortKey>("createdAt");
   const [sortOrder, setSortOrder]             = useState<"asc" | "desc">("desc");
   const [page, setPage]                       = useState(1);
-  const [showAdvancedPanel, setShowAdvancedPanel] = useState(false);
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [selected, setSelected]               = useState<Set<string>>(new Set());
   const [openContact, setOpenContact]         = useState<UnifiedContact | null>(null);
   const [openContactTab, setOpenContactTab]   = useState<"timeline" | undefined>(undefined);
@@ -162,7 +139,16 @@ export function ContactsClient() {
   const PAGE_SIZE = 50;
 
   useEffect(() => {
-    try { const r = localStorage.getItem("contacts_smart_lists"); if (r) setSmartLists(JSON.parse(r)); } catch {}
+    try { const r = localStorage.getItem(SMART_LISTS_KEY); if (r) setSmartLists(JSON.parse(r)); } catch {}
+  }, []);
+
+  // Hydrate filters + search from the URL on first load (bookmarkable views)
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const f = parseFilters(sp);
+    if (countActive(f) > 0) { setFilters(f); setActivePreset(""); }
+    const q = sp.get("q");
+    if (q) setSearch(q);
   }, []);
 
   useEffect(() => {
@@ -170,7 +156,7 @@ export function ContactsClient() {
     return () => clearTimeout(t);
   }, [search]);
 
-  useEffect(() => { setPage(1); }, [advancedRules, sortBy, sortOrder]);
+  useEffect(() => { setPage(1); }, [filters, sortBy, sortOrder]);
 
   const { data: pipelinesData } = useQuery<{ pipelines: Array<{ id: string; name: string; stages: Array<{ id: string; name: string }> }> }>({
     queryKey: ["pipelines"],
@@ -189,10 +175,27 @@ export function ContactsClient() {
     (teamData?.users ?? []).filter((u) => u.ghlUserId).map((u) => [u.ghlUserId!, u.name])
   );
 
+  // Pill catalogs for the filter sheet, sourced from live data
+  const stageOptions = (() => {
+    const seen = new Set<string>();
+    const out: { value: string; label: string }[] = [];
+    for (const p of pipelines) {
+      for (const s of p.stages) {
+        if (!seen.has(s.id)) { seen.add(s.id); out.push({ value: s.id, label: s.name }); }
+      }
+    }
+    return out;
+  })();
+  const repOptions = [
+    ...(teamData?.users ?? []).filter((u) => u.ghlUserId).map((u) => ({ value: u.ghlUserId!, label: u.name })),
+    { value: UNASSIGNED, label: "Unassigned" },
+  ];
+
+  const rules = filtersToRules(filters);
   const params = new URLSearchParams({
     page: String(page), pageSize: String(PAGE_SIZE), sortBy, sortOrder,
-    ...(debounced            && { search: debounced }),
-    ...(advancedRules.length && { rules: JSON.stringify(advancedRules) }),
+    ...(debounced     && { search: debounced }),
+    ...(rules.length  && { rules: JSON.stringify(rules) }),
   });
 
   const { data, isLoading, isFetching } = useQuery<{ contacts: UnifiedContact[]; total: number }>({
@@ -205,7 +208,20 @@ export function ContactsClient() {
   const contacts   = data?.contacts ?? [];
   const total      = data?.total    ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const activeRuleCount = advancedRules.length;
+  const activeFilterCount = countActive(filters);
+
+  // Track the unfiltered total so the sheet can show "X of Y contacts match"
+  useEffect(() => {
+    if (activeFilterCount === 0 && !debounced && total > 0) setBaselineCount(total);
+  }, [activeFilterCount, debounced, total]);
+
+  // Mirror filters + search into the URL (bookmarkable, survives reload)
+  useEffect(() => {
+    const p = filtersToParams(filters);
+    if (debounced) p.q = debounced;
+    const qs = new URLSearchParams(p).toString();
+    window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
+  }, [filters, debounced]);
 
   useEffect(() => {
     const fn = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); searchRef.current?.focus(); } };
@@ -234,11 +250,11 @@ export function ContactsClient() {
 
   function saveList() {
     if (!listName.trim()) return;
-    const newList: SmartList = { id: crypto.randomUUID(), name: listName.trim(), rules: advancedRules };
+    const newList: SmartList = { id: crypto.randomUUID(), name: listName.trim(), filters };
     const next = [...smartLists, newList];
     setSmartLists(next);
     setActiveListId(newList.id);
-    localStorage.setItem("contacts_smart_lists", JSON.stringify(next));
+    localStorage.setItem(SMART_LISTS_KEY, JSON.stringify(next));
     setListName("");
     setSavingList(false);
   }
@@ -247,17 +263,17 @@ export function ContactsClient() {
     const next = smartLists.filter((l) => l.id !== id);
     setSmartLists(next);
     if (activeListId === id) setActiveListId(null);
-    localStorage.setItem("contacts_smart_lists", JSON.stringify(next));
+    localStorage.setItem(SMART_LISTS_KEY, JSON.stringify(next));
   }
 
   function applyPreset(preset: PresetTab) {
     setActivePreset(preset.id);
-    setAdvancedRules(preset.rules);
+    setFilters(preset.filters);
     setActiveListId(null);
   }
 
   const clearAll = useCallback(() => {
-    setAdvancedRules([]);
+    setFilters(EMPTY_FILTERS);
     setSearch("");
     setActiveListId(null);
     setActivePreset("all");
@@ -308,28 +324,23 @@ export function ContactsClient() {
         </div>
 
         <button
-          onClick={() => setShowAdvancedPanel(true)}
+          onClick={() => setShowFilterSheet(true)}
           className={cn(
             "flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium rounded-[8px] border transition-colors",
-            showAdvancedPanel || activeRuleCount > 0
+            showFilterSheet || activeFilterCount > 0
               ? "border-primary/30 bg-primary/5 text-primary"
               : "border-border text-muted-foreground hover:text-foreground"
           )}
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />
           Filters
-          {activeRuleCount > 0 && (
-            <span className="ml-0.5 px-1.5 py-px text-[9px] font-bold bg-primary text-white rounded-full leading-tight">{activeRuleCount}</span>
+          {activeFilterCount > 0 && (
+            <span className="ml-0.5 px-1.5 py-px text-[9px] font-bold bg-primary text-white rounded-full leading-tight">{activeFilterCount}</span>
           )}
         </button>
 
-        {activeRuleCount > 0 && (
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {advancedRules.map((rule) => (
-              <Chip key={rule.id} label={ruleLabel(rule, pipelines)} onRemove={() => { setAdvancedRules(advancedRules.filter((r) => r.id !== rule.id)); setActiveListId(null); }} />
-            ))}
-            <button onClick={clearAll} className="text-xs text-muted-foreground hover:text-foreground transition-colors px-1">Clear</button>
-          </div>
+        {activeFilterCount > 0 && (
+          <button onClick={clearAll} className="text-xs text-muted-foreground hover:text-foreground transition-colors px-1">Clear all</button>
         )}
 
         <div className="ml-auto flex items-center gap-2">
@@ -393,7 +404,7 @@ export function ContactsClient() {
         {smartLists.map((list) => (
           <div key={list.id} className="flex items-center group">
             <button
-              onClick={() => { setAdvancedRules(list.rules); setActiveListId(list.id); setActivePreset(""); }}
+              onClick={() => { setFilters(list.filters); setActiveListId(list.id); setActivePreset(""); }}
               className={cn(
                 "px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap rounded-l-[6px]",
                 activeListId === list.id
@@ -422,7 +433,7 @@ export function ContactsClient() {
             <button onClick={() => setSavingList(false)} className="p-0.5 text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
           </div>
         ) : (
-          <button onClick={() => setSavingList(true)} disabled={activeRuleCount === 0} className="flex items-center gap-1 ml-1 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded-[6px] transition-colors whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed">
+          <button onClick={() => setSavingList(true)} disabled={activeFilterCount === 0} className="flex items-center gap-1 ml-1 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded-[6px] transition-colors whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed">
             <Plus className="w-3 h-3" /> Save list
           </button>
         )}
@@ -495,7 +506,7 @@ export function ContactsClient() {
                   <td colSpan={12} className="py-16 text-center">
                     <Users className="w-8 h-8 text-border mx-auto mb-2" />
                     <p className="text-sm font-medium text-foreground mb-0.5">No contacts found</p>
-                    {(search || activeRuleCount > 0) && <p className="text-xs text-muted-foreground">Try adjusting your search or filters</p>}
+                    {(search || activeFilterCount > 0) && <p className="text-xs text-muted-foreground">Try adjusting your search or filters</p>}
                   </td>
                 </tr>
               )
@@ -549,14 +560,18 @@ export function ContactsClient() {
         );
       })()}
 
-      {showAdvancedPanel && (
-        <AdvancedFiltersPanel
-          rules={advancedRules}
-          onApply={(rules) => { setAdvancedRules(rules); setShowAdvancedPanel(false); setActiveListId(null); }}
-          onClose={() => setShowAdvancedPanel(false)}
-          pipelines={pipelines}
-        />
-      )}
+      <FilterSheet
+        open={showFilterSheet}
+        filters={filters}
+        onChange={(f) => { setFilters(f); setActiveListId(null); setActivePreset(""); }}
+        onClear={clearAll}
+        onClose={() => setShowFilterSheet(false)}
+        matchCount={total}
+        baselineCount={baselineCount}
+        loading={isFetching && !isLoading}
+        stages={stageOptions}
+        reps={repOptions}
+      />
 
       {showCreateModal && (
         <CreateContactModal
@@ -949,15 +964,6 @@ function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMe
 }
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
-
-function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
-  return (
-    <span className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full text-xs bg-muted text-foreground border border-border/60">
-      {label}
-      <button onClick={onRemove} className="p-0.5 rounded-full hover:bg-border transition-colors"><X className="w-2.5 h-2.5" /></button>
-    </span>
-  );
-}
 
 function PageBtn({ children, onClick, disabled, active }: { children: React.ReactNode; onClick: () => void; disabled?: boolean; active?: boolean; }) {
   return (

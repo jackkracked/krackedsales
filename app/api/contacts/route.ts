@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { desc, eq, isNotNull } from "drizzle-orm";
+import { desc, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { commentLeads, brandCategories, demoGhlLinks, proposals, localContacts } from "@/lib/db/schema";
 import { ghl, locationId } from "@/lib/ghl/client";
@@ -59,6 +59,58 @@ function applyRule(c: UnifiedContact, rule: FilterRule): boolean {
       if (operator === "gt") return c.daysSinceLastTouch > n;
       if (operator === "lt") return c.daysSinceLastTouch < n;
       if (operator === "is") return c.daysSinceLastTouch === n;
+      return true;
+    }
+    case "platform":
+      if (operator === "is_any_of")  return c.platform != null && values.includes(c.platform);
+      if (operator === "is_none_of") return c.platform == null || !values.includes(c.platform);
+      return true;
+    case "channel":
+      if (operator === "is_any_of")  return c.lastChannel != null && values.includes(c.lastChannel);
+      if (operator === "is_none_of") return c.lastChannel == null || !values.includes(c.lastChannel);
+      return true;
+    case "assignedTo": {
+      // "__unassigned__" matches contacts with no rep
+      const wantsUnassigned = values.includes("__unassigned__");
+      const match = (c.assignedTo != null && values.includes(c.assignedTo)) || (wantsUnassigned && c.assignedTo == null);
+      if (operator === "is_any_of")  return match;
+      if (operator === "is_none_of") return !match;
+      return true;
+    }
+    case "hasProposal":
+      if (operator === "is_any_of")  return values.map((v) => v === "true").includes(c.hasProposal);
+      if (operator === "is_none_of") return !values.map((v) => v === "true").includes(c.hasProposal);
+      return true;
+    case "daysInCurrentStage": {
+      if (c.daysInCurrentStage == null) return false;
+      const n = Number(values[0] ?? 0);
+      if (operator === "gt") return c.daysInCurrentStage > n;
+      if (operator === "lt") return c.daysInCurrentStage < n;
+      if (operator === "is") return c.daysInCurrentStage === n;
+      return true;
+    }
+    case "reachableChannels": {
+      const hasEmail = c.reachableChannels?.includes("email") ?? false;
+      const hasSms = c.reachableChannels?.includes("sms") ?? false;
+      const matchesOne = (v: string) =>
+        v === "email_only" ? hasEmail && !hasSms :
+        v === "sms_only"   ? hasSms && !hasEmail :
+        v === "both"       ? hasEmail && hasSms :
+        false;
+      const match = values.some(matchesOne);
+      if (operator === "is_any_of")  return match;
+      if (operator === "is_none_of") return !match;
+      return true;
+    }
+    case "urgency": {
+      // single bucket value: today | 3to5 | 7plus | "<number>" (custom: at least N days)
+      const v = values[0] ?? "";
+      const d = c.daysSinceLastTouch;
+      if (v === "today")  return d === 0;
+      if (v === "3to5")   return d >= 3 && d <= 5;
+      if (v === "7plus")  return d >= 7;
+      const n = Number(v);
+      if (!Number.isNaN(n) && v !== "") return d >= n;
       return true;
     }
     default:

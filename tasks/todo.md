@@ -1,3 +1,24 @@
+# Contacts Advanced Filters — toggle-sheet rebuild (impeccable craft)
+
+**Status:** in progress · 2026-06-22 · Jack approved direction **B + stage color** (hero live-count, tinted groups, rep avatars, semantic stage pills)
+
+## Plan
+- [ ] `lib/contacts/filters.ts` — FilterRule types, ContactFilters model, pill catalogs, filtersToRules(), URL serialize/parse, countActive, stage tint
+- [ ] Extend API `app/api/contacts/route.ts` applyRule() — platform, channel, assignedTo, urgency, daysInCurrentStage, hasProposal, reachableChannels
+- [ ] Build `components/contacts/filter-sheet.tsx` (states, keyboard, reduced-motion, responsive, a11y)
+- [ ] Rewire `contacts-client.tsx` — ContactFilters state, live filtering, URL persistence, count badge, keep search + All/Unread/No-response presets, smart lists store ContactFilters
+- [ ] Delete `advanced-filters-panel.tsx`; add prefers-reduced-motion guard in globals.css
+- [ ] Verify tsc + visual check; remove temp mock + revert proxy.ts whitelist
+- [ ] Polish + harden; security/data review; deploy
+
+## Decisions
+- Filtering is SERVER-SIDE via existing `rules` engine — sheet emits FilterRule[] (is_any_of = OR within card, and = AND across cards). Minimal-impact reuse.
+- Opt-in source: GHL contacts hardcoded platform="lead_form"; only comment leads carry real FB/IG/TikTok. Pills honest to stored data. Flagged to Jack.
+- Available channels: only Email/SMS derivable → Email only / SMS only / SMS+Email. IG DM lives under Last contact channel.
+- Lead score CUT (opaque). Audit delivered = disabled "coming soon" (wiring is the next task).
+
+---
+
 # Proposal Builder Redesign — Guided Wizard (impeccable craft)
 
 **Status:** in progress · 2026-06-11 · Jack approved the shape brief ("go for it, build it")

@@ -180,3 +180,14 @@ h1, h2, h3, h4, h5, h6 {
 .animate-scale-in-flex {
   animation: scale-in-flex 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
+/* ─── Reduced motion — honour the user's OS preference ─── */
+@media (prefers-reduced-motion: reduce) {
+  .animate-slide-in-right,
+  .animate-slide-up-fade,
+  .animate-fade-in,
+  .animate-scale-in,
+  .animate-scale-in-flex {
+    animation: none;
+  }
+}
