@@ -55,9 +55,11 @@ Jack: audits follow a call, so ESP/Details/pitches are entered manually from cal
 - [x] Daily delivered-sync cron /api/cron/sync-audits (GET + CRON_SECRET, per-task fetch) → status/deliveredAt; vercel.json 0 10 * * *
 - [x] Security/data review (Gates 5+6) passed; tsc clean; deployed READY; cron verified live (401 unauth, {pending:0} authed)
 
-### Verify-after / hardening notes
-- [ ] **Confirm the exact ClickUp "Delivered" status name** on the Account Audits list. `isDelivered()` currently treats type closed/done OR a status name matching /deliver|complete|sent|done/. Raw name is stored in `clickup_status` for reconciliation. Tighten once Jack confirms the real status.
-- [ ] End-to-end live test: create an audit from the modal → confirm a row lands in `audits` with the right ghlContactId → mark the ClickUp task delivered → run the cron → confirm the "Audit delivered" filter shows that contact.
+### Self-audit — ✅ data/cron/logic layers PASS (2026-06-22)
+- [x] **Exact delivered status CONFIRMED:** Account Audits list real statuses are "audit needed" (open), "ready to send to client" (custom), "client received" (type=done, 86 tasks = the real delivered status), "on hold (missing access)" (open), "Closed" (type=closed). `isDelivered()` classifies ALL FIVE correctly (delivered = client received + Closed, via the type=done/closed check). No change needed; raw name stored in `clickup_status` anyway.
+- [x] **Cron flip PROVEN on prod:** inserted 2 sentinel rows (real done-task + real open-task) → ran deployed cron → returned {pending:2,checked:2,delivered:1} → "client received" flipped to delivered (deliveredAt + clickup_status set), "audit needed" stayed requested. contacts auditMap yielded hasAudit/auditStatus/auditDelivered correctly. Sentinel rows deleted; table back to 0 rows. (used SELFTEST ghl ids that match no real contact, zero pollution.)
+- [x] Build READY on prod, tsc clean, cron route enforces CRON_SECRET (401 unauth).
+- [ ] **Remaining = 2 quick UI eyeball checks (need Jack's session, do together):** (1) open a contact → Create Audit → submit → confirm a row lands in `audits` with the right ghlContactId + the modal's person-fields pre-fill from /api/me name; (2) Contacts → filter sheet → confirm "Audit delivered" card is enabled (no "Coming soon") and toggling Yes/No persists to URL + filters the list. Not done autonomously: submitting creates a real ClickUp task in the live Account Audits list.
 
 ## Phase 2b — demo modal reskin (SEPARATE — needs its own impeccable pass)
 - [ ] Re-skin demo modal with the shared request-modal primitives. This is a UI feature → run /impeccable shape → craft → polish → harden. NOT part of the tracking spine; deferred so tracking could ship clean.
