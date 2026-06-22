@@ -1,3 +1,28 @@
+# Audit Request feature — AI auto-fill + tracking + unified modal redesign
+
+**Status:** requirements locked (grill-me done 2026-06-22). Next: /impeccable shape.
+
+## Locked requirements
+- **Auto-fill** (Gemini): Brand+Website from data · ESP detected from site · Relevant Details drafted from qual Q&A · both pitch fields AI-suggested · Hiro default No · Strategist/Reviewer/Client Contact default to creator (logged-in user → ClickUp member by name). All editable.
+- **AI-fill UX "Live drafting":** open instantly, hard fields filled, AI fields shimmer+sparkle+LOCKED until values animate in (then unlock + "AI" chip); ~8s timeout → unlock empty.
+- **Submit:** ClickUp task as today (reuse /api/clickup/create-audit) + write new `audits` DB table (ghlContactId ↔ clickupTaskId + field values, requestedAt, status).
+- **Tracking:** daily cron syncs ClickUp task completion → deliveredAt/status=delivered → powers "Audit delivered" filter (Yes=delivered) + KPIs. Add hasAudit/auditStatus to UnifiedContact + contacts route.
+- **Beauty:** full unified premium redesign of BOTH audit + demo modals (one shared "request" design language, proposal-wizard/filter-sheet bar). Audit keeps 2-step; demo elevated.
+
+## Done already this session
+- [x] Swept + fixed all Create Audit/Demo/Task buttons (wired 2 dead audit buttons, 2 contacts half-baked) — deployed, verified on prod (commit 6f34965)
+
+## Build plan (after shape)
+- [ ] /impeccable shape the unified request modal (coded mockups)
+- [ ] AI draft route (Gemini, server-side): website→ESP + details + pitch suggestions
+- [ ] Live-drafting modal UX (shimmer/lock/animate-in)
+- [ ] `audits` table migration (additive/idempotent) + extend create-audit route to write it
+- [ ] Daily delivered-sync cron + hasAudit/auditStatus in contacts route + enable Audit-delivered filter card
+- [ ] Apply unified design to demo modal too
+- [ ] Security/data review (DB write + external input + AI + ClickUp); polish + harden; deploy
+
+---
+
 # Contacts Advanced Filters — toggle-sheet rebuild (impeccable craft)
 
 **Status:** in progress · 2026-06-22 · Jack approved direction **B + stage color** (hero live-count, tinted groups, rep avatars, semantic stage pills)
