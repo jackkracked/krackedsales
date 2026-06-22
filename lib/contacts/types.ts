@@ -48,8 +48,10 @@ export interface TimelineEvent {
     | "contacted"
     | "proposal_sent"
     | "proposal_signed"
-    | "proposal_paid";
+    | "proposal_paid"
+    | "call_outcome";
   title: string;
   body?: string;
   occurredAt: string;
+  outcome?: string; // raw disposition key, set on call_outcome events for tone/icon
 }

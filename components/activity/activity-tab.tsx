@@ -4,10 +4,13 @@ import { useQuery } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { Activity } from "lucide-react";
 import { formatActivitySentence, avatarColour, initials, type ActivityEvent } from "@/lib/activity/format";
+import { outcomeMeta, OUTCOME_TONES } from "@/lib/activity/outcomes";
 
 interface ActivityTabProps {
   entityType: string;
   entityId: string;
+  /** When set, call outcomes for this contact are merged into the feed. */
+  contactId?: string;
 }
 
 function ActivityRow({ event }: { event: ActivityEvent }) {
@@ -35,23 +38,28 @@ function ActivityRow({ event }: { event: ActivityEvent }) {
             {String(event.metadata.note_preview)}
           </p>
         )}
-        {event.action === "call.dispositioned" && !!event.metadata?.outcome && (
-          <span className="inline-block mt-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground capitalize">
-            {String(event.metadata.outcome).replace(/_/g, " ")}
-          </span>
-        )}
+        {event.action === "call.dispositioned" && !!event.metadata?.outcome && (() => {
+          const meta = outcomeMeta(String(event.metadata.outcome));
+          return (
+            <span className={`inline-block mt-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${OUTCOME_TONES[meta.tone].pill}`}>
+              {meta.label}
+            </span>
+          );
+        })()}
         <p className="text-[11px] text-muted-foreground/60 mt-0.5">{time}</p>
       </div>
     </div>
   );
 }
 
-export function ActivityTab({ entityType, entityId }: ActivityTabProps) {
+export function ActivityTab({ entityType, entityId, contactId }: ActivityTabProps) {
   const { data, isLoading } = useQuery<{ events: ActivityEvent[] }>({
-    queryKey: ["activity", entityType, entityId],
-    queryFn: () =>
-      fetch(`/api/activity?entityType=${entityType}&entityId=${encodeURIComponent(entityId)}&limit=50`)
-        .then((r) => r.json()),
+    queryKey: ["activity", entityType, entityId, contactId ?? null],
+    queryFn: () => {
+      const params = new URLSearchParams({ entityType, entityId, limit: "50" });
+      if (contactId) params.set("contactId", contactId);
+      return fetch(`/api/activity?${params}`).then((r) => r.json());
+    },
     staleTime: 30 * 1000,
     enabled: !!entityId,
   });

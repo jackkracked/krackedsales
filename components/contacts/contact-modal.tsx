@@ -17,6 +17,8 @@ import { DemoLinksRow } from "@/components/shared/demo-links-row";
 import { formatDate, formatDateTime, relativeTime } from "@/lib/utils/date";
 import { parseQualificationNote, isQualificationNote, looksLikeUrl, cleanUrl } from "@/lib/utils/url";
 import type { UnifiedContact, TimelineEvent } from "@/lib/contacts/types";
+import { outcomeMeta, OUTCOME_TONES } from "@/lib/activity/outcomes";
+import { EntityTypeChip, ENTITY_IDENTITY } from "@/components/shared/entity-identity";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -291,6 +293,7 @@ function TLIcon({ type }: { type: TimelineEvent["type"] }) {
     proposal_sent:    <Send           className={cn(cls, "text-blue-500")} />,
     proposal_signed:  <PenLine        className={cn(cls, "text-violet-500")} />,
     proposal_paid:    <DollarSign     className={cn(cls, "text-emerald-500")} />,
+    call_outcome:     <Phone          className={cn(cls, "text-primary")} />,
   };
   return <>{map[type] ?? <AlertCircle className={cn(cls, "text-muted-foreground")} />}</>;
 }
@@ -342,10 +345,17 @@ function TimelineTab({ contact }: { contact: UnifiedContact }) {
       <div className="relative pl-8">
         <div className="absolute left-3 top-3 bottom-3 w-px bg-border/50" />
         <div className="space-y-5">
-          {events.map((ev) => (
+          {events.map((ev) => {
+            const callTone = ev.type === "call_outcome" ? OUTCOME_TONES[outcomeMeta(ev.outcome ?? "").tone] : null;
+            return (
             <div key={ev.id} className="relative">
-              <div className="absolute -left-8 top-0 w-6 h-6 rounded-full bg-card border border-border flex items-center justify-center">
-                <TLIcon type={ev.type} />
+              <div className={cn(
+                "absolute -left-8 top-0 w-6 h-6 rounded-full border flex items-center justify-center",
+                callTone ? callTone.iconBg : "bg-card border-border"
+              )}>
+                {callTone
+                  ? <Phone className={cn("w-3.5 h-3.5", callTone.icon)} />
+                  : <TLIcon type={ev.type} />}
               </div>
               <div>
                 <div className="flex items-baseline gap-2 flex-wrap">
@@ -355,7 +365,8 @@ function TimelineTab({ contact }: { contact: UnifiedContact }) {
                 {ev.body && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-3 leading-relaxed">{ev.body}</p>}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -936,11 +947,16 @@ export function ContactModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+        <div className={cn("flex items-center justify-between px-5 py-4 border-b border-border shrink-0", ENTITY_IDENTITY.contact.headerWash)}>
           <div className="flex items-center gap-3 min-w-0">
-            <Avatar name={contact.name} size={40} />
+            <span className={cn("inline-flex shrink-0 rounded-full", ENTITY_IDENTITY.contact.avatarRing)}>
+              <Avatar name={contact.name} size={40} />
+            </span>
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-foreground truncate">{contact.name}</p>
+              <div className="flex items-center gap-2 min-w-0">
+                <EntityTypeChip kind="contact" />
+                <p className="text-sm font-semibold text-foreground truncate">{contact.name}</p>
+              </div>
               <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                 {contact.email && <span className="text-xs text-muted-foreground truncate">{contact.email}</span>}
                 {contact.platform && (

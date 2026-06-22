@@ -10,8 +10,9 @@ import {
   X, Mail, Phone, Tag, Calendar, User, TrendingUp,
   FileText, RefreshCw, Clock, ExternalLink, Edit2, Check, MessageSquare,
   Send, DollarSign, MessageCircle, ListTodo, Layers, ClipboardCheck, Zap,
-  ChevronDown, ChevronLeft, ChevronRight, Activity, PhoneCall,
+  ChevronDown, ChevronLeft, ChevronRight, Activity, PhoneCall, Briefcase,
 } from "lucide-react";
+import { EntityTypeChip, ENTITY_IDENTITY } from "@/components/shared/entity-identity";
 import { TIER_COLORS } from "@/lib/deal-health";
 import type { DealHealthResult } from "@/lib/deal-health";
 import { formatDateTime, relativeTime } from "@/lib/utils/date";
@@ -846,30 +847,41 @@ export function OpportunityModal({
 
       <div className="relative bg-card border border-border rounded-[10px] shadow-xl w-full max-w-[1080px] z-10 flex flex-col h-[85vh]">
         {/* Header */}
-        <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-border shrink-0">
-          <div className="min-w-0 flex-1 mr-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2
-                className="text-base font-semibold text-foreground leading-tight"
-                style={{ fontFamily: "var(--font-heading)" }}
-              >
-                {name}
-              </h2>
-              {/* Stage badge — shown in queue mode since contacts can span different stages */}
-              {inQueue && (
-                <span className="inline-flex items-center px-2 py-px rounded-full text-[11px] font-medium bg-muted text-muted-foreground border border-border/60 shrink-0">
-                  {localStageName}
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Created {relativeTime(opportunity.createdAt)}
-            </p>
-            <div className="mt-2">
-              <DemoLinksRow contactId={opportunity.contact?.id} />
+        <div className={cn("flex items-start justify-between px-5 pt-5 pb-4 border-b border-border shrink-0", ENTITY_IDENTITY.opportunity.headerWash)}>
+          <div className="min-w-0 flex-1 mr-3 flex items-start gap-3">
+            <span className={cn("shrink-0 mt-0.5 inline-flex items-center justify-center w-10 h-10 rounded-[10px]", ENTITY_IDENTITY.opportunity.tile)}>
+              <Briefcase className={cn("w-[18px] h-[18px]", ENTITY_IDENTITY.opportunity.tileIcon)} strokeWidth={2.25} />
+            </span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <EntityTypeChip kind="opportunity" />
+                <h2
+                  className="text-base font-semibold text-foreground leading-tight"
+                  style={{ fontFamily: "var(--font-heading)" }}
+                >
+                  {name}
+                </h2>
+                {/* Stage badge — shown in queue mode since contacts can span different stages */}
+                {inQueue && (
+                  <span className="inline-flex items-center px-2 py-px rounded-full text-[11px] font-medium bg-muted text-muted-foreground border border-border/60 shrink-0">
+                    {localStageName}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Created {relativeTime(opportunity.createdAt)}
+              </p>
+              <div className="mt-2">
+                <DemoLinksRow contactId={opportunity.contact?.id} />
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            {!!opportunity.monetaryValue && opportunity.monetaryValue > 0 && (
+              <span className="text-sm font-semibold tabular-nums text-[#7A4A1A] mr-0.5">
+                {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(opportunity.monetaryValue)}
+              </span>
+            )}
             <span
               className={cn(
                 "px-2.5 py-0.5 rounded-full text-xs font-medium capitalize",
@@ -1207,7 +1219,7 @@ export function OpportunityModal({
           )}
 
           {activeTab === "activity" && (
-            <ActivityTab entityType="opportunity" entityId={opportunity.id} />
+            <ActivityTab entityType="opportunity" entityId={opportunity.id} contactId={contactId} />
           )}
 
             {/* Quick actions — inside scroll area, below content */}

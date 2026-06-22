@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { commentLeads, proposals } from "@/lib/db/schema";
+import { commentLeads, proposals, callDispositions } from "@/lib/db/schema";
+import { outcomeMeta } from "@/lib/activity/outcomes";
 import { ghl } from "@/lib/ghl/client";
 import type { TimelineEvent } from "@/lib/contacts/types";
 
@@ -72,6 +73,9 @@ async function ghlTimeline(contactId: string, contactCreatedAt: string): Promise
   try {
     const data = await ghl.get<{ notes: GHLNote[] }>(`/contacts/${contactId}/notes/`);
     for (const note of data.notes ?? []) {
+      // Skip the raw "[Call outcome: …]" note — we render a structured
+      // call_outcome event from the dispositions table instead (no duplicate).
+      if (note.body?.trimStart().startsWith("[Call outcome:")) continue;
       events.push({
         id: `note_${note.id}`,
         type: "note_added",
@@ -165,6 +169,30 @@ export async function GET(
           }
         }
       } catch { /* ignore — proposals are optional context */ }
+
+      // Inject call-outcome events from the dispositions table.
+      try {
+        const dispositions = await db()
+          .select({
+            id: callDispositions.id,
+            outcome: callDispositions.outcome,
+            notes: callDispositions.notes,
+            dispositionedAt: callDispositions.dispositionedAt,
+          })
+          .from(callDispositions)
+          .where(eq(callDispositions.contactId, contactId));
+
+        for (const d of dispositions) {
+          events.push({
+            id: `call_${d.id}`,
+            type: "call_outcome",
+            title: `Call: ${outcomeMeta(d.outcome).label}`,
+            body: d.notes ?? undefined,
+            occurredAt: d.dispositionedAt.toISOString(),
+            outcome: d.outcome,
+          });
+        }
+      } catch { /* ignore — dispositions are optional context */ }
     } else if (id.startsWith("cl_")) {
       const clId = id.slice(3);
       const database = db();
