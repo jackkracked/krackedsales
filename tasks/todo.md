@@ -10,7 +10,7 @@ Long session; continuing in a fresh session. Working tree clean except this file
 - **A — Calls Logged fix (commit 2775b76):** calls table was empty after 2026-04-09. Now syncs GHL calendar bookings as callType "meet" (dedup meetConferenceId=`ghlappt_<id>`) in runSync. Verified: 306 calls total, **32 this month (was 0)**. Daily cron /api/cron/sync-calls keeps it current.
 
 ## REMAINING BACKLOG (Jack wants ALL, "100% accurately + beautifully")
-- **B — Audit Phase 2 (tracking):** `audits` table (drafted in schema.ts) → migration 0015 (run via scripts/run-migration pattern against .env.production.vercel DB) → /api/clickup/create-audit inserts row (ghlContactId already in payload, capture data.id) → hasAudit/auditStatus on UnifiedContact + contacts route → enable "Audit delivered" filter card (filter-sheet.tsx + filters.ts + applyRule) → daily delivered-sync cron polling audit-list ClickUp status → vercel.json. Also fix /api/me to return `name` (creator defaults). Then re-skin demo modal with the new request-modal primitives.
+- **B — Audit Phase 2 (tracking): ✅ DONE + DEPLOYED + VERIFIED (commit 048bad8, 2026-06-22).** /api/me name fix · migration 0015 applied to prod · create-audit DB write · contacts hasAudit/auditStatus join · "Audit delivered" filter card enabled · daily /api/cron/sync-audits. Two follow-ups: (1) confirm exact ClickUp "Delivered" status name to tighten isDelivered(); (2) one live end-to-end test (create audit → row → mark delivered → cron → filter). The demo-modal reskin was split out to **Phase 2b** (needs its own /impeccable pass). See the Audit Phase 2 section below.
 - **C — Activity tab: show call done/not.** Use the calls table. CAVEAT: many synced calendar calls have null contact_name / contactId / rep_name (GHL /calendars/events list omits them) — to link calls to a contact's activity, fetch contactId per appointment (may need /calendars/events detail or appointment-by-id) OR match by contactName. Investigate before building.
 - **D — Call recordings linked per contact.** OPEN QUESTION: recordings source. Google Meet recordings need Workspace (not configured); Fathom needs key (not set). GHL dialer TYPE_CALL messages may carry a recording URL (check meta/attachments). Clarify with Jack where recordings live before building.
 - **E — Mark conversation as read.** Inbox: add a way to clear unread so it doesn't persist. Self-contained. Look at components/inbox + the unread source (GHL conversation unreadCount or local state).
@@ -43,18 +43,24 @@ Jack: audits follow a call, so ESP/Details/pitches are entered manually from cal
 - [x] Brand+Website auto from qual note (✓auto); ESP/Details/pitches manual; Hiro default No
 - [x] Verified live on prod (modal opens, both steps balanced, Hiro=No default)
 
-## Phase 1 gap → fold into Phase 2
-- [ ] Creator-default person fields NOT working: `/api/me` returns only {id, role, timezone}, NO name. Fix: add `name` to /api/me response, then memberIdForName(me.name) matches a ClickUp member. (modal already wired to use me.name)
+## Phase 1 gap → fold into Phase 2 — ✅ FIXED (commit 048bad8)
+- [x] Creator-default person fields: `/api/me` now returns `name`. memberIdForName(me.name) can match a ClickUp member (modal already wired to use me.name). Live test pending (see Phase 2 verify-after).
 
-## Phase 2 — tracking + demo reskin (NEXT)
-- [ ] Fix /api/me to return `name` (creator-default)
-- [ ] `audits` table migration 0015 (additive/idempotent) mirroring demoGhlLinks; schema.ts
-- [ ] Extend /api/clickup/create-audit to insert audits row (capture ClickUp task id; link ghlContactId — already passed in payload)
-- [ ] hasAudit/auditStatus on UnifiedContact + contacts route join
-- [ ] Enable "Audit delivered" filter card (remove disabled) + ContactFilters.audit + filtersToRules + applyRule + URL parse
-- [ ] Daily delivered-sync cron (GET + CRON_SECRET) polling audit list status → deliveredAt; register in vercel.json (daily)
-- [ ] Re-skin demo modal with the shared request-modal primitives
-- [ ] Security/data review (DB write + external input + ClickUp); polish + harden; deploy
+## Phase 2 — tracking — ✅ DONE + DEPLOYED + VERIFIED (commit 048bad8, 2026-06-22)
+- [x] Fix /api/me to return `name` (creator-default) — getSessionUser already had it; added to JSON
+- [x] `audits` table migration 0015 (additive/idempotent) — applied to prod, 11 cols verified, 0 rows
+- [x] Extend /api/clickup/create-audit to insert audits row (taskId PK + ghlContactId + createdBy from session; non-fatal try/catch; onConflictDoNothing)
+- [x] hasAudit/auditStatus on UnifiedContact + contacts route join (auditMap, delivered wins) + applyRule "auditDelivered" case
+- [x] Enable "Audit delivered" filter card + ContactFilters.audit Tri + filtersToRules + filtersToParams + parseFilters + countActive (removed Coming-soon Lock)
+- [x] Daily delivered-sync cron /api/cron/sync-audits (GET + CRON_SECRET, per-task fetch) → status/deliveredAt; vercel.json 0 10 * * *
+- [x] Security/data review (Gates 5+6) passed; tsc clean; deployed READY; cron verified live (401 unauth, {pending:0} authed)
+
+### Verify-after / hardening notes
+- [ ] **Confirm the exact ClickUp "Delivered" status name** on the Account Audits list. `isDelivered()` currently treats type closed/done OR a status name matching /deliver|complete|sent|done/. Raw name is stored in `clickup_status` for reconciliation. Tighten once Jack confirms the real status.
+- [ ] End-to-end live test: create an audit from the modal → confirm a row lands in `audits` with the right ghlContactId → mark the ClickUp task delivered → run the cron → confirm the "Audit delivered" filter shows that contact.
+
+## Phase 2b — demo modal reskin (SEPARATE — needs its own impeccable pass)
+- [ ] Re-skin demo modal with the shared request-modal primitives. This is a UI feature → run /impeccable shape → craft → polish → harden. NOT part of the tracking spine; deferred so tracking could ship clean.
 
 ---
 
@@ -72,8 +78,8 @@ Jack: audits follow a call, so ESP/Details/pitches are entered manually from cal
 - [x] Polish + harden; security/data review (read-only, passed); deployed `vercel --prod` (commit 726659b)
 - [x] Verified LIVE on prod: 3,131 → 1 live filter, count-up, URL persist, emerald stage colour, real GHL stages
 
-## NEXT TASK (Jack: "closed tab")
-- [ ] Wire **Audit delivered** tracking, then enable the disabled filter card in filter-sheet.tsx
+## NEXT TASK (Jack: "closed tab") — ✅ DONE (commit 048bad8)
+- [x] Wired **Audit delivered** tracking + enabled the filter card in filter-sheet.tsx (see Audit Phase 2 section above)
 
 ## Decisions
 - Filtering is SERVER-SIDE via existing `rules` engine — sheet emits FilterRule[] (is_any_of = OR within card, and = AND across cards). Minimal-impact reuse.
