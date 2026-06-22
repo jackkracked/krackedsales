@@ -26,7 +26,11 @@ async function fetchCalendarNames(): Promise<Map<string, string>> {
     const data = await ghl.get<{ calendars?: Array<{ id: string; name: string }> }>(
       `/calendars/?locationId=${locationId()}`
     );
-    return new Map((data.calendars ?? []).map((c) => [c.id, c.name]));
+    // Light tidy of the raw GHL calendar name for display: trim + drop a
+    // trailing period/whitespace (e.g. "Email Design Demo | Intro Call." → "…Call").
+    return new Map(
+      (data.calendars ?? []).map((c) => [c.id, c.name.trim().replace(/[.\s]+$/, "")])
+    );
   } catch {
     return new Map();
   }
