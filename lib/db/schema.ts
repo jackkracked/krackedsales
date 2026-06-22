@@ -390,6 +390,27 @@ export const demoGhlLinks = pgTable("demo_ghl_links", {
 });
 
 /**
+ * Audit requests created from the in-app Create Audit modal.
+ * Mirrors the ClickUp audit task (clickupTaskId) and links it to a GHL contact
+ * so the contacts list can show audit status and the "Audit delivered" filter +
+ * KPIs work. `status` starts "requested"; a daily cron flips it to "delivered"
+ * when the ClickUp task is complete.
+ */
+export const audits = pgTable("audits", {
+  clickupTaskId: text("clickup_task_id").primaryKey(),
+  ghlContactId:  text("ghl_contact_id"),
+  brandName:     text("brand_name"),
+  website:       text("website"),
+  details:       text("details"),
+  status:        text("status").notNull().default("requested"), // requested | delivered
+  clickupStatus: text("clickup_status"),                          // last-seen ClickUp task status
+  requestedAt:   timestamp("requested_at").defaultNow().notNull(),
+  deliveredAt:   timestamp("delivered_at"),
+  createdBy:     uuid("created_by"),                              // app user id (nullable)
+  checkedAt:     timestamp("checked_at").defaultNow().notNull(),
+});
+
+/**
  * Demo Tracker target turnaround times — single row, upserted on save.
  * All values are in days. Defaults match the original STAGE_RISK_DAYS constants.
  */
