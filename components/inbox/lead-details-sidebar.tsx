@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils/cn";
 import { parseQualificationNote, isQualificationNote, cleanUrl } from "@/lib/utils/url";
 import { CreateTaskModal } from "@/components/shared/create-task-modal";
 import { CreateDemoModal } from "@/components/shared/create-demo-modal";
+import { CreateAuditModal } from "@/components/shared/create-audit-modal";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 
 interface Note {
@@ -47,6 +48,7 @@ export function LeadDetailsSidebar({ contactId, contactName = "" }: LeadDetailsS
   const queryClient = useQueryClient();
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [showCreateDemo, setShowCreateDemo] = useState(false);
+  const [showCreateAudit, setShowCreateAudit] = useState(false);
   const [localStageId, setLocalStageId] = useState<string | null>(null);
   const [localStageName, setLocalStageName] = useState<string | null>(null);
   const [savingStage, setSavingStage] = useState(false);
@@ -222,7 +224,7 @@ export function LeadDetailsSidebar({ contactId, contactName = "" }: LeadDetailsS
                 {[
                   { icon: ListTodo, label: "Task", onClick: () => setShowCreateTask(true) },
                   { icon: Layers, label: "Demo", onClick: () => setShowCreateDemo(true) },
-                  { icon: ClipboardCheck, label: "Audit", onClick: undefined },
+                  { icon: ClipboardCheck, label: "Audit", onClick: () => setShowCreateAudit(true) },
                 ].map(({ icon: Icon, label, onClick }) => (
                   <button
                     key={label}
@@ -312,6 +314,13 @@ export function LeadDetailsSidebar({ contactId, contactName = "" }: LeadDetailsS
         opportunityId={opp.id}
         opportunitySource={opp.source}
         onClose={() => setShowCreateDemo(false)}
+      />
+    )}
+    {showCreateAudit && opp && (
+      <CreateAuditModal
+        contactId={opp.contact?.id}
+        contactName={opp.contact?.name}
+        onClose={() => setShowCreateAudit(false)}
       />
     )}
     </>

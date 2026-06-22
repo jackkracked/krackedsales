@@ -2,14 +2,18 @@
 
 **Status:** in progress · 2026-06-22 · Jack approved direction **B + stage color** (hero live-count, tinted groups, rep avatars, semantic stage pills)
 
-## Plan
-- [ ] `lib/contacts/filters.ts` — FilterRule types, ContactFilters model, pill catalogs, filtersToRules(), URL serialize/parse, countActive, stage tint
-- [ ] Extend API `app/api/contacts/route.ts` applyRule() — platform, channel, assignedTo, urgency, daysInCurrentStage, hasProposal, reachableChannels
-- [ ] Build `components/contacts/filter-sheet.tsx` (states, keyboard, reduced-motion, responsive, a11y)
-- [ ] Rewire `contacts-client.tsx` — ContactFilters state, live filtering, URL persistence, count badge, keep search + All/Unread/No-response presets, smart lists store ContactFilters
-- [ ] Delete `advanced-filters-panel.tsx`; add prefers-reduced-motion guard in globals.css
-- [ ] Verify tsc + visual check; remove temp mock + revert proxy.ts whitelist
-- [ ] Polish + harden; security/data review; deploy
+## Plan — ✅ COMPLETE (2026-06-22, deployed to prod)
+- [x] `lib/contacts/filters.ts` — FilterRule types, ContactFilters model, pill catalogs, filtersToRules(), URL serialize/parse, countActive, stage tint
+- [x] Extend API `app/api/contacts/route.ts` applyRule() — platform, channel, assignedTo, urgency, daysInCurrentStage, hasProposal, reachableChannels
+- [x] Build `components/contacts/filter-sheet.tsx` (states, keyboard, reduced-motion, responsive, a11y, hero count-up)
+- [x] Rewire `contacts-client.tsx` — ContactFilters state, live filtering, URL persistence, count badge, search + All/Unread/No-response presets, smart lists store ContactFilters
+- [x] Delete `advanced-filters-panel.tsx`; add prefers-reduced-motion guard in globals.css
+- [x] Verify tsc (clean) + in-browser visual check (clean console, fixed hydration); removed temp mock + reverted proxy.ts
+- [x] Polish + harden; security/data review (read-only, passed); deployed `vercel --prod` (commit 726659b)
+- [x] Verified LIVE on prod: 3,131 → 1 live filter, count-up, URL persist, emerald stage colour, real GHL stages
+
+## NEXT TASK (Jack: "closed tab")
+- [ ] Wire **Audit delivered** tracking, then enable the disabled filter card in filter-sheet.tsx
 
 ## Decisions
 - Filtering is SERVER-SIDE via existing `rules` engine — sheet emits FilterRule[] (is_any_of = OR within card, and = AND across cards). Minimal-impact reuse.

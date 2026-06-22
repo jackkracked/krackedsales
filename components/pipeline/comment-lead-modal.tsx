@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CreateTaskModal } from "@/components/shared/create-task-modal";
 import { CreateDemoModal } from "@/components/shared/create-demo-modal";
+import { CreateAuditModal } from "@/components/shared/create-audit-modal";
 import {
   X, Mail, Phone, Globe, MessageSquare, Clock,
   User, TrendingUp, Check, RefreshCw, Edit2, Zap, ListTodo, Layers, ClipboardCheck,
@@ -378,6 +379,7 @@ export function CommentLeadModal({ lead, onClose, onUpdate, initialTab }: Commen
   const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? "overview");
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [showCreateDemo, setShowCreateDemo] = useState(false);
+  const [showCreateAudit, setShowCreateAudit] = useState(false);
   const [editingField, setEditingField] = useState<EditableFieldKey | null>(null);
   const queryClient = useQueryClient();
 
@@ -562,6 +564,7 @@ export function CommentLeadModal({ lead, onClose, onUpdate, initialTab }: Commen
                       Create Demo
                     </button>
                     <button
+                      onClick={() => setShowCreateAudit(true)}
                       className="flex flex-col items-center gap-1.5 py-3 text-xs font-medium text-foreground border border-border rounded-[7px] hover:bg-muted hover:border-primary/20 transition-colors"
                     >
                       <ClipboardCheck className="w-4 h-4 text-muted-foreground" />
@@ -633,6 +636,13 @@ export function CommentLeadModal({ lead, onClose, onUpdate, initialTab }: Commen
           commentLeadId={lead.id}
           opportunitySource={isFacebook ? "facebook" : "instagram"}
           onClose={() => setShowCreateDemo(false)}
+        />
+      )}
+
+      {showCreateAudit && (
+        <CreateAuditModal
+          contactName={lead.name}
+          onClose={() => setShowCreateAudit(false)}
         />
       )}
     </>

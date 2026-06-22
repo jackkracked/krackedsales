@@ -13,6 +13,8 @@ import { relativeTime, formatDate } from "@/lib/utils/date";
 import { Avatar } from "@/components/ui/avatar";
 import { ContactModal } from "./contact-modal";
 import { FilterSheet } from "./filter-sheet";
+import { CreateAuditModal } from "@/components/shared/create-audit-modal";
+import { CreateDemoModal } from "@/components/shared/create-demo-modal";
 import {
   type ContactFilters,
   EMPTY_FILTERS,
@@ -126,6 +128,8 @@ export function ContactsClient() {
   const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [selected, setSelected]               = useState<Set<string>>(new Set());
   const [openContact, setOpenContact]         = useState<UnifiedContact | null>(null);
+  const [auditContact, setAuditContact]       = useState<UnifiedContact | null>(null);
+  const [demoContact, setDemoContact]         = useState<UnifiedContact | null>(null);
   const [openContactTab, setOpenContactTab]   = useState<"timeline" | undefined>(undefined);
   const [smartLists, setSmartLists]           = useState<SmartList[]>([]);
   const [activeListId, setActiveListId]       = useState<string | null>(null);
@@ -279,21 +283,10 @@ export function ContactsClient() {
     setActivePreset("all");
   }, []);
 
-  // Quick actions
-  async function handleQuickAction(action: string, contact: UnifiedContact) {
-    if (action === "audit" && contact.ghlContactId) {
-      try {
-        await fetch("/api/clickup/create-audit", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contactId: contact.ghlContactId, contactName: contact.name }),
-        });
-      } catch {}
-    }
-    if (action === "demo" && contact.ghlContactId) {
-      // Open the contact modal to the demo tab
-      setOpenContact(contact);
-    }
+  // Quick actions — open the full create modals (same flow as the pipeline)
+  function handleQuickAction(action: string, contact: UnifiedContact) {
+    if (action === "audit") setAuditContact(contact);
+    if (action === "demo") setDemoContact(contact);
   }
 
   // Stage summary counts
@@ -572,6 +565,26 @@ export function ContactsClient() {
         stages={stageOptions}
         reps={repOptions}
       />
+
+      {auditContact && (
+        <CreateAuditModal
+          contactId={auditContact.ghlContactId ?? undefined}
+          contactName={auditContact.name}
+          onClose={() => setAuditContact(null)}
+        />
+      )}
+
+      {demoContact && (
+        <CreateDemoModal
+          contactId={demoContact.ghlContactId ?? undefined}
+          contactName={demoContact.name}
+          contactEmail={demoContact.email ?? undefined}
+          contactPhone={demoContact.phone ?? undefined}
+          opportunityId={demoContact.opportunityId ?? undefined}
+          opportunitySource={demoContact.platform ?? undefined}
+          onClose={() => setDemoContact(null)}
+        />
+      )}
 
       {showCreateModal && (
         <CreateContactModal
