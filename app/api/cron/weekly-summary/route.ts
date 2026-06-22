@@ -17,6 +17,13 @@ export const maxDuration = 60;
 
 const MODEL = "gemini-2.5-flash";
 
+// Vercel Cron invokes the path with a GET request (it auto-attaches the CRON_SECRET
+// in the Authorization header). The generation logic lived only under POST, so the
+// scheduled job never actually ran — delegate GET to POST so it fires every Monday.
+export async function GET(req: NextRequest) {
+  return POST(req);
+}
+
 /**
  * POST /api/cron/weekly-summary
  *

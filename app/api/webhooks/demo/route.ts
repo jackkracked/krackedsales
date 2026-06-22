@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { slackSettings } from "@/lib/db/schema";
+import { createBoardFromDemo } from "@/lib/demo-boards/create";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({ ok: true });
+    // Auto-create the demo board for this prospect. Non-fatal: a board-create
+    // failure must never break the demo request that already succeeded in n8n.
+    let boardToken: string | null = null;
+    try {
+      const board = await createBoardFromDemo(body);
+      boardToken = board.token;
+    } catch (boardErr) {
+      console.error("[demo webhook] board auto-create failed:", boardErr);
+    }
+
+    return NextResponse.json({ ok: true, boardToken });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[demo webhook] fetch threw:", message);

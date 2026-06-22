@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { listConfigs, getMetricValues } from "@/lib/kpi/engine";
 import { db } from "@/lib/db";
 import {
   calls, softwareCosts, proposals, proposalInstalments,
@@ -14,9 +15,11 @@ import { getKpiDef } from "@/lib/dashboard-kpis";
 import { kpiHealthLog } from "@/lib/db/schema";
 import { KPI_DEFINITIONS } from "@/lib/kpi-health/definitions";
 import { getAdaptiveBuckets, bucketCount, bucketSum } from "@/lib/kpi/buckets";
+import { getRepCommissionEvents, commissionInRange, type CommissionEvent, type PayoutTiming } from "@/lib/kpi/rep-proposal-commission";
 import { loadStripeKpiSeries, type StripeKpiSeries } from "@/lib/kpi/stripe-series";
 import { loadMetaAdSpend, type MetaAdSpend } from "@/lib/kpi/meta-series";
 import { readSnapshotSeries } from "@/lib/kpi/snapshots";
+import { readLastGood, writeLastGood } from "@/lib/kpi/last-good";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -61,6 +64,8 @@ export interface KpiMetricResult {
   series?: number[];
   /** Snapshot metrics only: e.g. "as of Jun 4" — signals a point-in-time level. */
   asOfLabel?: string;
+  /** "stale" = served from last-good cache because the source failed this refresh. */
+  status?: "ok" | "stale";
 }
 
 /**
@@ -115,7 +120,9 @@ export async function GET(req: NextRequest) {
 
   // ── Decide which shared sources to load ────────────────────────────────────
   const needsAdminOpps = role === "admin" && keys.some((k) => ["leads", "pipeline_value_admin"].includes(k));
-  const needsRepOpps = keys.some((k) => ["deals_won", "revenue_won", "pipeline_count", "pipeline_value", "commission"].includes(k));
+  // Pipeline snapshots still come from GHL; deals/commission/revenue are now proposal-based.
+  const needsRepOpps = keys.some((k) => ["pipeline_count", "pipeline_value"].includes(k));
+  const needsRepPaidProposals = keys.some((k) => ["deals_won", "revenue_won"].includes(k));
   const needsStripe = keys.some((k) => ["cash", "roas", "mrr"].includes(k));
   const needsMeta = keys.some((k) => ["ad_spend", "roas"].includes(k));
   const needsCallsAdmin = keys.includes("calls_admin");
@@ -130,7 +137,7 @@ export async function GET(req: NextRequest) {
   const [
     adminOpps, repOpps, stripeSeries, metaSpend,
     callAdminRows, callRepRows, propAdminRows, propRepRows,
-    repTargetRows, commissionRows, repUserRows,
+    repTargetRows, commissionRows, repUserRows, repPaidProposalRows,
   ] = await Promise.all([
     needsAdminOpps ? fetchAllGhlOpps(`/opportunities/search?location_id=${locId}`) : Promise.resolve([] as GHLOpportunity[]),
     needsRepOpps && ghlUserId ? fetchAllGhlOpps(`/opportunities/search?location_id=${locId}&assigned_to=${ghlUserId}`) : Promise.resolve([] as GHLOpportunity[]),
@@ -157,10 +164,24 @@ export async function GET(req: NextRequest) {
     needsCommission && userId
       ? db().select({ commissionPct: users.commissionPct }).from(users).where(eq(users.id, userId)).limit(1)
       : Promise.resolve([] as { commissionPct: number | null }[]),
+    // Rep's own paid proposals (Deals Closed + Revenue Won) — scoped to proposals they sent.
+    needsRepPaidProposals && userId
+      ? db().select({ totalAmount: proposals.totalAmount, paidAt: proposals.paidAt })
+          .from(proposals)
+          .where(and(eq(proposals.createdBy, userId), isNotNull(proposals.paidAt), gte(proposals.paidAt, prevStart), lt(proposals.paidAt, end)))
+      : Promise.resolve([] as { totalAmount: number; paidAt: Date | null }[]),
   ]);
 
   const repTarget = repTargetRows[0] ?? null;
   const commissionPct = repUserRows[0]?.commissionPct ?? 0;
+  const payoutTiming = (commissionRows[0]?.payoutTiming as PayoutTiming) ?? "full_paid";
+
+  // Proposal-based commission events for this rep (payout-timing aware) — the
+  // SAME source the breakdown drawer uses, so card and drawer always agree.
+  let commissionEvents: CommissionEvent[] = [];
+  if (needsCommission && userId && commissionPct > 0) {
+    commissionEvents = await getRepCommissionEvents({ userId, commissionPct, payoutTiming });
+  }
 
   // ── Helpers shared across metrics ──────────────────────────────────────────
   const inRange = (d: Date | string | null | undefined, s: Date, e: Date): boolean => {
@@ -170,7 +191,6 @@ export async function GET(req: NextRequest) {
   };
   const countOppsCreated = (opps: GHLOpportunity[], s: Date, e: Date) =>
     opps.filter((o) => inRange(o.createdAt, s, e)).length;
-  const wonOpps = repOpps.filter((o) => o.status === "won");
 
   // ── Compute each metric ────────────────────────────────────────────────────
   const metrics: Record<string, KpiMetricResult> = {};
@@ -300,13 +320,13 @@ export async function GET(req: NextRequest) {
           break;
         }
 
-        // ── Rep: Deals Closed (GHL won by updatedAt) ───────────────────────────
+        // ── Rep: Deals Closed (proposals they sent that got paid) ──────────────
         case "deals_won": {
           metrics[key] = {
-            value: wonOpps.filter((o) => inRange(o.updatedAt, start, end)).length,
-            prev: wonOpps.filter((o) => inRange(o.updatedAt, prevStart, prevEnd)).length,
+            value: repPaidProposalRows.filter((r) => inRange(r.paidAt, start, end)).length,
+            prev: repPaidProposalRows.filter((r) => inRange(r.paidAt, prevStart, prevEnd)).length,
             target: preset === "mtd" ? (repTarget?.dealsPerMonth ?? undefined) : undefined,
-            series: bucketCount(wonOpps, (o) => o.updatedAt, buckets),
+            series: bucketCount(repPaidProposalRows, (r) => r.paidAt, buckets),
           };
           break;
         }
@@ -323,26 +343,24 @@ export async function GET(req: NextRequest) {
           break;
         }
 
-        // ── Rep: Commission (GHL won value × pct) ──────────────────────────────
+        // ── Rep: Commission (proposal-based, payout-timing aware) ──────────────
         case "commission": {
-          const wonValue = (s: Date, e: Date) =>
-            wonOpps.filter((o) => inRange(o.updatedAt, s, e)).reduce((t, o) => t + (o.monetaryValue ?? 0), 0);
           metrics[key] = {
-            value: Math.round(wonValue(start, end) * commissionPct / 100),
-            prev: Math.round(wonValue(prevStart, prevEnd) * commissionPct / 100),
-            series: bucketSum(wonOpps, (o) => o.updatedAt, (o) => (o.monetaryValue ?? 0) * commissionPct / 100, buckets),
+            value: Math.round(commissionInRange(commissionEvents, start, end)),
+            prev: Math.round(commissionInRange(commissionEvents, prevStart, prevEnd)),
+            series: bucketSum(commissionEvents, (e) => e.date, (e) => e.commission, buckets),
           };
           break;
         }
 
-        // ── Rep: Revenue Won (GHL) ─────────────────────────────────────────────
+        // ── Rep: Revenue Won (paid proposals they sent) ────────────────────────
         case "revenue_won": {
-          const wonValue = (s: Date, e: Date) =>
-            wonOpps.filter((o) => inRange(o.updatedAt, s, e)).reduce((t, o) => t + (o.monetaryValue ?? 0), 0);
+          const paidValue = (s: Date, e: Date) =>
+            repPaidProposalRows.filter((r) => inRange(r.paidAt, s, e)).reduce((t, r) => t + r.totalAmount, 0);
           metrics[key] = {
-            value: wonValue(start, end),
-            prev: wonValue(prevStart, prevEnd),
-            series: bucketSum(wonOpps, (o) => o.updatedAt, (o) => o.monetaryValue ?? 0, buckets),
+            value: paidValue(start, end),
+            prev: paidValue(prevStart, prevEnd),
+            series: bucketSum(repPaidProposalRows, (r) => r.paidAt, (r) => r.totalAmount, buckets),
           };
           break;
         }
@@ -383,6 +401,39 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // ── Last-good-value fallback (stops the random flash-to-zero) ──────────────
+  // If an external source failed this refresh, serve the last successful value
+  // for that metric instead of a fake $0; otherwise cache the fresh value. A
+  // genuine zero (source succeeded) is cached and shown as 0 — we only fall back
+  // when the source actually failed.
+  const scopeKey = role === "admin" ? "admin" : `rep:${userId}`;
+  const rangeKey = `${start.toISOString()}|${end.toISOString()}|${preset}`;
+  const stripeOk = !needsStripe || stripeSeries?.hasData === true;
+  const metaOk = !needsMeta || metaSpend?.hasData === true;
+  const sourceFailed = (key: string): boolean => {
+    if (key === "cash" || key === "mrr") return !stripeOk;
+    if (key === "ad_spend") return !metaOk;
+    if (key === "roas") return !stripeOk || !metaOk;
+    return false; // DB/GHL metrics don't have a clean failure signal yet
+  };
+  const staleKeys = keys.filter((k) => metrics[k] && sourceFailed(k));
+  const healthyKeys = keys.filter((k) => metrics[k] && !sourceFailed(k));
+  if (staleKeys.length) {
+    const lastGood = await readLastGood(scopeKey, rangeKey, staleKeys);
+    for (const k of staleKeys) {
+      const lg = lastGood.get(k);
+      metrics[k] = lg
+        ? { value: lg.value, prev: lg.prev, series: lg.series ?? undefined, asOfLabel: metrics[k].asOfLabel, status: "stale" }
+        : { ...metrics[k], status: "stale" };
+    }
+  }
+  for (const k of healthyKeys) metrics[k].status = "ok";
+  writeLastGood(
+    scopeKey,
+    rangeKey,
+    healthyKeys.map((k) => ({ key: k, value: metrics[k].value, prev: metrics[k].prev, series: metrics[k].series ?? null })),
+  ).catch(() => {});
+
   // Fire-and-forget: log health status for computed metrics
   try {
     const logEntries = Object.entries(metrics).map(([key, result]) => {
@@ -401,6 +452,33 @@ export async function GET(req: NextRequest) {
     }
   } catch {
     // Health logging should never block the response
+  }
+
+  // ─── Configurable-KPI overlay ───────────────────────────────────────────────
+  // The dashboard reflects /kpis configs: a wired KPI's value flows through here too,
+  // so the two surfaces can't disagree. A small map bridges dashboard keys to the
+  // /kpis metric keys; matching keys (leads, commission, calls…) pass through 1:1.
+  // Unconfigured tiles keep their legacy compute. Non-fatal.
+  try {
+    const enabled = (await listConfigs()).filter((c) => c.enabled);
+    if (enabled.length) {
+      const DASH_TO_KPI: Record<string, string> = {
+        cash: "cashCollected",
+        mrr: "totalMrr",
+        ad_spend: "adSpend",
+      };
+      const engineVals = await getMetricValues(
+        enabled.map((c) => c.metricKey),
+        { start, end },
+        { isAdmin: role === "admin", userId, ghlUserId, repEmail },
+      );
+      for (const key of Object.keys(metrics)) {
+        const r = engineVals[DASH_TO_KPI[key] ?? key];
+        if (r && !r.unconfigured) metrics[key] = { ...metrics[key], value: r.value };
+      }
+    }
+  } catch (overlayErr) {
+    console.error("[dashboard/kpis] config overlay failed", overlayErr);
   }
 
   return NextResponse.json({ metrics });

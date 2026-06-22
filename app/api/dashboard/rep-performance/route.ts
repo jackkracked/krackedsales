@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { users, calls, proposals } from "@/lib/db/schema";
-import { and, eq, gte, lte, count, isNotNull } from "drizzle-orm";
+import { and, eq, gte, lte, count, sum, isNotNull } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 import {
@@ -153,16 +153,18 @@ export async function GET(req: NextRequest) {
         : and(eq(proposals.createdBy, user.id), isNotNull(proposals.sentAt));
       const [propRow] = await db().select({ c: count() }).from(proposals).where(propSentWhere);
 
-      // Deals closed — proposals with paidAt OR GHL opps in "closed" stages
+      // Deals closed — proposals THIS REP sent that got paid in the period.
+      // Count and $ value come from the same set, so they always agree (and match
+      // the commission dashboard). GHL won-opps are intentionally excluded.
       const dealsWhere = start
         ? and(eq(proposals.createdBy, user.id), isNotNull(proposals.paidAt), gte(proposals.paidAt, start), lte(proposals.paidAt, end))
         : and(eq(proposals.createdBy, user.id), isNotNull(proposals.paidAt));
-      const [dealRow] = await db().select({ c: count() }).from(proposals).where(dealsWhere);
-      // Also count GHL opps with status "won" assigned to this rep
-      const closedOpps = user.ghlUserId
-        ? allOpps.filter((o) => o.assignedTo === user.ghlUserId && o.status === "won").length
-        : 0;
-      const totalClosed = Number(dealRow?.c ?? 0) + closedOpps;
+      const [dealRow] = await db()
+        .select({ c: count(), v: sum(proposals.totalAmount) })
+        .from(proposals)
+        .where(dealsWhere);
+      const totalClosed = Number(dealRow?.c ?? 0);
+      const closedValue = Number(dealRow?.v ?? 0);
 
       // Open leads (GHL opps assigned to this user, status open)
       const openLeads = user.ghlUserId
@@ -183,6 +185,7 @@ export async function GET(req: NextRequest) {
         demos,
         proposalsSent: Number(propRow?.c ?? 0),
         dealsClosed: totalClosed,
+        closedValue,
         openLeads,
       };
     })

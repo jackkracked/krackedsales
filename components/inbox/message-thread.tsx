@@ -206,26 +206,26 @@ export function MessageThread({ messages }: MessageThreadProps) {
 
         // ── Regular message bubble (SMS / FB / IG / etc.) ────────────
         return (
-          <div key={msg.id} className={cn("flex flex-col gap-0.5", isOutbound ? "items-end" : "items-start")}>
+          <div key={msg.id} className={cn("flex flex-col gap-1", isOutbound ? "items-end" : "items-start")}>
             <div className={cn(
-              "max-w-[70%] px-3.5 py-2.5 rounded-[10px] text-sm",
+              "max-w-[68%] px-3.5 py-2.5 text-sm leading-relaxed",
               isOutbound
-                ? "bg-primary text-primary-foreground rounded-br-sm"
-                : "bg-muted text-foreground rounded-bl-sm"
+                ? "bg-primary text-primary-foreground rounded-[16px] rounded-br-[5px] shadow-[0_4px_14px_-8px_rgba(15,58,92,0.5)]"
+                : "bg-card text-foreground border border-border/70 rounded-[16px] rounded-bl-[5px] shadow-[0_2px_8px_-6px_rgba(15,23,42,0.18)]"
             )}>
               <MessageBody
                 body={msg.body}
-                linkClassName={isOutbound ? "text-primary-foreground" : "text-primary"}
+                linkClassName={isOutbound ? "text-primary-foreground underline" : "text-primary"}
               />
               <p className={cn(
-                "text-[11px] mt-1 text-right",
-                isOutbound ? "text-primary-foreground/70" : "text-muted-foreground"
+                "text-[10px] mt-1.5 text-right tabular-nums",
+                isOutbound ? "text-primary-foreground/65" : "text-muted-foreground"
               )}>
                 {msg.dateAdded ? formatDateTime(msg.dateAdded) : ""}
               </p>
             </div>
             {channelLabel && (
-              <span className="text-[10px] text-muted-foreground px-1">
+              <span className="text-[10px] text-muted-foreground/70 px-1.5">
                 {channelLabel}
               </span>
             )}

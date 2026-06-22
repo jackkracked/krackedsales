@@ -3,6 +3,7 @@ import { ghl } from "@/lib/ghl/client";
 import type { GHLMessage } from "@/lib/ghl/types";
 import { getSessionUser } from "@/lib/auth/session";
 import { logActivity } from "@/lib/activity/logger";
+import { updateLastResponder } from "@/lib/ghl/sync";
 
 export const dynamic = "force-dynamic";
 
@@ -97,6 +98,14 @@ export async function POST(
       entityName: undefined,
       metadata: { channel: sendType, conversation_id: conversationId },
     });
+
+    // Claim ownership locally: this rep is now the last responder. Reliable for
+    // app-originated sends regardless of whether GHL echoes a userId back.
+    if (sessionUser?.ghlUserId) {
+      await updateLastResponder(conversationId, sessionUser.ghlUserId, "api", new Date()).catch(
+        () => {}
+      );
+    }
 
     return NextResponse.json(data);
   } catch (err) {

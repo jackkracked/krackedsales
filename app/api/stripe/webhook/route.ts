@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { proposals, proposalInstalments, stripeEvents, agreementTemplates, tasks, users } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { stripe } from "@/lib/stripe/client";
 import type Stripe from "stripe";
 import { generateAgreementPdf } from "@/lib/pdf/render";
@@ -206,6 +206,10 @@ async function sendReceiptForProposal(proposalId: string) {
     paymentStructure: proposal.paymentStructure,
     billingInterval: proposal.billingInterval,
     billingIntervalCount: proposal.billingIntervalCount,
+    autoRenew: proposal.autoRenew,
+    listAmount: proposal.listAmount,
+    discountType: proposal.discountType,
+    discountValue: proposal.discountValue,
     startDate: proposal.startDate,
     endDate: proposal.endDate,
     signedAt: proposal.signedAt,
@@ -388,11 +392,66 @@ export async function POST(req: NextRequest) {
             dispatchWorkflowEvent("proposal.paid", payload)
           ).catch(() => {});
         } else {
-          // Single payment matched by invoice id (no metadata)
-          await db()
+          // No proposal metadata on the invoice (e.g. a management/subscription
+          // first invoice, where the proposal_id lives on the subscription, not
+          // the invoice). Correlate it carefully so we NEVER mark the wrong one:
+          //   1) a stored invoice id, 2) the invoice's subscription metadata,
+          //   3) customer + matching amount — a single confident match only.
+          const byInvoice = await db()
             .update(proposals)
             .set({ status: "paid", paidAt: new Date(), updatedAt: new Date() })
-            .where(eq(proposals.stripeInvoiceId, stripeInvoiceId));
+            .where(and(eq(proposals.stripeInvoiceId, stripeInvoiceId), ne(proposals.status, "paid")))
+            .returning({ id: proposals.id });
+          let matchedId: string | null = byInvoice[0]?.id ?? null;
+
+          // 2) the invoice's subscription carries the proposal_id
+          const subField = (obj as Stripe.Invoice & { subscription?: string | { id: string } }).subscription;
+          if (!matchedId && subField) {
+            try {
+              const subId = typeof subField === "string" ? subField : subField.id;
+              const sub = await stripe().subscriptions.retrieve(subId);
+              const pid = sub.metadata?.proposal_id;
+              if (pid) {
+                const r = await db()
+                  .update(proposals)
+                  .set({ status: "paid", paidAt: new Date(), stripeSubscriptionId: subId, stripeInvoiceId, updatedAt: new Date() })
+                  .where(and(eq(proposals.id, pid), ne(proposals.status, "paid")))
+                  .returning({ id: proposals.id });
+                matchedId = r[0]?.id ?? null;
+              }
+            } catch (e) {
+              console.error("[webhook] subscription lookup failed:", e);
+            }
+          }
+
+          // 3) customer + amount — only when exactly ONE unpaid proposal for this
+          //    customer matches the paid amount, so other proposals are untouched.
+          if (!matchedId && obj.customer) {
+            const custId = typeof obj.customer === "string" ? obj.customer : obj.customer.id;
+            const amountDollars = (obj.amount_paid ?? 0) / 100;
+            const candidates = await db()
+              .select()
+              .from(proposals)
+              .where(and(eq(proposals.stripeCustomerId, custId), ne(proposals.status, "paid")));
+            const byAmount = candidates.filter((p) => Math.abs((p.totalAmount ?? 0) - amountDollars) < 0.5);
+            if (byAmount.length === 1) {
+              await db()
+                .update(proposals)
+                .set({ status: "paid", paidAt: new Date(), stripeInvoiceId, updatedAt: new Date() })
+                .where(eq(proposals.id, byAmount[0].id));
+              matchedId = byAmount[0].id;
+            } else {
+              console.warn(`[webhook] invoice.paid ${stripeInvoiceId}: no confident proposal match (customer=${custId}, $${amountDollars}, unpaid=${candidates.length}, amountMatch=${byAmount.length})`);
+            }
+          }
+
+          if (matchedId) {
+            sendReceiptForProposal(matchedId).catch((e) => console.error("[webhook] Receipt email failed:", e));
+            createOnboardingTasks(matchedId).catch(() => {});
+            buildProposalPayload(matchedId, { stripeInvoiceId }).then((payload) =>
+              dispatchWorkflowEvent("proposal.paid", payload)
+            ).catch(() => {});
+          }
         }
         break;
       }
@@ -402,15 +461,38 @@ export async function POST(req: NextRequest) {
         const session = event.data.object as Stripe.Checkout.Session;
         const sessionMeta = session.metadata ?? {};
         if (sessionMeta.proposal_id) {
-          await db()
+          const subId = typeof session.subscription === "string" ? session.subscription : null;
+          const [updated] = await db()
             .update(proposals)
             .set({
               status: "paid",
               paidAt: new Date(),
-              stripeSubscriptionId: typeof session.subscription === "string" ? session.subscription : null,
+              stripeSubscriptionId: subId,
               updatedAt: new Date(),
             })
-            .where(eq(proposals.id, sessionMeta.proposal_id));
+            .where(eq(proposals.id, sessionMeta.proposal_id))
+            .returning({ autoRenew: proposals.autoRenew });
+
+          // Paid-in-full term (auto-renew OFF): set the subscription to cancel at the end
+          // of its single period, so it bills exactly once and NEVER renews — while still
+          // counting as an active subscription (management client / MRR) until the term ends.
+          // Retry a few times: this guarantees no second charge, so it must not be left to a
+          // single fallible call (the renewal it prevents is the whole point of "pay in full").
+          if (subId && updated?.autoRenew === false) {
+            let cancelSet = false;
+            for (let attempt = 1; attempt <= 3 && !cancelSet; attempt++) {
+              try {
+                await stripe().subscriptions.update(subId, { cancel_at_period_end: true });
+                cancelSet = true;
+                console.log(`[webhook] Prepaid term ${sessionMeta.proposal_id}: subscription ${subId} set to cancel at period end`);
+              } catch (e) {
+                console.error(`[webhook] Attempt ${attempt}/3 to set cancel_at_period_end for ${subId} failed:`, e);
+              }
+            }
+            if (!cancelSet) {
+              console.error(`[webhook] CRITICAL: could not stop renewal on prepaid subscription ${subId} (proposal ${sessionMeta.proposal_id}) — needs manual cancel_at_period_end in Stripe.`);
+            }
+          }
 
           sendReceiptForProposal(sessionMeta.proposal_id).catch((e) =>
             console.error("[webhook] Receipt email failed:", e)
@@ -452,10 +534,14 @@ export async function POST(req: NextRequest) {
         // not at the end of the billing cycle.
         const sub = event.data.object as Stripe.Subscription;
         if (sub.cancel_at_period_end) {
+          // A prepaid term (auto-renew OFF) is SET to cancel at period end by design —
+          // that is not an early cancellation, so it must not stamp cancelledAt (which
+          // would wrongly read as churn today). Only a genuinely auto-renewing client
+          // choosing to cancel counts as churn-on-cancellation-day.
           await db()
             .update(proposals)
             .set({ cancelledAt: new Date(), updatedAt: new Date() })
-            .where(eq(proposals.stripeSubscriptionId, sub.id));
+            .where(and(eq(proposals.stripeSubscriptionId, sub.id), ne(proposals.autoRenew, false)));
         }
         break;
       }

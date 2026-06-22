@@ -45,10 +45,11 @@ const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {
 
 /** Derive 2-letter initials + consistent color from an assignee string */
 function getRepAvatar(assignedTo: string): { initials: string; color: string } {
-  const parts = assignedTo.trim().split(/\s+/);
-  const initials = parts.length >= 2
-    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-    : assignedTo.slice(0, 2).toUpperCase();
+  const parts = assignedTo.trim().split(/\s+/).filter(Boolean);
+  const initials = (parts.length >= 2
+    ? (parts[0][0] + parts[parts.length - 1][0])
+    : assignedTo.slice(0, 2)
+  ).toUpperCase();
 
   // Hash initials to a color
   const colors = [

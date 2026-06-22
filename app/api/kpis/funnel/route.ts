@@ -6,8 +6,40 @@ import { getSessionUser } from "@/lib/auth/session";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { clickup, demoListId } from "@/lib/clickup/client";
 import type { GHLOpportunity } from "@/lib/ghl/types";
+import { getMetricValues } from "@/lib/kpi/engine";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+/**
+ * Overlay each offer metric with its PER-FUNNEL config (key `offer:{funnelId}:{metric}`).
+ * A wired metric's value comes from the engine; unconfigured metrics keep their
+ * legacy compute. Mutates `metrics` in place and returns the base keys that are
+ * configured (so the UI can show the "wired" state). Never throws.
+ */
+async function overlayFunnelConfigs(
+  metrics: Record<string, number>,
+  funnelId: string,
+  range: { start: Date; end: Date },
+  userId: string,
+): Promise<string[]> {
+  const configured: string[] = [];
+  try {
+    const baseKeys = Object.keys(metrics);
+    const nsKeys = baseKeys.map((k) => `offer:${funnelId}:${k}`);
+    const vals = await getMetricValues(nsKeys, range, { isAdmin: true, userId });
+    for (const k of baseKeys) {
+      const r = vals[`offer:${funnelId}:${k}`];
+      if (r && !r.unconfigured) {
+        metrics[k] = r.value;
+        configured.push(k);
+      }
+    }
+  } catch (e) {
+    console.error("[kpis/funnel] config overlay failed:", e);
+  }
+  return configured;
+}
 
 function parseRange(searchParams: URLSearchParams): { start: Date; end: Date } | null {
   const startParam = searchParams.get("start");
@@ -45,11 +77,17 @@ export async function GET(req: NextRequest) {
 
     const pipelineIds = (funnel.pipelineIds as string[]) ?? [];
     if (pipelineIds.length === 0) {
-      return NextResponse.json({ funnel: funnel.name, metrics: emptyMetrics() });
+      // No pipelines, but the funnel may still have wired offer metrics (e.g. a
+      // calendar-driven Booked Calls), so run the overlay before returning.
+      const metrics = emptyMetrics();
+      const configured = await overlayFunnelConfigs(metrics, funnelId, { start, end }, user.id);
+      return NextResponse.json({ funnel: funnel.name, metrics, configured });
     }
 
-    // ─── 1. Leads: opportunities in funnel pipelines ──────────────────────────
-    let leads = 0;
+    // ─── 1a. Funnel contacts: opportunities in funnel pipelines ────────────────
+    // We still walk the GHL opportunities to collect the set of contacts in this
+    // funnel (used below to attribute proposals). We NO LONGER derive the Leads
+    // count from this — that over-counted every opp sitting in the new-lead stage.
     const contactIdsInFunnel = new Set<string>();
     try {
       for (const pipelineId of pipelineIds) {
@@ -61,8 +99,6 @@ export async function GET(req: NextRequest) {
           const opps = res.opportunities ?? [];
           for (const opp of opps) {
             if (opp.contact?.id) contactIdsInFunnel.add(opp.contact.id);
-            const created = new Date(opp.createdAt);
-            if (created >= start && created < end) leads++;
           }
           if (opps.length < 100) break;
           page++;
@@ -70,6 +106,18 @@ export async function GET(req: NextRequest) {
       }
     } catch (e) {
       console.error("[kpis/funnel] GHL opportunity fetch failed:", e);
+    }
+
+    // ─── 1b. Leads: Meta lead-form submissions in the period ───────────────────
+    // Read straight from Meta Ads Manager (Insights API `actions`), scoped to the
+    // funnel's campaign filter when one is set. This replaces the GHL opp count.
+    let leads = 0;
+    try {
+      const { loadMetaAdSpend } = await import("@/lib/kpi/meta-series");
+      const metaSeries = await loadMetaAdSpend(start, end, funnel.campaignFilter ?? undefined);
+      leads = metaSeries.leadsInRange(start, end);
+    } catch (e) {
+      console.error("[kpis/funnel] Meta lead fetch failed:", e);
     }
 
     // ─── 2. Booked Calls: calendar events for contacts in funnel ──────────────
@@ -264,28 +312,30 @@ export async function GET(req: NextRequest) {
     const costPerDemoCompleted = demosCompleted > 0 ? adSpend / demosCompleted : 0;
     const roas = adSpend > 0 ? Math.round((funnelCashCollected / adSpend) * 100) / 100 : 0;
 
-    return NextResponse.json({
-      funnel: funnel.name,
-      metrics: {
-        leads,
-        cpl,
-        bookedCalls,
-        bookingRate,
-        costPerBookedCall,
-        adSpend,
-        demosSubmitted,
-        demosCompleted,
-        costPerDemoCompleted,
-        auditsRequested,
-        auditsCompleted,
-        cashCollected: funnelCashCollected,
-        roas,
-        mgmtProposalValueSent: funnelMgmtSent,
-        mgmtProposalValueLost: funnelMgmtLost,
-        projProposalValueSent: funnelProjSent,
-        projProposalValueLost: funnelProjLost,
-      },
-    });
+    const metrics: Record<string, number> = {
+      leads,
+      cpl,
+      bookedCalls,
+      bookingRate,
+      costPerBookedCall,
+      adSpend,
+      demosSubmitted,
+      demosCompleted,
+      costPerDemoCompleted,
+      auditsRequested,
+      auditsCompleted,
+      cashCollected: funnelCashCollected,
+      roas,
+      mgmtProposalValueSent: funnelMgmtSent,
+      mgmtProposalValueLost: funnelMgmtLost,
+      projProposalValueSent: funnelProjSent,
+      projProposalValueLost: funnelProjLost,
+    };
+
+    // Per-funnel config overlay — wired offer metrics come from the engine.
+    const configured = await overlayFunnelConfigs(metrics, funnelId, { start, end }, user.id);
+
+    return NextResponse.json({ funnel: funnel.name, metrics, configured });
   } catch (err) {
     console.error("[GET /api/kpis/funnel]", err);
     return NextResponse.json({ error: "Failed to load funnel metrics" }, { status: 500 });

@@ -1,13 +1,7 @@
 "use client";
 
-import { cn } from "@/lib/utils/cn";
-import { MetricCell, MetricCellSkeleton, type MetricDef, type SparkPoint } from "./metric-cell";
-
-interface MetricValue {
-  value: number | null | undefined;
-  spark?: SparkPoint[];
-  sub?: string;
-}
+import { BalancedMetricGrid, type MetricValue } from "./balanced-metric-grid";
+import { type MetricDef } from "./metric-cell";
 
 interface MetricSectionProps {
   title: string;
@@ -22,9 +16,8 @@ interface MetricSectionProps {
 }
 
 /**
- * A full-width section band containing a responsive grid of metrics.
- * Metrics flow into rows that fill the content area.
- * Last row stretches to match the width of full rows.
+ * A full-width section band containing a balanced grid of metrics.
+ * Rows fill the width and the last row stretches — no empty trailing cells.
  */
 export function MetricSection({
   title,
@@ -58,79 +51,17 @@ export function MetricSection({
         <div className="flex-1 h-px bg-border/60" />
       </div>
 
-      {/* Metric grid — fills width, last row stretches */}
+      {/* Balanced metric grid */}
       <div className="bg-card border border-border rounded-[10px] overflow-hidden">
-        {loading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 divide-x divide-y divide-border/40">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <MetricCellSkeleton key={i} />
-            ))}
-          </div>
-        ) : (
-          <MetricGrid
-            metrics={metrics}
-            values={values}
-            onMetricClick={onMetricClick}
-            onManualSave={onManualSave}
-          />
-        )}
+        <BalancedMetricGrid
+          metrics={metrics}
+          values={values}
+          loading={loading}
+          loadingCount={metrics.length || 5}
+          onMetricClick={onMetricClick}
+          onManualSave={onManualSave}
+        />
       </div>
     </section>
-  );
-}
-
-/**
- * Responsive grid that auto-fills and stretches the last row.
- * Uses CSS grid with auto-fill so metrics dynamically adapt.
- */
-function MetricGrid({
-  metrics,
-  values,
-  onMetricClick,
-  onManualSave,
-}: {
-  metrics: MetricDef[];
-  values: Record<string, MetricValue | undefined>;
-  onMetricClick?: (key: string) => void;
-  onManualSave?: (key: string, value: number) => void;
-}) {
-  // Calculate ideal columns: aim for 4-5 on desktop, 2-3 on mobile
-  // Use a CSS grid that fills rows evenly
-  const count = metrics.length;
-
-  // Determine the column count for the last row to make it stretch
-  // We use tailwind responsive classes and let the grid handle it
-  return (
-    <div
-      className={cn(
-        "grid divide-x divide-y divide-border/40",
-        // Responsive columns
-        count === 1 && "grid-cols-1",
-        count === 2 && "grid-cols-2",
-        count === 3 && "grid-cols-3",
-        count >= 4 && count <= 5 && "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5",
-        count >= 6 && count <= 8 && "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4",
-        count >= 9 && "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5",
-      )}
-      style={{
-        // Make last row items stretch to fill remaining space
-        // Each cell is equal width within its row
-      }}
-    >
-      {metrics.map((def) => {
-        const mv = values[def.key];
-        return (
-          <MetricCell
-            key={def.key}
-            def={def}
-            value={mv?.value}
-            spark={mv?.spark}
-            sub={mv?.sub}
-            onClick={onMetricClick ? () => onMetricClick(def.key) : undefined}
-            onManualSave={def.manual && onManualSave ? (v) => onManualSave(def.key, v) : undefined}
-          />
-        );
-      })}
-    </div>
   );
 }

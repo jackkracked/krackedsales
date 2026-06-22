@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils/cn";
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from "recharts";
-import { Pencil } from "lucide-react";
+import { Pencil, Settings2, SlidersHorizontal, TrendingUp, TrendingDown } from "lucide-react";
 import { useState } from "react";
 
 // ─── Value formatting ─────────────────────────────────────────────────────────
@@ -50,6 +50,16 @@ export interface MetricDef {
   accent?: "positive" | "negative" | "neutral"; // forced color
 }
 
+/**
+ * An admin-set goal for a metric.
+ *   direction "higher" → ABOVE target is GOOD (revenue, leads, MRR).
+ *   direction "lower"  → BELOW target is GOOD (costs, churn, CPL, ad spend).
+ */
+export interface MetricTarget {
+  target: number;
+  direction: "higher" | "lower";
+}
+
 interface MetricCellProps {
   def: MetricDef;
   value: number | null | undefined;
@@ -57,6 +67,27 @@ interface MetricCellProps {
   sub?: string;
   onClick?: () => void;
   onManualSave?: (value: number) => void;
+  /** "stale" = value came from cache because the source couldn't refresh. */
+  status?: "ok" | "stale";
+  /**
+   * KPI-wiring affordances (admin only). When `configurable` is true the cell can
+   * be wired via the configurator:
+   *   - CONFIGURED   (configured=true)  → value renders normally; a gear appears on
+   *                                       hover top-right → onConfigure(); value-click
+   *                                       still drills down via onClick.
+   *   - UNCONFIGURED (configured=false) → dashed-border ghost cell, muted "—", and a
+   *                                       gold "Configure" pill. The whole cell opens
+   *                                       the configurator.
+   * When `configurable` is false/omitted the cell behaves exactly as before.
+   */
+  configurable?: boolean;
+  configured?: boolean;
+  onConfigure?: () => void;
+  /**
+   * An admin-set goal. When present and the cell has a numeric value, a small
+   * direction-aware over/under badge renders under the value.
+   */
+  target?: MetricTarget;
 }
 
 // ─── Sparkline ────────────────────────────────────────────────────────────────
@@ -115,9 +146,55 @@ function MiniSparkline({ data, positive, unit }: { data: SparkPoint[]; positive?
 
 // ─── Metric Cell ──────────────────────────────────────────────────────────────
 
-export function MetricCell({ def, value, spark, sub, onClick, onManualSave }: MetricCellProps) {
+export function MetricCell({
+  def,
+  value,
+  spark,
+  sub,
+  onClick,
+  onManualSave,
+  status,
+  configurable,
+  configured,
+  onConfigure,
+  target,
+}: MetricCellProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
+
+  // ── UNCONFIGURED ghost state ──────────────────────────────────────────────────
+  // Only show the ghost when there is genuinely NO value. If the metric still has a
+  // (built-in/legacy) number, show that accurate number — with a gear to wire it —
+  // so no KPI ever reads "—" when a real figure is available.
+  if (configurable && configured === false && (value === null || value === undefined)) {
+    return (
+      <button
+        type="button"
+        onClick={onConfigure}
+        className="group/cell relative w-full text-left py-3.5 px-4 min-w-0 cursor-pointer transition-colors hover:bg-primary/[0.03]"
+      >
+        {/* Dashed inner frame to read as a ghost cell without breaking the grid lines */}
+        <span className="pointer-events-none absolute inset-1.5 rounded-[6px] border border-dashed border-border/80 group-hover/cell:border-gold/50 transition-colors" />
+        <div className="relative">
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider leading-none truncate mb-1.5">
+            {def.label}
+          </p>
+          <div className="flex items-center gap-2">
+            <span
+              className="text-lg font-bold leading-none text-muted-foreground/40"
+              style={{ fontFamily: "var(--font-heading)" }}
+            >
+              {"—"}
+            </span>
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gold/12 text-[10px] font-semibold text-gold border border-gold/25 group-hover/cell:bg-gold/20 transition-colors">
+              <SlidersHorizontal className="w-2.5 h-2.5" />
+              Configure
+            </span>
+          </div>
+        </div>
+      </button>
+    );
+  }
 
   const formatted = fmtValue(value, def.unit);
 
@@ -147,11 +224,34 @@ export function MetricCell({ def, value, spark, sub, onClick, onManualSave }: Me
       )}
       onClick={editing ? undefined : onClick}
     >
+      {/* Configure gear — always visible for admins (quiet at rest, lifts on hover)
+          so the configurator (and its Target input) is discoverable without hunting. */}
+      {configurable && onConfigure && (
+        <button
+          type="button"
+          aria-label={`Configure ${def.label}`}
+          title="Configure this KPI & set a target"
+          onClick={(e) => {
+            e.stopPropagation();
+            onConfigure();
+          }}
+          className="absolute top-2 right-2 z-10 p-1 rounded-md text-muted-foreground/45 opacity-100 hover:text-primary hover:bg-primary/8 transition-all active:scale-90"
+        >
+          <Settings2 className="w-3 h-3" />
+        </button>
+      )}
+
       {/* Label row */}
       <div className="flex items-center gap-1.5 mb-1">
         <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider leading-none truncate">
           {def.label}
         </p>
+        {status === "stale" && (
+          <span
+            title="Showing the last value — couldn't refresh from the source just now"
+            className="w-1.5 h-1.5 rounded-full bg-amber-400/80 shrink-0"
+          />
+        )}
         {def.manual && !editing && (
           <button
             onClick={(e) => {
@@ -189,6 +289,13 @@ export function MetricCell({ def, value, spark, sub, onClick, onManualSave }: Me
         </p>
       )}
 
+      {/* Target over/under badge — direction-aware, only with a numeric value */}
+      {!editing && target && typeof value === "number" && Number.isFinite(value) && (
+        <div className="mt-1.5">
+          <TargetBadge value={value} target={target} unit={def.unit} />
+        </div>
+      )}
+
       {/* Sub-text */}
       {sub && (
         <p className="text-[10px] text-muted-foreground mt-1 leading-tight truncate">{sub}</p>
@@ -201,6 +308,91 @@ export function MetricCell({ def, value, spark, sub, onClick, onManualSave }: Me
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Target over/under badge ──────────────────────────────────────────────────
+
+/**
+ * A small, direction-aware chip showing how the value compares to its target.
+ *
+ *   deltaPct = (value − target) / target × 100
+ *
+ * Good-vs-bad is decided by `direction`, NOT by the sign of the delta:
+ *   direction "higher" → above target (deltaPct > 0) is GOOD.
+ *   direction "lower"  → below target (deltaPct < 0) is GOOD.
+ *
+ * Worked examples (confirmed):
+ *   • Cash $42k vs $30k target, higher → +40% above  → GREEN  "40% above target"
+ *   • Ad Spend $6.7k vs $5k target, lower → +34% above → RED   "34% above target"
+ *   • Expenses under a target (lower)                  → GREEN "x% below target"
+ *
+ * A near-zero delta (|deltaPct| < ON_TARGET_PCT) reads as a neutral "On target".
+ * target === 0 can't yield a percentage, so it shows a neutral "vs 0 target".
+ */
+
+const ON_TARGET_PCT = 2; // within ±2% of target reads as "on target"
+
+function TargetBadge({
+  value,
+  target,
+  unit,
+}: {
+  value: number;
+  target: MetricTarget;
+  unit: MetricUnit;
+}) {
+  const targetLabel = `Target ${fmtValue(target.target, unit)}`;
+
+  // Guard: a 0 target has no meaningful percentage — show a calm neutral chip.
+  if (target.target === 0) {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-muted/60 text-[10px] font-semibold text-muted-foreground">
+        <span className="tabular-nums">vs 0 target</span>
+      </span>
+    );
+  }
+
+  const deltaPct = ((value - target.target) / target.target) * 100;
+  const absPct = Math.abs(deltaPct);
+  const isAbove = deltaPct > 0; // strictly above target
+
+  // Roughly on target → neutral, no good/bad judgement.
+  if (absPct < ON_TARGET_PCT) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-muted/60 text-[10px] font-semibold text-muted-foreground"
+        title={targetLabel}
+      >
+        On target
+        <span className="font-normal text-muted-foreground/70">· {targetLabel}</span>
+      </span>
+    );
+  }
+
+  // Direction-aware verdict: is the current side of target the GOOD side?
+  const isGood = target.direction === "higher" ? isAbove : !isAbove;
+
+  // The arrow follows the VALUE's position vs target (up = above, down = below),
+  // independent of good/bad — colour carries the good/bad meaning.
+  const Arrow = isAbove ? TrendingUp : TrendingDown;
+  const positionWord = isAbove ? "above" : "below";
+  const pctText = `${absPct < 10 ? absPct.toFixed(1) : Math.round(absPct)}%`;
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold",
+        isGood
+          ? "bg-success-subtle text-success"
+          : "bg-destructive/10 text-destructive",
+      )}
+      title={targetLabel}
+    >
+      <Arrow className="w-2.5 h-2.5 shrink-0" aria-hidden />
+      <span className="tabular-nums">{pctText} {positionWord} target</span>
+      <span className="font-normal text-muted-foreground/70">· {targetLabel}</span>
+    </span>
   );
 }
 

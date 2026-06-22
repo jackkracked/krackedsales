@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pusherTrigger } from "@/lib/pusher/server";
+import { syncBoardFromClickupTask } from "@/lib/demo-boards/clickup-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,15 @@ export async function POST(req: NextRequest) {
         eventType === "taskCreated" ? "task.created" : "task.updated",
         { taskId: body?.task_id }
       );
+
+      // Demo Boards two-way sync: reflect a tracked board's task status back onto
+      // the board + backfill the board-link field. Non-fatal — never breaks the
+      // existing demo-tracker pusher flow above.
+      try {
+        await syncBoardFromClickupTask(body);
+      } catch (syncErr) {
+        console.error("[ClickUp Webhook] board sync failed:", syncErr);
+      }
     }
 
     return NextResponse.json({ received: true });

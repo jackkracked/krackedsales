@@ -3,6 +3,7 @@ import { openGet, openPost, getTiktokSettings } from "@/lib/tiktok/client";
 import { db } from "@/lib/db";
 import { platformReplies } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
+import { getSessionUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -118,7 +119,9 @@ export async function POST(
 
     const messageId = res.data?.message_id ?? "";
 
-    // Track reply time for the reply queue
+    // Track reply time + who replied (app-side ownership for the dashboard scope)
+    const sessionUser = await getSessionUser().catch(() => null);
+    const responderUserId = sessionUser?.ghlUserId ?? null;
     const client = db();
     const existing = await client
       .select({ id: platformReplies.id })
@@ -128,12 +131,12 @@ export async function POST(
     if (existing.length > 0) {
       await client
         .update(platformReplies)
-        .set({ repliedAt: new Date() })
+        .set({ repliedAt: new Date(), responderUserId })
         .where(eq(platformReplies.id, existing[0].id));
     } else {
       await client
         .insert(platformReplies)
-        .values({ platform: "tiktok", externalId: id, repliedAt: new Date() });
+        .values({ platform: "tiktok", externalId: id, repliedAt: new Date(), responderUserId });
     }
 
     return NextResponse.json({ messageId });

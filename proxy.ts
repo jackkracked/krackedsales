@@ -19,6 +19,8 @@ const PUBLIC_PATHS = [
   "/privacy",
   "/p/",                        // Public proposal signing pages — no auth required
   "/api/proposals/public/",    // API called by the public signing page — no auth required
+  "/board/",                    // Public demo boards (tokenized) — no auth required
+  "/api/boards/public/",       // API called by the public demo board — no auth required
   "/api/auth/login",
   "/api/cron/",    // Vercel cron runner — routes validate CRON_SECRET themselves
   "/api/webhooks/",
@@ -49,6 +51,13 @@ export function proxy(request: NextRequest) {
 
   // Allow client-facing proposal actions — signing and PDF download are unauthenticated
   if (/^\/api\/proposals\/[^/]+\/(sign|pdf)$/.test(pathname)) {
+    return NextResponse.next();
+  }
+
+  // Allow the Blob client-upload route. Both the token request and Vercel's
+  // server-to-server completion callback hit this path with no session cookie;
+  // auth is enforced inside onBeforeGenerateToken (handleUpload).
+  if (request.method === "POST" && /^\/api\/boards\/[^/]+\/design$/.test(pathname)) {
     return NextResponse.next();
   }
 

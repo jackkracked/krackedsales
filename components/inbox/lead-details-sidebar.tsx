@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   RefreshCw, ExternalLink, Tag, TrendingUp, FileText,
-  ListTodo, Layers, ClipboardCheck, DollarSign,
+  ListTodo, Layers, ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { parseQualificationNote, isQualificationNote, cleanUrl } from "@/lib/utils/url";
@@ -146,11 +146,23 @@ export function LeadDetailsSidebar({ contactId, contactName = "" }: LeadDetailsS
   return (
     <>
     <div className="w-72 shrink-0 border-l border-border bg-card flex flex-col overflow-y-auto">
-      {/* Header */}
-      <div className="px-4 py-3.5 border-b border-border shrink-0">
-        <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">
-          Lead Details
-        </h3>
+      {/* Header — contact + stage at a glance */}
+      <div className="px-4 py-4 border-b border-border shrink-0">
+        <p className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-[0.14em] mb-1.5">Lead details</p>
+        {contactName && (
+          <p className="text-[15px] font-bold text-foreground tracking-[-0.01em] truncate mb-2.5" style={{ fontFamily: "var(--font-heading)" }}>{contactName}</p>
+        )}
+        {opp && displayStageName && (
+          savingStage ? (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border border-primary/30 bg-primary/5 text-primary">
+              <RefreshCw className="w-3 h-3 animate-spin" /> Saving…
+            </span>
+          ) : (
+            <span className={cn("inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border", stageBadgeClass(displayStageName))}>
+              {displayStageName}
+            </span>
+          )
+        )}
       </div>
 
       {isLoading ? (
@@ -159,61 +171,41 @@ export function LeadDetailsSidebar({ contactId, contactName = "" }: LeadDetailsS
           <span className="text-sm">Loading…</span>
         </div>
       ) : (
-        <div className="flex flex-col divide-y divide-border/50">
+        <div className="flex flex-col">
 
-          {/* ── Pipeline / Stage ───────────────────────────────── */}
-          <div className="px-4 py-4 space-y-3">
-            <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
-              <TrendingUp className="w-3 h-3" />
-              Pipeline
-            </h4>
+          {/* ── Pipeline / value ───────────────────────────────── */}
+          <div className="px-4 py-4 space-y-3 border-b border-border/60">
             {opp ? (
               <>
-                {/* Stage dropdown */}
-                <div className={cn(
-                  "rounded-[8px] border px-3 py-2.5 transition-colors",
-                  savingStage ? "border-primary/30 bg-primary/5" : "border-border/60 bg-muted/20"
-                )}>
-                  <p className="text-[10px] text-muted-foreground mb-1">Stage</p>
-                  {savingStage ? (
-                    <div className="flex items-center gap-1.5 text-sm font-medium text-primary">
-                      <RefreshCw className="w-3 h-3 animate-spin" />
-                      Saving…
-                    </div>
-                  ) : (
-                    <select
-                      value={displayStageId}
-                      onChange={(e) => handleStageChange(e.target.value)}
-                      disabled={pipelineStages.length === 0}
-                      className="w-full text-sm font-medium text-foreground bg-transparent border-none outline-none cursor-pointer appearance-none disabled:opacity-50"
-                    >
-                      {pipelineStages.length === 0 && (
-                        <option value={displayStageId}>{displayStageName ?? "Unknown"}</option>
-                      )}
-                      {pipelineStages.map((s) => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-
-                {/* Pipeline name */}
-                {pipelineName && (
-                  <p className="text-xs text-muted-foreground">{pipelineName}</p>
-                )}
-
-                {/* Company name */}
-                {opp.contact?.companyName && (
-                  <p className="text-sm font-medium text-foreground">{opp.contact.companyName}</p>
-                )}
-
-                {/* Deal value */}
+                {/* Deal value — prominent */}
                 {opp.monetaryValue != null && opp.monetaryValue > 0 && (
-                  <div className="flex items-center gap-1.5 text-sm text-foreground">
-                    <DollarSign className="w-3.5 h-3.5 text-muted-foreground" />
-                    <span className="font-medium">{opp.monetaryValue.toLocaleString()}</span>
+                  <div className="flex items-center justify-between rounded-[10px] border border-border/60 bg-muted/20 px-3.5 py-3">
+                    <span className="text-xs text-muted-foreground">Deal value</span>
+                    <span className="text-lg font-bold text-foreground tabular-nums" style={{ fontFamily: "var(--font-heading)" }}>
+                      ${opp.monetaryValue.toLocaleString()}
+                    </span>
                   </div>
                 )}
+
+                {/* Change stage */}
+                <div className="rounded-[10px] border border-border/60 bg-muted/20 px-3 py-2.5">
+                  <p className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1.5"><TrendingUp className="w-3 h-3" /> Change stage</p>
+                  <select
+                    value={displayStageId}
+                    onChange={(e) => handleStageChange(e.target.value)}
+                    disabled={pipelineStages.length === 0 || savingStage}
+                    className="w-full text-sm font-medium text-foreground bg-transparent border-none outline-none cursor-pointer appearance-none disabled:opacity-50"
+                  >
+                    {pipelineStages.length === 0 && (
+                      <option value={displayStageId}>{displayStageName ?? "Unknown"}</option>
+                    )}
+                    {pipelineStages.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {pipelineName && <p className="text-[11px] text-muted-foreground px-0.5">{pipelineName}{opp.contact?.companyName ? ` · ${opp.contact.companyName}` : ""}</p>}
               </>
             ) : (
               <p className="text-xs text-muted-foreground italic">No opportunity found</p>
@@ -222,38 +214,34 @@ export function LeadDetailsSidebar({ contactId, contactName = "" }: LeadDetailsS
 
           {/* ── Quick Actions ──────────────────────────────────── */}
           {opp && (
-            <div className="px-4 py-4 space-y-2">
-              <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-3">
-                Quick Actions
+            <div className="px-4 py-4 border-b border-border/60">
+              <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.12em] mb-2.5">
+                Quick actions
               </h4>
               <div className="grid grid-cols-3 gap-2">
-                <button
-                  onClick={() => setShowCreateTask(true)}
-                  className="flex flex-col items-center gap-1.5 py-3 text-[11px] font-medium text-foreground border border-border rounded-[7px] hover:bg-muted hover:border-primary/20 transition-colors"
-                >
-                  <ListTodo className="w-4 h-4 text-muted-foreground" />
-                  Task
-                </button>
-                <button
-                  onClick={() => setShowCreateDemo(true)}
-                  className="flex flex-col items-center gap-1.5 py-3 text-[11px] font-medium text-foreground border border-border rounded-[7px] hover:bg-muted hover:border-primary/20 transition-colors"
-                >
-                  <Layers className="w-4 h-4 text-muted-foreground" />
-                  Demo
-                </button>
-                <button
-                  className="flex flex-col items-center gap-1.5 py-3 text-[11px] font-medium text-foreground border border-border rounded-[7px] hover:bg-muted hover:border-primary/20 transition-colors"
-                >
-                  <ClipboardCheck className="w-4 h-4 text-muted-foreground" />
-                  Audit
-                </button>
+                {[
+                  { icon: ListTodo, label: "Task", onClick: () => setShowCreateTask(true) },
+                  { icon: Layers, label: "Demo", onClick: () => setShowCreateDemo(true) },
+                  { icon: ClipboardCheck, label: "Audit", onClick: undefined },
+                ].map(({ icon: Icon, label, onClick }) => (
+                  <button
+                    key={label}
+                    onClick={onClick}
+                    className="group flex flex-col items-center gap-1.5 py-3 text-[11px] font-medium text-foreground border border-border rounded-[9px] hover:border-primary/40 hover:bg-primary/[0.03] transition-all active:scale-[0.97]"
+                  >
+                    <span className="w-7 h-7 rounded-[7px] bg-muted/70 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+                      <Icon className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
+                    </span>
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
           )}
 
           {/* ── Tags ───────────────────────────────────────────── */}
           {opp?.contact?.tags && opp.contact.tags.length > 0 && (
-            <div className="px-4 py-4 space-y-2.5">
+            <div className="px-4 py-4 border-b border-border/60 space-y-2.5">
               <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
                 <Tag className="w-3 h-3" />
                 Tags

@@ -305,8 +305,11 @@ function ViewCommentNotification({ url, createdAt }: { url: string; createdAt: s
 
 function MessageBubble({ message }: { message: MetaMessage }) {
   const isOutbound = message.direction === "outbound";
-  const timeAgo = formatDistanceToNow(new Date(message.createdAt), { addSuffix: true });
-  const viewCommentMatch = message.text.match(VIEW_COMMENT_RE);
+  // text can be absent for non-text messages (stickers, images, reactions, likes)
+  const text = message.text ?? "";
+  const ts = message.createdAt ? new Date(message.createdAt) : null;
+  const timeAgo = ts && !isNaN(ts.getTime()) ? formatDistanceToNow(ts, { addSuffix: true }) : "";
+  const viewCommentMatch = text.match(VIEW_COMMENT_RE);
 
   if (viewCommentMatch) {
     return <ViewCommentNotification url={viewCommentMatch[2]} createdAt={message.createdAt} />;

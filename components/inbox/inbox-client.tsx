@@ -4,14 +4,16 @@ import { useState } from "react";
 import { useConversations, useMessages } from "@/lib/hooks/use-conversations";
 import { useInboxStore } from "@/store/inbox-store";
 import { ConversationList } from "./conversation-list";
+import { Avatar } from "@/components/ui/avatar";
 import { MessageThread } from "./message-thread";
 import { ReplyComposer } from "./reply-composer";
 import type { ChannelFilter } from "./channel-filter-pills";
 import { MetaConversations } from "./meta-conversations";
 import { TikTokConversations } from "./tiktok-conversations";
 import { LeadDetailsSidebar } from "./lead-details-sidebar";
-import { RefreshCw, ArrowLeft, Move, Inbox } from "lucide-react";
-import { TikTokIcon } from "@/components/shared/channel-icon";
+import { InboxOverview } from "./inbox-overview";
+import { RefreshCw, ArrowLeft, Move, Inbox, MessageCircle } from "lucide-react";
+import { TikTokIcon, FacebookIcon } from "@/components/shared/channel-icon";
 import { MessageSquare, Mail } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { ReplyQueue } from "./reply-queue";
@@ -26,8 +28,8 @@ const TAB_TO_CHANNEL: Partial<Record<InboxTab, ChannelFilter>> = {
 
 const INBOX_TABS: Array<{ key: InboxTab; label: string; icon?: React.ElementType }> = [
   { key: "Queue", label: "Queue", icon: Inbox },
-  { key: "GHL", label: "GHL" },
-  { key: "Meta", label: "Meta" },
+  { key: "GHL", label: "GHL", icon: MessageCircle },
+  { key: "Meta", label: "Meta", icon: FacebookIcon },
   { key: "SMS", label: "SMS", icon: MessageSquare },
   { key: "Email", label: "Email", icon: Mail },
   { key: "TikTok", label: "TikTok", icon: TikTokIcon },
@@ -59,27 +61,34 @@ export function InboxClient() {
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* ── Top-level tab switcher ── */}
-      <div className="flex items-center gap-1 px-4 py-2 border-b border-border bg-card shrink-0">
-        <div className="flex items-center gap-1 bg-muted rounded-lg p-1 w-fit">
-          {INBOX_TABS.map(({ key, label, icon: Icon }) => (
+    <div className="flex h-full overflow-hidden">
+      {/* ── Vertical channel rail ── */}
+      <nav className="w-[68px] shrink-0 border-r border-border bg-card flex flex-col items-stretch py-2 overflow-y-auto">
+        {INBOX_TABS.map(({ key, label, icon: Icon }) => {
+          const active = inboxTab === key;
+          return (
             <button
               key={key}
               onClick={() => setInboxTab(key)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
-                inboxTab === key
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
+              title={label}
+              className="group flex flex-col items-center gap-1 px-1 py-1.5 outline-none"
             >
-              {Icon && <Icon className="w-3 h-3" />}
-              {label}
+              <span className={cn(
+                "relative w-10 h-10 rounded-[12px] flex items-center justify-center transition-all duration-150 active:scale-[0.94]",
+                active
+                  ? "bg-primary text-primary-foreground shadow-[0_4px_12px_-6px_rgba(15,58,92,0.5)]"
+                  : "text-muted-foreground group-hover:bg-muted group-hover:text-foreground"
+              )}>
+                {Icon ? <Icon className="w-[18px] h-[18px]" /> : <span className="text-[13px] font-bold">{label[0]}</span>}
+              </span>
+              <span className={cn("text-[10px] font-medium leading-none", active ? "text-foreground" : "text-muted-foreground")}>{label}</span>
             </button>
-          ))}
-        </div>
-      </div>
+          );
+        })}
+      </nav>
+
+      {/* ── Channel content ── */}
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
 
       {/* ── Reply Queue ── */}
       {inboxTab === "Queue" && (
@@ -112,21 +121,21 @@ export function InboxClient() {
         mobileView === "thread" ? "hidden lg:flex" : "flex"
       )}>
         {/* Header */}
-        <div className="px-4 py-3 border-b border-border space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>
+        <div className="px-4 py-3.5 border-b border-border">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base font-bold text-foreground tracking-[-0.01em]" style={{ fontFamily: "var(--font-heading)" }}>
               Inbox
             </h2>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-2">
               {isFetching && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
               {/* Unread / All toggle */}
-              <div className="flex items-center bg-muted rounded-lg p-0.5">
+              <div className="flex items-center bg-muted/60 rounded-[9px] p-0.5">
                 <button
                   onClick={() => setUnreadOnly(true)}
                   className={cn(
-                    "px-2.5 py-1 text-xs font-medium rounded-md transition-colors",
+                    "px-2.5 py-1 text-xs font-medium rounded-[7px] transition-all",
                     unreadOnly
-                      ? "bg-card text-foreground shadow-sm"
+                      ? "bg-card text-foreground shadow-sm ring-1 ring-foreground/[0.04]"
                       : "text-muted-foreground hover:text-foreground"
                   )}
                 >
@@ -135,9 +144,9 @@ export function InboxClient() {
                 <button
                   onClick={() => setUnreadOnly(false)}
                   className={cn(
-                    "px-2.5 py-1 text-xs font-medium rounded-md transition-colors",
+                    "px-2.5 py-1 text-xs font-medium rounded-[7px] transition-all",
                     !unreadOnly
-                      ? "bg-card text-foreground shadow-sm"
+                      ? "bg-card text-foreground shadow-sm ring-1 ring-foreground/[0.04]"
                       : "text-muted-foreground hover:text-foreground"
                   )}
                 >
@@ -200,20 +209,21 @@ export function InboxClient() {
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </button>
-                <div>
-                  <h3 className="text-sm font-semibold text-foreground">
+                <Avatar name={selectedConversation.fullName ?? selectedConversation.contact?.name ?? "Unknown"} size={36} />
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-foreground truncate tracking-[-0.01em]" style={{ fontFamily: "var(--font-heading)" }}>
                     {selectedConversation.fullName ?? selectedConversation.contact?.name ?? "Unknown"}
                   </h3>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-muted-foreground truncate">
                     {selectedConversation.contact?.email ?? selectedConversation.email ?? selectedConversation.contact?.phone ?? selectedConversation.phone ?? ""}
                   </p>
                 </div>
                 <div className="ml-auto">
                   <button
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-foreground border border-border rounded-[7px] hover:bg-muted transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-foreground border border-border rounded-[8px] hover:border-primary/40 hover:bg-primary/[0.03] transition-all active:scale-[0.97]"
                     title="Move to pipeline"
                   >
-                    <Move className="w-3 h-3" />
+                    <Move className="w-3.5 h-3.5 text-muted-foreground" />
                     Pipeline
                   </button>
                 </div>
@@ -251,16 +261,12 @@ export function InboxClient() {
             />
           </>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-2 bg-background">
-            <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
-              <RefreshCw className="w-5 h-5" />
-            </div>
-            <p className="text-sm">Select a conversation</p>
-          </div>
+          <InboxOverview conversations={conversations} onSelect={handleSelectConversation} />
         )}
       </div>
       </div>
       )}
+      </div>
     </div>
   );
 }

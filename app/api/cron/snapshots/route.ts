@@ -7,6 +7,11 @@ import { recordSnapshot } from "@/lib/kpi/snapshots";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+// Vercel Cron triggers via GET (CRON_SECRET auto-attached). Delegate so the daily job runs.
+export async function GET(req: NextRequest) {
+  return POST(req);
+}
+
 /**
  * POST /api/cron/snapshots
  *

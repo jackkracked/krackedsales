@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
       fields: "date_start,spend,actions",
       time_range: JSON.stringify({ since, until }),
       time_increment: "1", // one row per day
-      limit: "90",
+      limit: "500", // avoid Meta's 25/page default dropping recent days off an unfetched page
     });
 
     const days = (res.data ?? []).map((row) => {

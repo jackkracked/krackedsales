@@ -109,6 +109,7 @@ export async function POST(req: NextRequest) {
           body: body?.message ?? body?.body,
           status: body?.status,
           source: body?.source,
+          userId: body?.userId, // sender's GHL user id (for last-responder attribution)
           attachments: body?.attachments,
           dateAdded: body?.dateAdded,
         }).catch(() => {});

@@ -10,6 +10,7 @@ import {
   doublePrecision,
   date,
   uniqueIndex,
+  index,
 } from "drizzle-orm/pg-core";
 
 /** Monthly software subscriptions — summed into the Software Cost KPI */
@@ -490,6 +491,7 @@ export const platformReplies = pgTable("platform_replies", {
   platform: text("platform").notNull(),    // "facebook" | "instagram" | "tiktok"
   externalId: text("external_id").notNull(), // recipientId or conversationId
   repliedAt: timestamp("replied_at").defaultNow().notNull(),
+  responderUserId: text("responder_user_id"), // GHL user id of the rep who last replied (app-side ownership)
 });
 
 /**
@@ -565,14 +567,21 @@ export const proposals = pgTable("proposals", {
   createdBy: uuid("created_by").references(() => users.id),
   status: text("status").notNull().default("draft"),
     // "draft" | "sent" | "signed" | "paid" | "failed" | "void" | "overdue"
-  totalAmount: doublePrecision("total_amount").notNull(),
+  totalAmount: doublePrecision("total_amount").notNull(), // BILLED amount (what Stripe charges, after discount)
   currency: text("currency").notNull().default("usd"),
+  // Discount engine — display only. listAmount is the pre-discount full price (struck-through for the client).
+  listAmount: doublePrecision("list_amount"), // null when no discount; > totalAmount when discounted
+  discountType: text("discount_type"), // "percent" | "fixed"
+  discountValue: doublePrecision("discount_value"),
   serviceDescription: text("service_description"),
   notes: text("notes"),
   paymentStructure: text("payment_structure").notNull(),
     // "subscription" | "single" | "instalment"
   billingInterval: text("billing_interval"),
   billingIntervalCount: integer("billing_interval_count"),
+  // Auto-renew: true => recurring subscription (paymentStructure "subscription").
+  // false => paid-in-full fixed term (paymentStructure "single"); covers N months, never recurs.
+  autoRenew: boolean("auto_renew").notNull().default(true),
   startDate: timestamp("start_date"),
   endDate: timestamp("end_date"),
   expiresAt: timestamp("expires_at"),
@@ -876,6 +885,11 @@ export const localConversations = pgTable("local_conversations", {
   unreadCount: integer("unread_count").default(0),
   type: text("type"),
   assignedTo: text("assigned_to"),
+  // Last rep to *personally* respond (GHL user id), used to scope each rep's
+  // dashboard to their own threads. Set only for human replies (not automation).
+  lastResponderUserId: text("last_responder_user_id"),
+  lastRespondedAt: timestamp("last_responded_at"),
+  lastRespondedSource: text("last_responded_source"),
   inbox: boolean("inbox").default(true),
   starred: boolean("starred").default(false),
   rawData: jsonb("raw_data"),
@@ -894,6 +908,7 @@ export const localMessages = pgTable("local_messages", {
   subject: text("subject"),
   status: text("status"),
   source: text("source"),
+  sentByUserId: text("sent_by_user_id"), // GHL user id of the sender, when GHL provides it
   attachments: jsonb("attachments").default([]),
   rawData: jsonb("raw_data"),
   messageDate: timestamp("message_date"),
@@ -969,4 +984,213 @@ export const metricSnapshots = pgTable("metric_snapshots", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [
   uniqueIndex("metric_snapshots_key_date_uq").on(t.metricKey, t.capturedDate),
+]);
+
+// ─── Demo Boards ────────────────────────────────────────────────────────────────
+// Branded, hosted demo board per prospect (replaces the bare Miro board).
+
+export const demoBoards = pgTable("demo_boards", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  token: text("token").notNull().unique(),          // tokenized public link (identifies the prospect)
+  slug: text("slug").notNull(),                      // human URL piece, e.g. "drinksteamy"
+  referenceCode: text("reference_code").notNull(),   // DEMO-DRINKS-0613
+  // Linkage
+  clickupTaskId: text("clickup_task_id"),            // the demo task this board belongs to
+  ghlContactId: text("ghl_contact_id"),
+  contactName: text("contact_name").notNull(),
+  contactEmail: text("contact_email"),
+  repId: uuid("rep_id").references(() => users.id),         // owning rep (for routing + attribution)
+  designerId: uuid("designer_id").references(() => users.id),
+  // Presentation
+  title: text("title"),                              // e.g. "Welcome" email type
+  builtOn: text("built_on"),                         // e.g. "Shopify + Klaviyo"
+  // Lifecycle: created | awaiting_design | in_review | sent | opened | engaged | booked | closed
+  status: text("status").notNull().default("awaiting_design"),
+  // Channel the board was sent on (sms/email/meta/...)
+  sentChannel: text("sent_channel"),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  firstOpenedAt: timestamp("first_opened_at", { withTimezone: true }),
+  bookedAt: timestamp("booked_at", { withTimezone: true }),
+  lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("demo_boards_status_idx").on(t.status),
+  index("demo_boards_rep_idx").on(t.repId),
+  index("demo_boards_clickup_task_idx").on(t.clickupTaskId),
+]);
+
+export const demoBoardDesigns = pgTable("demo_board_designs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  boardId: uuid("board_id").notNull().references(() => demoBoards.id, { onDelete: "cascade" }),
+  blobUrl: text("blob_url").notNull(),               // Vercel Blob public URL
+  mimeType: text("mime_type"),
+  width: integer("width"),
+  height: integer("height"),
+  version: integer("version").notNull().default(1),
+  uploadedBy: uuid("uploaded_by").references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("demo_board_designs_board_idx").on(t.boardId),
+]);
+
+export const demoBoardComments = pgTable("demo_board_comments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  boardId: uuid("board_id").notNull().references(() => demoBoards.id, { onDelete: "cascade" }),
+  designId: uuid("design_id").references(() => demoBoardDesigns.id, { onDelete: "set null" }),
+  parentId: uuid("parent_id"),                       // thread root (self-ref; nullable for top-level)
+  x: doublePrecision("x"),                           // pin position (0-1 fraction of the design), null = general
+  y: doublePrecision("y"),
+  body: text("body").notNull(),
+  authorType: text("author_type").notNull(),         // "prospect" | "team"
+  authorId: uuid("author_id").references(() => users.id), // team author (null for prospect)
+  authorName: text("author_name"),
+  visibility: text("visibility").notNull().default("shared"), // "internal" | "shared"
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("demo_board_comments_board_idx").on(t.boardId),
+]);
+
+export const demoBoardEvents = pgTable("demo_board_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  boardId: uuid("board_id").notNull().references(() => demoBoards.id, { onDelete: "cascade" }),
+  // created | design_uploaded | sent | opened | viewed | time_on_design | scrolled_bottom |
+  // reopened | forwarded | commented | booked | closed
+  type: text("type").notNull(),
+  actor: text("actor"),                              // "prospect" | viewer email | team user name
+  metadata: jsonb("metadata"),                       // { channel, durationMs, viewerEmail, commentId, ... }
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("demo_board_events_board_idx").on(t.boardId),
+  index("demo_board_events_type_idx").on(t.type),
+]);
+
+/**
+ * KPI configurations — the SOURCE OF TRUTH for what each KPI on /kpis reads.
+ * One row per metric key. Unconfigured metrics (no row, or enabled=false) read 0
+ * (or, during migration, fall back to the legacy compute). `filters`/`aggregation`
+ * are typed at the app layer (lib/kpi/engine/types.ts) and validated against the
+ * dataset registry on write, so a stored config can never be malformed. Additive +
+ * idempotent — safe for prod-only deploy.
+ */
+export const kpiConfigs = pgTable("kpi_configs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  metricKey: text("metric_key").notNull().unique(),
+  dataset: text("dataset").notNull(),
+  aggregation: jsonb("aggregation").notNull(),
+  filters: jsonb("filters").notNull().default([]),
+  dateField: text("date_field"),
+  unit: text("unit").notNull().default("currency"),
+  enabled: boolean("enabled").notNull().default(true),
+  updatedBy: uuid("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
+ * KPI targets — admin-set goal per metric, with a direction so the card knows
+ * whether being ABOVE target is good (revenue: higher is better) or bad (costs:
+ * lower is better). Independent of kpi_configs so a target works for any KPI,
+ * configured or not. Additive + idempotent.
+ */
+export const kpiTargets = pgTable("kpi_targets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  metricKey: text("metric_key").notNull().unique(),
+  target: doublePrecision("target").notNull(),
+  direction: text("direction").notNull().default("higher"), // "higher" = above is good | "lower" = below is good
+  updatedBy: uuid("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
+ * ── CRO / "Constraint" feature (Gage's Book A Call Dashboard, as software) ──────
+ *
+ * weekly_funnel_log: one frozen row per week (his Tab 3 history). The live current
+ * week is computed on the fly from integrations; the Monday cron FREEZES the prior
+ * week here so it can never be re-curated ("log it, never curate it"). The 9 auto
+ * inputs are snapshotted; `conversations` comes from conversation_events; closed/
+ * revenue may carry a manual override (flagged, never silent). Additive + idempotent.
+ */
+export const weeklyFunnelLog = pgTable("weekly_funnel_log", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  weekOf: date("week_of").notNull().unique(), // Monday (UTC) the week starts
+  adSpend: doublePrecision("ad_spend").notNull().default(0),
+  impressions: doublePrecision("impressions").notNull().default(0),
+  clicks: doublePrecision("clicks").notNull().default(0),
+  leads: doublePrecision("leads").notNull().default(0),
+  conversations: doublePrecision("conversations").notNull().default(0),
+  callsBooked: doublePrecision("calls_booked").notNull().default(0),
+  callsShowed: doublePrecision("calls_showed").notNull().default(0),
+  closed: doublePrecision("closed").notNull().default(0),
+  revenue: doublePrecision("revenue").notNull().default(0),
+  /** Manual overrides applied to auto values, e.g. {closed: 2, revenue: 9000}. */
+  overrides: jsonb("overrides").notNull().default({}),
+  frozen: boolean("frozen").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
+ * cro_benchmarks: per-stage Conservative / Good / Great ladder (his Funnel
+ * Benchmarks tab). Overrides the in-code DEFAULT_BENCHMARKS so Gage can tune them.
+ * Stored as fractions (0..1). One row per stage_key.
+ */
+export const croBenchmarks = pgTable("cro_benchmarks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  stageKey: text("stage_key").notNull().unique(),
+  conservative: doublePrecision("conservative").notNull(),
+  good: doublePrecision("good").notNull(),
+  great: doublePrecision("great").notNull(),
+  updatedBy: uuid("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
+ * cro_assumptions: the three blue unit-economics cells (ACV, retention months,
+ * gross margin). Singleton row keyed "default". gross_margin stored as 0..1.
+ */
+export const croAssumptions = pgTable("cro_assumptions", {
+  key: text("key").primaryKey().default("default"),
+  acv: doublePrecision("acv").notNull().default(3000),
+  retentionMonths: doublePrecision("retention_months").notNull().default(4),
+  grossMargin: doublePrecision("gross_margin").notNull().default(0.8),
+  updatedBy: uuid("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
+ * project_statuses: per-project active/complete state. A project becomes ACTIVE
+ * automatically when its project proposal is paid; it stays active until someone
+ * MARKS it complete here. # Active Projects = paid project proposals minus the
+ * ones marked complete. No row = active (the default for a freshly-paid project).
+ */
+export const projectStatuses = pgTable("project_statuses", {
+  proposalId: uuid("proposal_id").primaryKey().references(() => proposals.id),
+  status: text("status").notNull().default("active"), // "active" | "complete"
+  completedAt: timestamp("completed_at"),
+  updatedBy: uuid("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
+ * conversation_events: GHL inbound/outbound message log, the source of truth for
+ * "Conversations" (leads who replied). Fed by the GHL InboundMessage webhook and
+ * a backfill over /conversations/search. `message_id` is unique so a webhook +
+ * backfill can't double-count the same reply. A "conversation" in the funnel =
+ * a distinct contact with an INBOUND message in the period.
+ */
+export const conversationEvents = pgTable("conversation_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  messageId: text("message_id").notNull().unique(),
+  ghlContactId: text("ghl_contact_id"),
+  ghlConversationId: text("ghl_conversation_id"),
+  direction: text("direction").notNull(), // "inbound" | "outbound"
+  messageType: text("message_type"), // TYPE_SMS / TYPE_INSTAGRAM / ...
+  occurredAt: timestamp("occurred_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("conversation_events_occurred_idx").on(t.occurredAt),
+  index("conversation_events_contact_idx").on(t.ghlContactId),
 ]);

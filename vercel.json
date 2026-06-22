@@ -2,6 +2,8 @@
   "crons": [
     { "path": "/api/cron/workflows", "schedule": "0 8 * * *" },
     { "path": "/api/cron/snapshots", "schedule": "0 3 * * *" },
+    { "path": "/api/cron/roll-up-orphans", "schedule": "0 9 * * *" },
+    { "path": "/api/cron/reconcile-prepaid-terms", "schedule": "0 4 * * *" },
     {
       "path": "/api/cron/sync-no-shows",
       "schedule": "0 0 * * *"

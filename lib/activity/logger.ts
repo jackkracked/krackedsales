@@ -18,7 +18,8 @@ export type ActivityAction =
   | "demo.started"
   | "follow_up.sent"
   | "lead.added"
-  | "proposal.deposit_override";
+  | "proposal.deposit_override"
+  | "contact.assigned";
 
 export interface LogActivityParams {
   userId: string;

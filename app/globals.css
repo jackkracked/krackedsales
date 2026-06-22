@@ -114,6 +114,16 @@ h1, h2, h3, h4, h5, h6 {
 }
 .pipeline-hscroll:hover::-webkit-scrollbar-thumb { background: #B8B3AC; }
 
+/* ─── Demo board canvas — subtle dot grid ─── */
+/* The infinite design surface in the public demo board. A faint dotted texture
+   reads as a "canvas" without competing with the email design floating on it. */
+.dotgrid {
+  background-color: var(--background);
+  background-image: radial-gradient(circle, rgba(28, 35, 51, 0.09) 1px, transparent 1px);
+  background-size: 20px 20px;
+  background-position: -1px -1px;
+}
+
 /* ─── Focus Ring ─── */
 :focus-visible {
   outline: 2px solid var(--primary);

@@ -1,10 +1,17 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { Pen, RefreshCw, Check, AlertTriangle, Clock, Shield, Download, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import {
+  priceSuffix,
+  clientSentence,
+  discountInfo,
+  amountBlockLabel,
+  type BillingTerms,
+} from "@/lib/proposals/billing";
 
 interface Instalment {
   id: string;
@@ -28,6 +35,10 @@ interface ProposalData {
   paymentStructure: string;
   billingInterval: string | null;
   billingIntervalCount: number | null;
+  autoRenew?: boolean | null;
+  listAmount?: number | null;
+  discountType?: string | null;
+  discountValue?: number | null;
   startDate: string | null;
   endDate: string | null;
   expiresAt: string | null;
@@ -232,27 +243,29 @@ function ScopeDisplay({ text }: { text: string }) {
         const header = isHeader ? firstLine.slice(0, -1) : null;
         const bodyLines = isHeader ? lines.slice(1) : lines;
 
-        const bullets = bodyLines.filter((l) => l.startsWith("•") || l.startsWith("-") || l.startsWith("*"));
-        const prose = bodyLines.filter((l) => !l.startsWith("•") && !l.startsWith("-") && !l.startsWith("*"));
-
         return (
           <div key={si}>
             {header && (
               <p className="text-xs font-bold text-foreground uppercase tracking-wide mb-1.5">{header}</p>
             )}
-            {bullets.length > 0 && (
-              <ul className="space-y-0.5">
-                {bullets.map((line, li) => (
-                  <li key={li} className="flex items-baseline gap-2 text-sm text-foreground/80">
+            {/* Render every line IN ITS ORIGINAL ORDER. Bullet lines (•/-/*) keep a
+                bullet marker, plain lines render as prose — nothing is reshuffled.
+                (Previously bullets were grouped and rendered before all prose, which
+                moved lines around between edit and preview/send.) */}
+            <div className="space-y-0.5">
+              {bodyLines.map((line, li) => {
+                const isBullet =
+                  line.startsWith("•") || line.startsWith("-") || line.startsWith("*");
+                return isBullet ? (
+                  <div key={li} className="flex items-baseline gap-2 text-sm text-foreground/80">
                     <span className="text-foreground/40 shrink-0">•</span>
                     <span>{line.replace(/^[•\-*]\s*/, "")}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {prose.map((line, li) => (
-              <p key={li} className="text-sm text-foreground/80 leading-relaxed">{line}</p>
-            ))}
+                  </div>
+                ) : (
+                  <p key={li} className="text-sm text-foreground/80 leading-relaxed">{line}</p>
+                );
+              })}
+            </div>
           </div>
         );
       })}
@@ -270,9 +283,23 @@ function DocDivider() {
 
 function PricingTable({ proposal }: { proposal: ProposalData }) {
   const isManagement = proposal.type === "management";
-  const totalLabel = isManagement
-    ? `${fmtAmount(proposal.totalAmount, proposal.currency)}/mo`
-    : fmtAmount(proposal.totalAmount, proposal.currency);
+  // All billing wording derives from one shared model so the table, the sidebar,
+  // the PDF, and the admin view always agree — and always match what Stripe charges.
+  const terms = proposal as BillingTerms;
+  const suffix = priceSuffix(terms);
+  const disc = discountInfo(terms);
+  const totalLabel = `${fmtAmount(proposal.totalAmount, proposal.currency)}${suffix}`;
+  const listLabel = disc ? `${fmtAmount(disc.listAmount, proposal.currency)}${suffix}` : null;
+
+  // The price cell: struck-through list price → billed price when a discount applies.
+  const priceNode = disc ? (
+    <span className="inline-flex items-baseline gap-1.5">
+      <span className="text-foreground/40 line-through font-normal">{listLabel}</span>
+      <span>{totalLabel}</span>
+    </span>
+  ) : (
+    <>{totalLabel}</>
+  );
 
   const serviceLabel = isManagement
     ? "Kracked Retention Email + SMS Marketing Management"
@@ -296,7 +323,7 @@ function PricingTable({ proposal }: { proposal: ProposalData }) {
       <div className="sm:hidden border border-foreground/20 rounded-[8px] overflow-hidden mb-4 text-sm">
         <div className="bg-foreground/5 px-4 py-2.5 flex items-center justify-between border-b border-foreground/20">
           <span className="font-bold text-foreground text-xs uppercase tracking-wide">{isManagement ? "Services" : "Project"}</span>
-          <span className="font-bold text-foreground">{totalLabel}</span>
+          <span className="font-bold text-foreground">{priceNode}</span>
         </div>
         <div className="px-4 py-3">{serviceCellContent}</div>
         <div className="bg-foreground/5 px-4 py-3 border-t border-foreground/20 flex items-center justify-between">
@@ -320,7 +347,7 @@ function PricingTable({ proposal }: { proposal: ProposalData }) {
         <tbody>
           <tr>
             <td className="border border-foreground/20 px-3 py-2 text-foreground">{serviceCellContent}</td>
-            <td className="border border-foreground/20 px-3 py-2 text-right font-bold text-foreground align-top">{totalLabel}</td>
+            <td className="border border-foreground/20 px-3 py-2 text-right font-bold text-foreground align-top">{priceNode}</td>
           </tr>
           <tr>
             <td className="border border-foreground/20 px-3 py-2 text-right font-bold text-foreground">Total:</td>
@@ -328,6 +355,14 @@ function PricingTable({ proposal }: { proposal: ProposalData }) {
           </tr>
         </tbody>
       </table>
+
+      {/* Plain-language billing summary + savings — what they pay and whether it recurs */}
+      <p className="text-sm text-foreground/75 mb-1.5">{clientSentence(terms)}</p>
+      {disc && (
+        <p className="text-xs font-semibold text-green-700 mb-3">
+          You save {fmtAmount(disc.saved, proposal.currency)} ({disc.pct}% off).
+        </p>
+      )}
 
       {/* ── Payment schedule ── */}
       {proposal.paymentStructure === "instalment" && proposal.instalments.length > 0 && (() => {
@@ -454,27 +489,31 @@ function AdditionalScopePricing({
       return defaults;
     }
   });
+  const queryClient = useQueryClient();
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
   const [savingIdx, setSavingIdx] = useState<number | null>(null);
+  const [saveError, setSaveError] = useState(false);
 
   async function saveRow(idx: number) {
     if (!proposalId) return;
     // Small delay to ensure React state has flushed to the ref
     await new Promise(r => setTimeout(r, 50));
     setSavingIdx(idx);
-    const current = rowsRef.current;
-    const res = await fetch(`/api/proposals/${proposalId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ additionalRates: JSON.stringify(current) }),
-    });
-    if (!res.ok) console.error("[saveRow] Failed:", await res.text().catch(() => ""));
+    setSaveError(false);
+    const ok = await persistEdit(proposalId, { additionalRates: JSON.stringify(rowsRef.current) });
     setSavingIdx(null);
+    if (ok) queryClient.invalidateQueries({ queryKey: ["public-proposal"] });
+    else setSaveError(true);
   }
 
   return (
     <div className="my-4">
+      {saveError && (
+        <p className="text-xs text-red-600 font-medium mb-2 bg-red-50 px-2.5 py-1.5 rounded-[6px] print:hidden">
+          A pricing change didn&apos;t save. Edit the cell again and tab out to retry.
+        </p>
+      )}
       <p className="text-sm text-foreground/80 leading-relaxed mb-3">
         {isManagement
           ? "If additional services are requested (e.g., extra campaigns, flow build-outs, or any other additional support), Kracked Retention will pro-rate based on the below table. If a service is not listed, a proposal via Slack or email will be sent upon request outlining the additional scope and cost. Upon written acceptance, work will be completed and prorated at the end of the month."
@@ -773,6 +812,29 @@ function AcceptanceText({ isManagement }: { isManagement: boolean }) {
 
 // ─── Admin inline edit components (draft preview only) ─────────────────────────
 
+/**
+ * Persist an inline edit to the proposal. Returns true only when the DB confirms it.
+ *
+ * `keepalive: true` is the critical bit: a blur-triggered save can start just as the
+ * admin navigates away to send the proposal. Without keepalive the browser aborts the
+ * in-flight request on navigation, the field never reaches the DB, and the sent proposal
+ * silently falls back to its template — the "edits reverted on send" bug. keepalive tells
+ * the browser to finish the request regardless. Body is tiny, well under the 64KB limit.
+ */
+async function persistEdit(proposalId: string, body: Record<string, unknown>): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/proposals/${proposalId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      keepalive: true,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 function InlineEditText({
   value,
   proposalId,
@@ -792,22 +854,23 @@ function InlineEditText({
   placeholder?: string;
   onSave?: (newValue: string) => void;
 }) {
+  const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [localValue, setLocalValue] = useState(value);
   const [saved, setSaved] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
 
   async function handleBlur() {
     setEditing(false);
     if (localValue.trim() === value.trim()) return;
     const finalValue = localValue.trim() || value;
-    await fetch(`/api/proposals/${proposalId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ [field]: finalValue }),
-    });
+    setSaveFailed(false);
+    const ok = await persistEdit(proposalId, { [field]: finalValue });
+    if (!ok) { setSaveFailed(true); return; }
     onSave?.(finalValue);
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
+    queryClient.invalidateQueries({ queryKey: ["public-proposal"] });
   }
 
   if (editing) {
@@ -858,6 +921,11 @@ function InlineEditText({
           Saved
         </span>
       )}
+      {saveFailed && (
+        <span className="absolute -top-5 left-0 text-[10px] text-red-600 font-semibold whitespace-nowrap bg-white px-1.5 rounded shadow-sm">
+          Not saved — click to retry
+        </span>
+      )}
     </span>
   );
 }
@@ -869,20 +937,21 @@ function InlineEditScope({
   value: string;
   proposalId: string;
 }) {
+  const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [localValue, setLocalValue] = useState(value);
   const [saved, setSaved] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
 
   async function handleBlur() {
     setEditing(false);
     if (localValue === value) return;
-    await fetch(`/api/proposals/${proposalId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ serviceDescription: localValue }),
-    });
+    setSaveFailed(false);
+    const ok = await persistEdit(proposalId, { serviceDescription: localValue });
+    if (!ok) { setSaveFailed(true); return; }
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
+    queryClient.invalidateQueries({ queryKey: ["public-proposal"] });
   }
 
   if (editing) {
@@ -915,6 +984,11 @@ function InlineEditScope({
           Saved
         </span>
       )}
+      {saveFailed && (
+        <span className="absolute -top-5 left-0 text-[10px] text-red-600 font-semibold whitespace-nowrap bg-white px-1.5 rounded shadow-sm">
+          Not saved — click to retry
+        </span>
+      )}
     </div>
   );
 }
@@ -928,20 +1002,21 @@ function InlineEditDate({
   proposalId: string;
   className?: string;
 }) {
+  const queryClient = useQueryClient();
   const [localValue, setLocalValue] = useState(value ? new Date(value).toISOString().slice(0, 10) : "");
   const [saved, setSaved] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
 
   async function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const newVal = e.target.value;
     setLocalValue(newVal);
     if (!newVal) return;
-    await fetch(`/api/proposals/${proposalId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expiresAt: new Date(newVal).toISOString() }),
-    });
+    setSaveFailed(false);
+    const ok = await persistEdit(proposalId, { expiresAt: new Date(newVal).toISOString() });
+    if (!ok) { setSaveFailed(true); return; }
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
+    queryClient.invalidateQueries({ queryKey: ["public-proposal"] });
   }
 
   return (
@@ -954,6 +1029,7 @@ function InlineEditDate({
       />
       <Pencil className="w-3 h-3 opacity-50" />
       {saved && <span className="text-[10px] text-green-600 font-semibold">Saved</span>}
+      {saveFailed && <span className="text-[10px] text-red-600 font-semibold">Not saved</span>}
     </span>
   );
 }
@@ -1401,24 +1477,36 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
             <div className="lg:sticky lg:top-[52px] space-y-3">
               <div className="bg-white border border-black/8 rounded-[8px] overflow-hidden shadow-sm">
                 {/* Amount */}
-                <div className="px-5 py-4 border-b border-border bg-muted/10">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
-                    {isManagement ? "Monthly Retainer" : "Project Investment"}
-                  </p>
-                  <p
-                    className="text-2xl font-bold text-foreground"
-                    style={{ fontFamily: "var(--font-heading)" }}
-                  >
-                    {fmtAmount(proposal.totalAmount, proposal.currency)}
-                  </p>
-                  {proposal.paymentStructure === "subscription" && proposal.billingInterval && (
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      per {proposal.billingIntervalCount && proposal.billingIntervalCount > 1
-                        ? `${proposal.billingIntervalCount} ${proposal.billingInterval}s`
-                        : proposal.billingInterval}
-                    </p>
-                  )}
-                </div>
+                {(() => {
+                  const terms = proposal as BillingTerms;
+                  const disc = discountInfo(terms);
+                  return (
+                    <div className="px-5 py-4 border-b border-border bg-muted/10">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
+                        {amountBlockLabel(terms)}
+                      </p>
+                      {disc && (
+                        <p className="text-sm text-muted-foreground/70 line-through tabular-nums leading-none">
+                          {fmtAmount(disc.listAmount, proposal.currency)}
+                        </p>
+                      )}
+                      <p
+                        className="text-2xl font-bold text-foreground"
+                        style={{ fontFamily: "var(--font-heading)" }}
+                      >
+                        {fmtAmount(proposal.totalAmount, proposal.currency)}
+                      </p>
+                      {disc && (
+                        <p className="text-xs font-semibold text-green-700 mt-0.5">
+                          You save {fmtAmount(disc.saved, proposal.currency)} ({disc.pct}% off)
+                        </p>
+                      )}
+                      <p className="text-xs text-muted-foreground mt-1.5 leading-snug">
+                        {clientSentence(terms)}
+                      </p>
+                    </div>
+                  );
+                })()}
 
                 {/* Deposit schedule */}
                 {proposal.hasDeposit && (() => {

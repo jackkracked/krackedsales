@@ -16,7 +16,8 @@ export type DetailSource =
   | "subs_new"                 // Stripe subs created in range
   | "subs_canceled"            // Stripe subs canceled in range
   | "project_invoices_paid"    // Stripe paid one-off (non-subscription) invoices
-  | "proposals"                // DB proposals (params: status, type, dateField)
+  | "proposals"                // DB proposals (params: status, type, dateField, scoped, asCount)
+  | "rep_commission"           // DB proposal-based rep commission (payout-timing aware)
   | "calls"                    // DB calls (params: scoped)
   | "software_costs"           // DB active software costs (snapshot)
   | "opps"                     // GHL opportunities (params: mode = created|won|open)
@@ -155,18 +156,18 @@ export const METRIC_CATALOG: Record<string, MetricCatalogEntry> = {
   },
   deals_won: {
     label: "Deals Closed",
-    explanation: "Opportunities marked won. “In period” = the date the deal was marked won, within the range.",
-    detail: { source: "opps", params: { mode: "won" } },
+    explanation: "Proposals you sent that got paid. “In period” = paid date within the range.",
+    detail: { source: "proposals", params: { dateField: "paidAt", scoped: "1", asCount: "1" } },
   },
   revenue_won: {
     label: "Revenue Won",
-    explanation: "Value of opportunities marked won. “In period” = won date within the range.",
-    detail: { source: "opps", params: { mode: "won" } },
+    explanation: "Value of proposals you sent that got paid. “In period” = paid date within the range.",
+    detail: { source: "proposals", params: { dateField: "paidAt", scoped: "1" } },
   },
   commission: {
     label: "Commission Earned",
-    explanation: "Your commission = the value of won deals × your commission rate. “In period” = won date within the range.",
-    detail: { source: "opps", params: { mode: "won" } },
+    explanation: "Your commission from proposals you sent that got paid, at your commission rate. “In period” = the date each payment landed.",
+    detail: { source: "rep_commission" },
   },
   pipeline_value_admin: {
     label: "Pipeline Value",

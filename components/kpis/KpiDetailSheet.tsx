@@ -1,17 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useCallback } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { X, Loader2, Info } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { createPortal } from "react-dom";
 
 interface DetailRow {
+  /** Stable id (e.g. proposal id) — required for editable rows. */
+  id?: string;
   label: string;
   sublabel?: string;
   amount?: number;
   date?: string;
   inPeriod: boolean;
+  /** Present on editable rows (active/complete project status, etc.). */
+  status?: string;
 }
 
 interface DetailPage {
@@ -23,6 +27,8 @@ interface DetailPage {
   periodCount: number;
   totalCount?: number;
   isSnapshot?: boolean;
+  /** When set, rows render an inline editor. "projectStatus" = active/complete toggle. */
+  editable?: "projectStatus";
   rows: DetailRow[];
   breakdown?: { label: string; value: string }[];
   nextOffset: number | null;
@@ -73,6 +79,24 @@ export function KpiDetailSheet({ metric, start, end, userId, ghlUserId, email, p
   const meta = data?.pages[0];
   const rows = data?.pages.flatMap((p) => p.rows) ?? [];
   const unit = meta?.unit ?? "currency";
+
+  // Editable rows (e.g. mark a project active/complete) — update + refresh the
+  // drawer AND the card behind it so the count moves in lockstep.
+  const queryClient = useQueryClient();
+  const setProjectStatus = useMutation({
+    mutationFn: async ({ proposalId, status }: { proposalId: string; status: "active" | "complete" }) => {
+      const res = await fetch("/api/projects/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ proposalId, status }),
+      });
+      if (!res.ok) throw new Error("Failed to update project status");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["kpi-detail"] });
+      queryClient.invalidateQueries({ queryKey: ["kpi-metrics"] });
+    },
+  });
 
   // Close on Escape
   useEffect(() => {
@@ -163,31 +187,45 @@ export function KpiDetailSheet({ metric, start, end, userId, ghlUserId, email, p
           ) : (
             <>
               <div className="divide-y divide-border">
-                {rows.map((row, i) => (
-                  <div
-                    key={`${row.date ?? ""}-${row.label}-${i}`}
-                    className={cn(
-                      "flex items-center justify-between px-5 py-3 transition-colors border-l-2",
-                      row.inPeriod
-                        ? "bg-primary/5 border-l-primary"
-                        : "border-l-transparent opacity-55 hover:opacity-100",
-                    )}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-foreground truncate">{row.label}</p>
-                      {(row.sublabel || row.date) && (
-                        <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                          {[row.sublabel, row.date ? fmtDate(row.date) : undefined].filter(Boolean).join(" · ")}
-                        </p>
+                {rows.map((row, i) => {
+                  const editable = meta?.editable === "projectStatus" && !!row.id;
+                  // For editable rows the status is shown by the toggle, so the
+                  // sublabel line carries the deal value instead.
+                  const subBits = editable
+                    ? [row.amount != null ? fmtUSD(row.amount) : undefined, row.date ? `paid ${fmtDate(row.date)}` : undefined]
+                    : [row.sublabel, row.date ? fmtDate(row.date) : undefined];
+                  return (
+                    <div
+                      key={row.id ?? `${row.date ?? ""}-${row.label}-${i}`}
+                      className={cn(
+                        "flex items-center justify-between px-5 py-3 transition-colors border-l-2",
+                        row.inPeriod
+                          ? "bg-primary/5 border-l-primary"
+                          : "border-l-transparent opacity-55 hover:opacity-100",
                       )}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-foreground truncate">{row.label}</p>
+                        {subBits.some(Boolean) && (
+                          <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                            {subBits.filter(Boolean).join(" · ")}
+                          </p>
+                        )}
+                      </div>
+                      {editable ? (
+                        <ProjectStatusToggle
+                          status={(row.status as "active" | "complete") ?? "active"}
+                          pending={setProjectStatus.isPending && setProjectStatus.variables?.proposalId === row.id}
+                          onChange={(s) => setProjectStatus.mutate({ proposalId: row.id as string, status: s })}
+                        />
+                      ) : row.amount != null ? (
+                        <span className={cn("ml-4 shrink-0 text-sm font-semibold tabular-nums", row.amount >= 0 ? "text-foreground" : "text-red-500")}>
+                          {fmtUSD(row.amount)}
+                        </span>
+                      ) : null}
                     </div>
-                    {row.amount != null && (
-                      <span className={cn("ml-4 shrink-0 text-sm font-semibold tabular-nums", row.amount >= 0 ? "text-foreground" : "text-red-500")}>
-                        {fmtUSD(row.amount)}
-                      </span>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               {/* Infinite-scroll sentinel */}
               <div ref={sentinelRef} className="h-10 flex items-center justify-center">
@@ -214,4 +252,43 @@ export function KpiDetailSheet({ metric, start, end, userId, ghlUserId, email, p
 
   if (typeof document === "undefined") return null;
   return createPortal(content, document.body);
+}
+
+// ─── Active / Complete segmented toggle (Active Projects drill-down) ────────────
+
+function ProjectStatusToggle({
+  status,
+  pending,
+  onChange,
+}: {
+  status: "active" | "complete";
+  pending: boolean;
+  onChange: (s: "active" | "complete") => void;
+}) {
+  return (
+    <div className="ml-3 shrink-0 flex rounded-[7px] border border-border overflow-hidden text-[11px] font-semibold">
+      {(["active", "complete"] as const).map((s) => {
+        const on = status === s;
+        return (
+          <button
+            key={s}
+            type="button"
+            disabled={pending}
+            onClick={() => { if (!on) onChange(s); }}
+            className={cn(
+              "px-2.5 py-1 transition-colors disabled:opacity-60",
+              s === "complete" && "border-l border-border",
+              on
+                ? s === "complete"
+                  ? "bg-success-subtle text-success"
+                  : "bg-primary/10 text-primary"
+                : "bg-background text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {pending && !on ? <Loader2 className="w-3 h-3 animate-spin" /> : s === "complete" ? "Complete" : "Active"}
+          </button>
+        );
+      })}
+    </div>
+  );
 }

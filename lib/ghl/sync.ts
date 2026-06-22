@@ -17,7 +17,7 @@ import {
   localConversations,
   localMessages,
 } from "@/lib/db/schema";
-import { sql } from "drizzle-orm";
+import { sql, and, eq, or, isNull, lte } from "drizzle-orm";
 
 // ─── GHL API response shapes ──────────────────────────────────────────────────
 
@@ -106,8 +106,59 @@ export interface GhlMessage {
   subject?: string;
   status?: string;
   source?: string;
+  userId?: string; // GHL user id of the sender (present on human-sent outbound messages)
   attachments?: unknown[];
   dateAdded?: string;
+}
+
+// A genuine human reply (vs automation) carries a userId AND originates from a
+// person: GHL web/mobile app ("app") or our own app/API ("api"). Workflow blasts
+// and bulk sends also carry a userId, so source must be checked too. Activity
+// rows (TYPE_ACTIVITY_*) are system events, not messages.
+const HUMAN_REPLY_SOURCES = new Set(["app", "api"]);
+
+export function isHumanOutboundReply(m: {
+  direction?: string;
+  source?: string;
+  type?: string;
+  userId?: string;
+}): boolean {
+  if (m.direction !== "outbound") return false;
+  if (!m.userId) return false;
+  if (!m.source || !HUMAN_REPLY_SOURCES.has(m.source)) return false;
+  if (m.type && m.type.toUpperCase().startsWith("TYPE_ACTIVITY")) return false;
+  return true;
+}
+
+/**
+ * Record who last *personally* responded to a conversation. Date-guarded: only
+ * advances when `at` is newer than the stored value, so replayed / out-of-order
+ * webhooks can't set a stale responder. No-ops if the conversation row is absent
+ * yet (self-heals on the next sync/message).
+ */
+export async function updateLastResponder(
+  conversationId: string,
+  userId: string,
+  source: string | null,
+  at: Date
+): Promise<void> {
+  await db()
+    .update(localConversations)
+    .set({
+      lastResponderUserId: userId,
+      lastRespondedAt: at,
+      lastRespondedSource: source ?? null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(localConversations.id, conversationId),
+        or(
+          isNull(localConversations.lastRespondedAt),
+          lte(localConversations.lastRespondedAt, at)
+        )
+      )
+    );
 }
 
 // ─── Upsert functions ─────────────────────────────────────────────────────────
@@ -304,10 +355,21 @@ export async function upsertMessage(m: GhlMessage): Promise<void> {
       subject: m.subject ?? null,
       status: m.status ?? null,
       source: m.source ?? null,
+      sentByUserId: m.userId ?? null,
       attachments: (m.attachments ?? []) as Record<string, unknown>[],
       rawData: m as unknown as Record<string, unknown>,
       messageDate: m.dateAdded ? new Date(m.dateAdded) : null,
       syncedAt: new Date(),
     })
     .onConflictDoNothing();
+
+  // Record the rep as last responder when this is a real human reply.
+  if (isHumanOutboundReply(m) && m.userId) {
+    await updateLastResponder(
+      m.conversationId,
+      m.userId,
+      m.source ?? null,
+      m.dateAdded ? new Date(m.dateAdded) : new Date()
+    );
+  }
 }

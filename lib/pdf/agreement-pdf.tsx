@@ -9,6 +9,7 @@ import {
   StyleSheet,
 } from "@react-pdf/renderer";
 import { format } from "date-fns";
+import { priceSuffix, discountInfo, clientSentence, type BillingTerms } from "@/lib/proposals/billing";
 
 const LOGO_PATH = path.join(process.cwd(), "public", "kracked-logo.png");
 
@@ -34,6 +35,10 @@ export interface ProposalForPdf {
   paymentStructure: string;
   billingInterval: string | null;
   billingIntervalCount: number | null;
+  autoRenew?: boolean | null;
+  listAmount?: number | null;
+  discountType?: string | null;
+  discountValue?: number | null;
   startDate: Date | string | null;
   endDate: Date | string | null;
   signedAt?: Date | string | null;
@@ -301,9 +306,10 @@ function MarkdownSection({ content }: { content: string }) {
 
 function PricingSection({ proposal }: { proposal: ProposalForPdf }) {
   const isManagement = proposal.type === "management";
-  const totalLabel = isManagement
-    ? `${fmtAmt(proposal.totalAmount, proposal.currency)}/mo`
-    : fmtAmt(proposal.totalAmount, proposal.currency);
+  // Model-accurate suffix (never a hard-coded "/mo") + discount, from the shared helper.
+  const suffix = priceSuffix(proposal as BillingTerms);
+  const disc = discountInfo(proposal as BillingTerms);
+  const totalLabel = `${fmtAmt(proposal.totalAmount, proposal.currency)}${suffix}`;
 
   const serviceLabel = isManagement
     ? "Kracked Retention Email + SMS Marketing Management"
@@ -347,6 +353,15 @@ function PricingSection({ proposal }: { proposal: ProposalForPdf }) {
           <Text style={[s.tableCellR, s.tableCellBold]}>{totalLabel}</Text>
         </View>
       </View>
+
+      {disc && (
+        <Text style={s.bodyMb}>
+          A {disc.pct}% discount has been applied to the list price of {fmtAmt(disc.listAmount, proposal.currency)} (a saving of {fmtAmt(disc.saved, proposal.currency)}).
+        </Text>
+      )}
+      {isManagement && (
+        <Text style={s.bodyMb}>{clientSentence(proposal as BillingTerms)}</Text>
+      )}
 
       {/* Invoice date table */}
       <View style={s.tableWrap}>

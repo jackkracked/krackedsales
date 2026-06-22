@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { calls, repTargets, users, proposals, proposalInstalments, commissionSettings } from "@/lib/db/schema";
-import { and, eq, gte, lte, isNotNull } from "drizzle-orm";
+import { calls, repTargets, users, commissionSettings } from "@/lib/db/schema";
+import { and, eq, gte, lte } from "drizzle-orm";
 import { locationId } from "@/lib/ghl/client";
 import { fetchAllOpportunities } from "@/lib/ghl/paginate";
 import type { GHLOpportunity } from "@/lib/ghl/types";
-import { startOfMonth, endOfMonth, startOfDay, endOfDay, subDays, startOfWeek, startOfYear, format } from "date-fns";
+import { startOfMonth, endOfMonth, startOfDay, endOfDay, subDays, startOfWeek, startOfYear, addDays, format } from "date-fns";
+import { getRepCommissionEvents, commissionInRange, type PayoutTiming } from "@/lib/kpi/rep-proposal-commission";
 
 /**
  * GET /api/kpi/rep-metrics?userId=&ghlUserId=&email=
@@ -113,121 +114,30 @@ export async function GET(req: NextRequest) {
   }
 
   // ─── Commission calculation ───────────────────────────────────────────────
+  // Uses the SHARED proposal-commission helper over UTC-parsed period ranges —
+  // identical to what the click-through breakdown drawer shows, so the cards and
+  // their drawers can never disagree (incl. at week/month/year boundaries).
   let commissionThisWeek = 0;
   let commissionThisMonth = 0;
   let commissionThisYear = 0;
 
   if (userId && commissionPct > 0) {
     try {
-      if (payoutTiming === "split") {
-        // Commission earned as each instalment is paid
-        const paidInstalments = await db()
-          .select({
-            amount: proposalInstalments.amount,
-            paidAt: proposalInstalments.paidAt,
-          })
-          .from(proposalInstalments)
-          .innerJoin(proposals, eq(proposalInstalments.proposalId, proposals.id))
-          .where(
-            and(
-              eq(proposals.createdBy, userId),
-              isNotNull(proposalInstalments.paidAt),
-              gte(proposalInstalments.paidAt, commissionYearStart)
-            )
-          );
+      // Match the drawer's ranges exactly: local calendar day → UTC midnight.
+      const utc = (d: Date) => new Date(format(d, "yyyy-MM-dd") + "T00:00:00.000Z");
+      const weekStartU = utc(commissionWeekStart);
+      const monthStartU = utc(monthStart);
+      const yearStartU = utc(commissionYearStart);
+      const endU = utc(addDays(todayStart, 1)); // exclusive: through end of today
 
-        for (const inst of paidInstalments) {
-          const earned = inst.amount * commissionPct / 100;
-          if (inst.paidAt! >= commissionWeekStart) commissionThisWeek += earned;
-          if (inst.paidAt! >= monthStart) commissionThisMonth += earned;
-          commissionThisYear += earned;
-        }
-
-        // Also include single/subscription proposals paid this year (no instalments)
-        const paidSingleProposals = await db()
-          .select({ totalAmount: proposals.totalAmount, paidAt: proposals.paidAt })
-          .from(proposals)
-          .where(
-            and(
-              eq(proposals.createdBy, userId),
-              eq(proposals.paymentStructure, "single"),
-              isNotNull(proposals.paidAt),
-              gte(proposals.paidAt, commissionYearStart)
-            )
-          );
-
-        for (const p of paidSingleProposals) {
-          const earned = p.totalAmount * commissionPct / 100;
-          if (p.paidAt! >= commissionWeekStart) commissionThisWeek += earned;
-          if (p.paidAt! >= monthStart) commissionThisMonth += earned;
-          commissionThisYear += earned;
-        }
-
-      } else if (payoutTiming === "first_instalment") {
-        // Full commission when first instalment is paid (or single payment is made)
-        const firstInstalments = await db()
-          .select({
-            totalAmount: proposals.totalAmount,
-            paidAt: proposalInstalments.paidAt,
-          })
-          .from(proposalInstalments)
-          .innerJoin(proposals, eq(proposalInstalments.proposalId, proposals.id))
-          .where(
-            and(
-              eq(proposals.createdBy, userId),
-              eq(proposalInstalments.instalmentNumber, 1),
-              isNotNull(proposalInstalments.paidAt),
-              gte(proposalInstalments.paidAt, commissionYearStart)
-            )
-          );
-
-        for (const inst of firstInstalments) {
-          const earned = inst.totalAmount * commissionPct / 100;
-          if (inst.paidAt! >= commissionWeekStart) commissionThisWeek += earned;
-          if (inst.paidAt! >= monthStart) commissionThisMonth += earned;
-          commissionThisYear += earned;
-        }
-
-        // Non-instalment proposals: full commission on paidAt
-        const paidNonInstalment = await db()
-          .select({ totalAmount: proposals.totalAmount, paidAt: proposals.paidAt })
-          .from(proposals)
-          .where(
-            and(
-              eq(proposals.createdBy, userId),
-              eq(proposals.paymentStructure, "single"),
-              isNotNull(proposals.paidAt),
-              gte(proposals.paidAt, commissionYearStart)
-            )
-          );
-
-        for (const p of paidNonInstalment) {
-          const earned = p.totalAmount * commissionPct / 100;
-          if (p.paidAt! >= commissionWeekStart) commissionThisWeek += earned;
-          if (p.paidAt! >= monthStart) commissionThisMonth += earned;
-          commissionThisYear += earned;
-        }
-
-      } else {
-        // "full_paid" — commission when entire proposal is paid
-        const paidProposals = await db()
-          .select({ totalAmount: proposals.totalAmount, paidAt: proposals.paidAt })
-          .from(proposals)
-          .where(
-            and(
-              eq(proposals.createdBy, userId),
-              isNotNull(proposals.paidAt),
-              gte(proposals.paidAt, commissionYearStart)
-            )
-          );
-
-        for (const p of paidProposals) {
-          const earned = p.totalAmount * commissionPct / 100;
-          if (p.paidAt! >= commissionWeekStart) commissionThisWeek += earned;
-          if (p.paidAt! >= monthStart) commissionThisMonth += earned;
-          commissionThisYear += earned;
-        }
-      }
+      const events = await getRepCommissionEvents({
+        userId,
+        commissionPct,
+        payoutTiming: payoutTiming as PayoutTiming,
+      });
+      commissionThisWeek = commissionInRange(events, weekStartU, endU);
+      commissionThisMonth = commissionInRange(events, monthStartU, endU);
+      commissionThisYear = commissionInRange(events, yearStartU, endU);
     } catch (e) {
       console.error("[rep-metrics] Commission calculation failed:", e);
     }

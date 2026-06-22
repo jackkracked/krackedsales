@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { proposals, calls, softwareCosts, manualExpenses, users } from "@/lib/db/schema";
+import { proposals, calls, softwareCosts, manualExpenses, users, projectStatuses } from "@/lib/db/schema";
 import { and, eq, isNotNull, inArray, desc } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
 import { stripe, hasStripe } from "@/lib/stripe/client";
@@ -9,6 +9,8 @@ import { ghl, locationId } from "@/lib/ghl/client";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 import { getMetricEntry, type DetailSource } from "@/lib/kpi/metric-catalog";
 import { loadMetaAdSpend } from "@/lib/kpi/meta-series";
+import { getRepCommissionEvents, getPayoutTiming, commissionDetailRows } from "@/lib/kpi/rep-proposal-commission";
+import { getConfig, getMetricValue } from "@/lib/kpi/engine";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -145,13 +147,30 @@ async function buildSource(
       const subs = await paginateAll<ES>((after) =>
         stripe().subscriptions.list({ status: "active", expand: ["data.customer"], limit: 100, ...(after ? { starting_after: after } : {}) }) as Promise<{ data: ES[]; has_more: boolean }>,
       );
+      // Correlate to proposals so paid-in-full (auto-renew OFF) clients are labelled —
+      // they count in MRR at their monthly run-rate, so the drill-down explains why.
+      const subPropIds = [...new Set(subs.map((s) => s.metadata?.proposal_id).filter((x): x is string => !!x))];
+      const prepaidMap = new Map<string, Date | null>();
+      if (subPropIds.length) {
+        const props = await db()
+          .select({ id: proposals.id, autoRenew: proposals.autoRenew, endDate: proposals.endDate })
+          .from(proposals)
+          .where(inArray(proposals.id, subPropIds));
+        for (const p of props) if (p.autoRenew === false) prepaidMap.set(p.id, p.endDate);
+      }
       subs.sort((a, b) => (b.items.data[0] ? toMonthlyDollars(b.items.data[0]) : 0) - (a.items.data[0] ? toMonthlyDollars(a.items.data[0]) : 0));
       let periodSum = 0;
       const rows = subs.map((s) => {
         const item = s.items.data[0];
         const amt = item ? toMonthlyDollars(item) : 0;
         periodSum += amt;
-        return { label: customerName(s.customer), sublabel: item?.price.nickname || "Subscription", amount: amt, date: new Date(s.created * 1000).toISOString(), inPeriod: true };
+        const pid = s.metadata?.proposal_id;
+        const isPrepaid = pid != null && prepaidMap.has(pid);
+        const endDate = isPrepaid ? prepaidMap.get(pid!) : null;
+        const sublabel = isPrepaid
+          ? `Prepaid term${endDate ? ` · ends ${new Date(endDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}` : ""}`
+          : item?.price.nickname || "Subscription";
+        return { label: customerName(s.customer), sublabel, amount: amt, date: new Date(s.created * 1000).toISOString(), inPeriod: true };
       });
       return { unit: "currency", rows, periodSum, periodCount: rows.length };
     }
@@ -227,6 +246,9 @@ async function buildSource(
         const col = colMap[dateField];
         const conds = [...baseConds, isNotNull(col)];
         const results = await db().select().from(proposals).where(and(...conds)).orderBy(desc(col)).limit(1000);
+        // asCount: count metric (e.g. Deals Closed) — header shows the count, rows
+        // still carry each deal's value for context.
+        const asCount = params.asCount === "1";
         let periodSum = 0, periodCount = 0;
         const rows = results.map((p) => {
           const d = p[dateField];
@@ -234,7 +256,7 @@ async function buildSource(
           if (ip) { periodSum += p.totalAmount; periodCount++; }
           return { label: p.contactName || "Unknown Client", sublabel: p.status, amount: p.totalAmount, date: d ? new Date(d).toISOString() : undefined, inPeriod: ip };
         });
-        return { unit: "currency", rows, periodSum, periodCount };
+        return { unit: asCount ? "count" : "currency", rows, periodSum, periodCount };
       }
 
       // Snapshot (e.g. Outstanding Proposals) — status-based, not date-scoped.
@@ -246,6 +268,17 @@ async function buildSource(
         return { label: p.contactName || "Unknown Client", sublabel: p.status, amount: p.totalAmount, date: p.sentAt ? new Date(p.sentAt).toISOString() : undefined, inPeriod: true };
       });
       return { unit: "currency", rows, periodSum, periodCount: rows.length };
+    }
+
+    // ── DB: rep commission (proposal-based, payout-timing aware) ──────────────
+    case "rep_commission": {
+      if (!ctx.userId || !range) return { unit: "currency", rows: [], periodSum: 0, periodCount: 0 };
+      const [u] = await db().select({ pct: users.commissionPct }).from(users).where(eq(users.id, ctx.userId)).limit(1);
+      const pct = u?.pct ?? 0;
+      const timing = await getPayoutTiming();
+      const events = await getRepCommissionEvents({ userId: ctx.userId, commissionPct: pct, payoutTiming: timing });
+      const { rows, periodSum, periodCount } = commissionDetailRows(events, range.start, range.end);
+      return { unit: "currency", rows, periodSum, periodCount };
     }
 
     // ── DB: calls ───────────────────────────────────────────────────────────────
@@ -317,7 +350,7 @@ async function buildSource(
       try {
         const res = await meta.get<{ data: Array<{ spend?: string; date_start?: string }> }>(
           `/${adAccountId}/insights`,
-          { fields: "spend", time_range: JSON.stringify({ since, until }), time_increment: "1" },
+          { fields: "spend", time_range: JSON.stringify({ since, until }), time_increment: "1", limit: "500" },
         );
         daily = (res.data ?? []).filter((d) => d.date_start).map((d) => ({ date: new Date(d.date_start + "T00:00:00.000Z"), spend: parseFloat(d.spend ?? "0") }));
       } catch (e) {
@@ -372,15 +405,108 @@ export async function GET(req: NextRequest) {
     const metricKey = searchParams.get("metric");
     if (!metricKey) return NextResponse.json({ error: "metric param required" }, { status: 400 });
 
-    const entry = getMetricEntry(metricKey);
+    // Funnel-scoped keys (`offer:{funnelId}:{base}`) borrow the base metric's
+    // catalog entry for a friendly title/explanation; the engine still keys the
+    // config off the full metricKey below.
+    const baseKey = metricKey.startsWith("offer:")
+      ? metricKey.split(":").slice(2).join(":")
+      : metricKey;
+    const entry = getMetricEntry(baseKey);
     const range = parseRange(searchParams);
     const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10) || 0);
-    const u = user as { id?: string; email?: string; ghlUserId?: string | null };
+    const u = user as { id?: string; email?: string; ghlUserId?: string | null; role?: string };
+    // Reps may only ever see their OWN scoped line items — ignore query-param
+    // identity for non-admins (prevents reading another rep's deals via ?userId=).
+    const isAdmin = u.role === "admin";
     const ctx = {
-      userId: searchParams.get("userId") ?? u.id ?? "",
-      email: searchParams.get("email") ?? u.email ?? "",
-      ghlUserId: searchParams.get("ghlUserId") ?? u.ghlUserId ?? "",
+      userId: (isAdmin ? searchParams.get("userId") ?? u.id : u.id) ?? "",
+      email: (isAdmin ? searchParams.get("email") ?? u.email : u.email) ?? "",
+      ghlUserId: (isAdmin ? searchParams.get("ghlUserId") ?? u.ghlUserId : u.ghlUserId) ?? "",
     };
+
+    // ─── Active Projects (interactive: mark active/complete) ───────────────────
+    // Paid project proposals, each row carrying its status so the drawer can toggle
+    // active ↔ complete. Active = not complete; completed rows show muted at the end.
+    if (metricKey === "activeProjects") {
+      const rows = await db()
+        .select({
+          id: proposals.id,
+          contactName: proposals.contactName,
+          amount: proposals.totalAmount,
+          paidAt: proposals.paidAt,
+          status: projectStatuses.status,
+        })
+        .from(proposals)
+        .leftJoin(projectStatuses, eq(projectStatuses.proposalId, proposals.id))
+        .where(and(eq(proposals.type, "project"), eq(proposals.status, "paid")));
+
+      const list = rows
+        .map((r) => {
+          const status = (r.status ?? "active") as "active" | "complete";
+          return {
+            id: r.id,
+            label: r.contactName || "Project",
+            sublabel: status === "complete" ? "Complete" : "Active",
+            amount: r.amount,
+            status,
+            date: r.paidAt ? new Date(r.paidAt).toISOString() : undefined,
+            inPeriod: status !== "complete",
+          };
+        })
+        .sort((a, b) => {
+          const ac = a.status === "complete" ? 1 : 0;
+          const bc = b.status === "complete" ? 1 : 0;
+          if (ac !== bc) return ac - bc;
+          return (b.amount ?? 0) - (a.amount ?? 0);
+        });
+
+      return NextResponse.json({
+        title: "Active Projects",
+        explanation:
+          "Paid project proposals. A project is active the moment it's paid; mark it complete here when the work is done and it drops out of the count.",
+        kind: "list",
+        editable: "projectStatus",
+        rows: list,
+        periodSum: null,
+        periodCount: list.filter((r) => r.status !== "complete").length,
+        unit: "count",
+        nextOffset: null,
+      });
+    }
+
+    // ─── Configurable-KPI overlay ─────────────────────────────────────────────
+    // If this metric is WIRED, its drill-down rows come from the engine (the exact
+    // records behind the configured number) — the confidence surface. Falls through
+    // to the legacy detail path when unconfigured.
+    if (range) {
+      const cfg = await getConfig(metricKey).catch(() => null);
+      if (cfg && cfg.enabled) {
+        const r = await getMetricValue(metricKey, range, {
+          isAdmin,
+          userId: ctx.userId,
+          ghlUserId: ctx.ghlUserId,
+          repEmail: ctx.email,
+        });
+        const allRows = r.rows.map((row) => ({
+          label: row.label,
+          sublabel: row.sublabel,
+          amount: row.amount,
+          date: row.date,
+          inPeriod: true,
+        }));
+        const page = allRows.slice(offset, offset + PAGE_SIZE);
+        return NextResponse.json({
+          title: entry?.label ?? metricKey,
+          explanation: entry?.explanation ?? "Configured metric.",
+          kind: "list",
+          rows: page,
+          periodSum: r.unit === "currency" ? r.value : null,
+          periodCount: allRows.length,
+          unit: r.unit === "currency" ? "currency" : "count",
+          nextOffset: offset + PAGE_SIZE < allRows.length ? offset + PAGE_SIZE : null,
+        });
+      }
+    }
 
     // Unknown metric or no catalog entry — return a graceful, explained empty.
     if (!entry) {
@@ -405,11 +531,54 @@ export async function GET(req: NextRequest) {
       const swTotal = sw.reduce((s, r) => s + r.c, 0);
       const manualTotal = manual.reduce((s, r) => s + r.a, 0);
       const adSpend = metaSpend.spendInRange(range.start, range.end);
+
+      // Stripe processing fees (on succeeded charges) + refunds in the period — the
+      // actual total, not a pointer. Mirrors the metrics route's computation.
+      let stripeFeesRefunds = 0;
+      if (hasStripe()) {
+        try {
+          const s = stripe();
+          const startUnix = Math.floor(range.start.getTime() / 1000);
+          const endUnix = Math.floor(range.end.getTime() / 1000);
+          let fees = 0;
+          let after: string | undefined;
+          while (true) {
+            const page = await s.charges.list({
+              created: { gte: startUnix, lt: endUnix },
+              expand: ["data.balance_transaction"],
+              limit: 100,
+              ...(after ? { starting_after: after } : {}),
+            });
+            for (const c of page.data) {
+              const bt = c.balance_transaction;
+              if (c.status === "succeeded" && bt && typeof bt !== "string") fees += bt.fee ?? 0;
+            }
+            if (!page.has_more) break;
+            after = page.data[page.data.length - 1].id;
+          }
+          let refundTotal = 0;
+          let rAfter: string | undefined;
+          while (true) {
+            const page = await s.refunds.list({
+              created: { gte: startUnix, lt: endUnix },
+              limit: 100,
+              ...(rAfter ? { starting_after: rAfter } : {}),
+            });
+            for (const r of page.data) refundTotal += r.amount;
+            if (!page.has_more) break;
+            rAfter = page.data[page.data.length - 1].id;
+          }
+          stripeFeesRefunds = (fees + refundTotal) / 100;
+        } catch (e) {
+          console.error("[detail/expenses_breakdown] fees fetch failed", e);
+        }
+      }
+
       const breakdown = [
         { label: "Software subscriptions", value: `$${Math.round(swTotal).toLocaleString()}` },
         { label: "Manual expenses", value: `$${Math.round(manualTotal).toLocaleString()}` },
         { label: "Ad spend (Meta)", value: `$${Math.round(adSpend).toLocaleString()}` },
-        { label: "Stripe fees + refunds", value: "see Stripe section" },
+        { label: "Stripe fees + refunds", value: `$${Math.round(stripeFeesRefunds).toLocaleString()}` },
       ];
       return NextResponse.json({ title: entry.label, explanation: entry.explanation, kind: "breakdown", breakdown, rows: [], periodSum: null, periodCount: 0, unit: "currency", nextOffset: null });
     }

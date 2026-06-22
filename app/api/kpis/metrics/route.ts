@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { proposals, proposalInstalments, softwareCosts, manualExpenses, kpiOverrides } from "@/lib/db/schema";
+import { proposals, proposalInstalments, softwareCosts, manualExpenses, projectStatuses } from "@/lib/db/schema";
 import { and, eq, gte, lt, inArray, isNotNull, sql } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
 import { stripe, hasStripe } from "@/lib/stripe/client";
 import type Stripe from "stripe";
 import { eachDayOfInterval, startOfDay, endOfDay, format } from "date-fns";
+import { listConfigs, getMetricValues } from "@/lib/kpi/engine";
 
 export const dynamic = "force-dynamic";
 
@@ -185,9 +186,11 @@ export async function GET(req: NextRequest) {
       );
       const newMgmtIds = new Set(newSubs.map((sub) => typeof sub.customer === "string" ? sub.customer : sub.customer.id));
       newManagementCount = newMgmtIds.size;
+      // New Management MRR is an MRR figure — normalize to the monthly run-rate, same as
+      // total/churned MRR (so a prepaid or multi-month sub isn't shown as its full term value).
       newManagementValue = newSubs.reduce((sum, sub) => {
         const item = sub.items.data[0];
-        return item ? sum + (item.price.unit_amount ?? 0) : sum;
+        return item ? sum + toMonthlyCents(item) : sum;
       }, 0) / 100;
 
       // Churned management MRR
@@ -310,7 +313,7 @@ export async function GET(req: NextRequest) {
     // ─── Ad spend (total from Meta + TikTok) ─────────────────────────────────
     // Computed before totalExpenses because ad spend is an expense in that total.
     let metaAdSpend = 0;
-    let tiktokAdSpend = 0;
+    const tiktokAdSpend = 0;
 
     try {
       const adAccountId = process.env.META_AD_ACCOUNT_ID;
@@ -340,33 +343,24 @@ export async function GET(req: NextRequest) {
     // Total MRR = management MRR + software costs
     mrr = managementMrr + softwareCostTotal;
 
-    // ─── Active Projects (auto-calculated, manual override takes precedence) ──
+    // ─── Active Projects ──────────────────────────────────────────────────────
+    // A project is ACTIVE the moment its proposal is paid, and stays active until
+    // it's MANUALLY marked complete (project_statuses). So active = paid project
+    // proposals minus the ones marked complete. No status row = active.
     let activeProjects = 0;
     try {
-      const [override] = await db().select({ value: kpiOverrides.value }).from(kpiOverrides)
-        .where(and(
-          eq(kpiOverrides.metricKey, "active_projects"),
-          eq(kpiOverrides.period, periodMonth),
-        )).limit(1);
-      if (override) {
-        activeProjects = override.value;
-      } else {
-        // Auto-calculate: project-type proposals in active states (sent, signed, or paid without an end date in the past)
-        const activeProjectRows = await db()
-          .select({ id: proposals.id })
-          .from(proposals)
-          .where(and(
-            eq(proposals.type, "project"),
-            inArray(proposals.status, ["sent", "signed", "paid"]),
-          ));
-        activeProjects = activeProjectRows.length;
-      }
+      const rows = await db()
+        .select({ id: proposals.id, pstatus: projectStatuses.status })
+        .from(proposals)
+        .leftJoin(projectStatuses, eq(projectStatuses.proposalId, proposals.id))
+        .where(and(eq(proposals.type, "project"), eq(proposals.status, "paid")));
+      activeProjects = rows.filter((r) => (r.pstatus ?? "active") !== "complete").length;
     } catch {
       // fallback to 0
     }
 
     // ─── Response ─────────────────────────────────────────────────────────────
-    return NextResponse.json({
+    const body = {
       // Business Metrics
       business: {
         cashCollected,
@@ -415,7 +409,38 @@ export async function GET(req: NextRequest) {
         clientChurnCount,
         pastDueInvoiceCount,
       },
-    });
+    };
+
+    // ─── Configurable-KPI overlay ─────────────────────────────────────────────
+    // If an admin has WIRED a KPI on /kpis, its configured value (from the engine)
+    // overrides the legacy number for that key. Unconfigured metrics keep the legacy
+    // compute — nothing regresses until a KPI is explicitly configured. Non-fatal.
+    try {
+      const enabled = (await listConfigs()).filter((c) => c.enabled);
+      if (enabled.length) {
+        const engineVals = await getMetricValues(
+          enabled.map((c) => c.metricKey),
+          { start, end },
+          { isAdmin: true, userId: user.id },
+        );
+        const overrides: Record<string, number> = {};
+        for (const [k, r] of Object.entries(engineVals)) {
+          if (r && !r.unconfigured) overrides[k] = r.value;
+        }
+        for (const section of [body.business, body.management, body.project, body.sales] as Record<string, unknown>[]) {
+          for (const key of Object.keys(section)) {
+            if (key in overrides) section[key] = overrides[key];
+          }
+        }
+        // Flat map of EVERY configured metric → value, so the client can surface
+        // configured values for any KPI (incl. funnel + derived) regardless of section.
+        (body as Record<string, unknown>).configured = overrides;
+      }
+    } catch (overlayErr) {
+      console.error("[kpis/metrics] config overlay failed", overlayErr);
+    }
+
+    return NextResponse.json(body);
   } catch (err) {
     console.error("[GET /api/kpis/metrics]", err);
     return NextResponse.json({ error: "Failed to load metrics" }, { status: 500 });

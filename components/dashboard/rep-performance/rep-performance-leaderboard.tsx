@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils/cn";
 import { Avatar } from "@/components/ui/avatar";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
+import { fmtCurrency } from "@/components/kpis/metric-cell";
 import { startOfMonth, addDays, format } from "date-fns";
 
 interface RepRow {
@@ -16,6 +17,7 @@ interface RepRow {
   demos: number;
   proposalsSent: number;
   dealsClosed: number;
+  closedValue: number;
   openLeads: number;
 }
 
@@ -31,12 +33,13 @@ function StatusDot({ active }: { active: boolean }) {
   );
 }
 
-const COLUMNS = [
-  { key: "calls", label: "Calls", align: "right" as const },
-  { key: "demos", label: "Demos", align: "right" as const },
-  { key: "proposalsSent", label: "Proposals", align: "right" as const },
-  { key: "dealsClosed", label: "Closed", align: "right" as const },
-  { key: "openLeads", label: "Open", align: "right" as const },
+const COLUMNS: { key: string; label: string; align: "right" | "left"; currency?: boolean }[] = [
+  { key: "calls", label: "Calls", align: "right" },
+  { key: "demos", label: "Demos", align: "right" },
+  { key: "proposalsSent", label: "Proposals", align: "right" },
+  { key: "dealsClosed", label: "Closed", align: "right" },
+  { key: "closedValue", label: "$ Closed", align: "right", currency: true },
+  { key: "openLeads", label: "Open", align: "right" },
 ];
 
 export function RepPerformanceLeaderboard() {
@@ -114,7 +117,7 @@ export function RepPerformanceLeaderboard() {
           {isLoading
             ? Array.from({ length: 3 }).map((_, i) => (
                 <tr key={i} className="border-b border-border last:border-0">
-                  <td className="px-4 py-3" colSpan={6}>
+                  <td className="px-4 py-3" colSpan={7}>
                     <div className="h-4 bg-muted/60 rounded animate-pulse w-full" />
                   </td>
                 </tr>
@@ -135,14 +138,17 @@ export function RepPerformanceLeaderboard() {
                       </div>
                     </div>
                   </td>
-                  {COLUMNS.map((col) => (
-                    <td
-                      key={col.key}
-                      className="px-4 py-3 text-right tabular-nums text-sm text-foreground/80"
-                    >
-                      {rep[col.key as keyof RepRow] as number}
-                    </td>
-                  ))}
+                  {COLUMNS.map((col) => {
+                    const val = rep[col.key as keyof RepRow] as number;
+                    return (
+                      <td
+                        key={col.key}
+                        className="px-4 py-3 text-right tabular-nums text-sm text-foreground/80"
+                      >
+                        {col.currency ? fmtCurrency(val) : val}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
         </tbody>

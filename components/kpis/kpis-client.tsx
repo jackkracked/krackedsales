@@ -7,9 +7,12 @@ import { RefreshCw, Shield, Settings2, Plus, X, ChevronDown, ChevronRight } from
 import { cn } from "@/lib/utils/cn";
 import { format, startOfMonth, addMonths } from "date-fns";
 import { MetricSection } from "./metric-section";
-import { MetricCell, fmtCurrency, fmtNumber, type MetricDef, fmtValue } from "./metric-cell";
+import { MetricCell, fmtCurrency, fmtNumber, type MetricDef, type MetricTarget, fmtValue } from "./metric-cell";
 import { KpiDetailSheet } from "./KpiDetailSheet";
+import { KpiConfigurator } from "./kpi-configurator";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
+import { balancedRows, type MetricValue } from "./balanced-metric-grid";
+import type { MetricConfigInput } from "@/lib/kpi/engine/types";
 
 // ─── Metric definitions per section ───────────────────────────────────────────
 
@@ -32,15 +35,15 @@ const MANAGEMENT_METRICS: MetricDef[] = [
 
 const PROJECT_METRICS: MetricDef[] = [
   { key: "newProjectValue", label: "New Project Value", unit: "currency", accent: "positive" },
-  { key: "activeProjects", label: "# Active Projects", unit: "count", manual: true },
+  { key: "activeProjects", label: "# Active Projects", unit: "count" },
 ];
 
 const SALES_METRICS: MetricDef[] = [
-  { key: "mgmtProposalValueSent", label: "Mgmt Proposal Value Sent", unit: "currency" },
+  { key: "mgmtProposalValueSent", label: "Mgmt Proposal Value Outstanding", unit: "currency" },
   { key: "mgmtProposalValueLost", label: "Mgmt Proposal Value Lost", unit: "currency", accent: "negative" },
-  { key: "projProposalValueSent", label: "Project Proposal Value Sent", unit: "currency" },
+  { key: "projProposalValueSent", label: "Project Proposal Value Outstanding", unit: "currency" },
   { key: "projProposalValueLost", label: "Project Proposal Value Lost", unit: "currency", accent: "negative" },
-  { key: "adSpendMeta", label: "Meta Ad Spend", unit: "currency" },
+  { key: "adSpendMeta", label: "Total Meta Ad Spend", unit: "currency" },
   { key: "adSpendTiktok", label: "TikTok Ad Spend", unit: "currency" },
 ];
 
@@ -65,11 +68,11 @@ const FUNNEL_GROUPS: { label: string; metrics: MetricDef[] }[] = [
   {
     label: "Fulfillment",
     metrics: [
-      { key: "demosSubmitted", label: "Demos Submitted", unit: "count" },
-      { key: "demosCompleted", label: "Demos Completed", unit: "count" },
+      { key: "demosSubmitted", label: "New Demo Requests", unit: "count" },
+      { key: "demosCompleted", label: "Demos Sent", unit: "count" },
       { key: "costPerDemoCompleted", label: "Cost / Demo", unit: "currency" },
-      { key: "auditsRequested", label: "Audits Requested", unit: "count" },
-      { key: "auditsCompleted", label: "Audits Completed", unit: "count" },
+      { key: "auditsRequested", label: "New Audit Requests", unit: "count" },
+      { key: "auditsCompleted", label: "Audits Sent", unit: "count" },
     ],
   },
   {
@@ -157,6 +160,71 @@ export function KpisClient() {
   const [syncSummary, setSyncSummary] = useState("");
   const [detailMetric, setDetailMetric] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** The metric whose configurator drawer is open (null = closed). */
+  const [configureKey, setConfigureKey] = useState<string | null>(null);
+
+  // ─── Admin gate (gear / Configure affordances are admin-only) ─────────────────
+  const { data: me } = useQuery<{ role: string }>({
+    queryKey: ["me"],
+    queryFn: () => fetch("/api/me").then((r) => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
+  const isAdmin = me?.role === "admin";
+
+  // ─── Which metrics have a saved config (drives configured vs ghost state) ─────
+  const configsQuery = useQuery<{ configs: MetricConfigInput[] }>({
+    queryKey: ["kpi-configs"],
+    queryFn: async () => {
+      const res = await fetch("/api/kpis/configs");
+      if (!res.ok) throw new Error("Failed to load configs");
+      return res.json();
+    },
+    enabled: isAdmin,
+    staleTime: 60 * 1000,
+  });
+
+  const configs = useMemo(() => configsQuery.data?.configs ?? [], [configsQuery.data]);
+  const configuredKeys = useMemo(
+    () => new Set(configs.filter((c) => c.enabled).map((c) => c.metricKey)),
+    [configs],
+  );
+
+  // ─── KPI targets (admin-set goals → per-card over/under badge) ────────────────
+  const targetsQuery = useQuery<{ targets: Record<string, MetricTarget> }>({
+    queryKey: ["kpi-targets"],
+    queryFn: async () => {
+      const res = await fetch("/api/kpis/targets");
+      if (!res.ok) throw new Error("Failed to load targets");
+      return res.json();
+    },
+    enabled: isAdmin,
+    staleTime: 60 * 1000,
+  });
+  const targets = useMemo(() => targetsQuery.data?.targets ?? {}, [targetsQuery.data]);
+  const existingConfig = useMemo(
+    () => (configureKey ? configs.find((c) => c.metricKey === configureKey) ?? null : null),
+    [configs, configureKey],
+  );
+
+  // Flattened, deduped list of every dashboard metric (key + friendly label).
+  // Powers both the configurator title lookup and the Combine term-builder dropdown.
+  const availableMetrics = useMemo(() => {
+    const all: MetricDef[] = [
+      ...BUSINESS_METRICS,
+      ...MANAGEMENT_METRICS,
+      ...PROJECT_METRICS,
+      ...SALES_METRICS,
+      ...FUNNEL_GROUPS.flatMap((g) => g.metrics),
+    ];
+    const seen = new Set<string>();
+    const out: { metricKey: string; label: string }[] = [];
+    for (const m of all) {
+      if (seen.has(m.key)) continue;
+      seen.add(m.key);
+      out.push({ metricKey: m.key, label: m.label });
+    }
+    return out;
+  }, []);
 
   // ─── Fetch evergreen metrics ──────────────────────────────────────────────
   const metricsQuery = useQuery({
@@ -183,6 +251,20 @@ export function KpisClient() {
   const funnels = funnelsQuery.data?.funnels ?? [];
   const data = metricsQuery.data;
   const loading = metricsQuery.isLoading;
+
+  // Label for the metric being configured (best-effort lookup across all defs).
+  // Funnel-scoped keys are `offer:{funnelId}:{base}` → "Base · Funnel name".
+  const configureLabel = useMemo(() => {
+    if (!configureKey) return "";
+    if (configureKey.startsWith("offer:")) {
+      const [, funnelId, ...rest] = configureKey.split(":");
+      const baseKey = rest.join(":");
+      const baseLabel = availableMetrics.find((m) => m.metricKey === baseKey)?.label ?? baseKey;
+      const funnelName = funnels.find((f) => f.id === funnelId)?.name;
+      return funnelName ? `${baseLabel} · ${funnelName}` : baseLabel;
+    }
+    return availableMetrics.find((m) => m.metricKey === configureKey)?.label ?? configureKey;
+  }, [configureKey, availableMetrics, funnels]);
 
   // ─── Build value maps ─────────────────────────────────────────────────────
   const businessValues = useMemo(() => {
@@ -333,8 +415,8 @@ export function KpisClient() {
           </div>
         )}
 
-        {/* Sections */}
-        <MetricSection
+        {/* Sections — admins get the configurable variant (gear + ghost states). */}
+        <KpiSection
           title="Business Metrics"
           metrics={BUSINESS_METRICS}
           values={businessValues}
@@ -342,18 +424,26 @@ export function KpisClient() {
           accent={SECTION_ACCENTS.business}
           onMetricClick={setDetailMetric}
           onManualSave={handleManualSave}
+          isAdmin={isAdmin}
+          configuredKeys={configuredKeys}
+          targets={targets}
+          onConfigure={setConfigureKey}
         />
 
-        <MetricSection
+        <KpiSection
           title="Management Metrics"
           metrics={MANAGEMENT_METRICS}
           values={managementValues}
           loading={loading}
           accent={SECTION_ACCENTS.management}
           onMetricClick={setDetailMetric}
+          isAdmin={isAdmin}
+          configuredKeys={configuredKeys}
+          targets={targets}
+          onConfigure={setConfigureKey}
         />
 
-        <MetricSection
+        <KpiSection
           title="Project Metrics"
           metrics={PROJECT_METRICS}
           values={projectValues}
@@ -361,15 +451,23 @@ export function KpisClient() {
           accent={SECTION_ACCENTS.project}
           onMetricClick={setDetailMetric}
           onManualSave={handleManualSave}
+          isAdmin={isAdmin}
+          configuredKeys={configuredKeys}
+          targets={targets}
+          onConfigure={setConfigureKey}
         />
 
-        <MetricSection
+        <KpiSection
           title="Sales Metrics"
           metrics={SALES_METRICS}
           values={salesValues}
           loading={loading}
           accent={SECTION_ACCENTS.sales}
           onMetricClick={setDetailMetric}
+          isAdmin={isAdmin}
+          configuredKeys={configuredKeys}
+          targets={targets}
+          onConfigure={setConfigureKey}
         />
 
         {/* Offer Funnels */}
@@ -379,6 +477,10 @@ export function KpisClient() {
             funnel={funnel}
             dateRange={dateRange}
             onMetricClick={setDetailMetric}
+            targets={targets}
+            isAdmin={isAdmin}
+            configuredKeys={configuredKeys}
+            onConfigure={setConfigureKey}
           />
         ))}
 
@@ -411,6 +513,172 @@ export function KpisClient() {
           onClose={() => { setSettingsOpen(false); queryClient.invalidateQueries({ queryKey: ["offer-funnels"] }); }}
         />
       )}
+
+      {isAdmin && (
+        <KpiConfigurator
+          metricKey={configureKey ?? ""}
+          metricLabel={configureLabel}
+          existingConfig={existingConfig}
+          range={{ start: dateRange.start, end: dateRange.end }}
+          availableMetrics={availableMetrics}
+          open={configureKey !== null}
+          onClose={() => setConfigureKey(null)}
+          onSaved={() => {
+            queryClient.invalidateQueries({ queryKey: ["kpi-configs"] });
+            queryClient.invalidateQueries({ queryKey: ["kpi-metrics"] });
+            queryClient.invalidateQueries({ queryKey: ["kpi-targets"] });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── KPI Section — configurable for admins, plain otherwise ──────────────────────
+
+/**
+ * Wraps MetricSection's chrome. For admins it renders the cells directly (so each
+ * cell can carry the gear / ghost "Configure" affordances); for non-admins it
+ * delegates to the standard MetricSection unchanged.
+ */
+function KpiSection({
+  title,
+  metrics,
+  values,
+  loading,
+  accent,
+  onMetricClick,
+  onManualSave,
+  isAdmin,
+  configuredKeys,
+  targets,
+  onConfigure,
+}: {
+  title: string;
+  metrics: MetricDef[];
+  values: Record<string, MetricValue | undefined>;
+  loading?: boolean;
+  accent?: string;
+  onMetricClick?: (key: string) => void;
+  onManualSave?: (key: string, value: number) => void;
+  isAdmin?: boolean;
+  configuredKeys: Set<string>;
+  targets: Record<string, MetricTarget>;
+  onConfigure: (key: string) => void;
+}) {
+  // Non-admins (or no metrics) → the standard section, no configure affordances.
+  if (!isAdmin) {
+    return (
+      <MetricSection
+        title={title}
+        metrics={metrics}
+        values={values}
+        loading={loading}
+        accent={accent}
+        onMetricClick={onMetricClick}
+        onManualSave={onManualSave}
+      />
+    );
+  }
+
+  return (
+    <section className="mb-6">
+      {/* Section header — mirrors MetricSection */}
+      <div className="flex items-center gap-3 mb-2 px-1">
+        <div className="w-0.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: accent ?? "oklch(0.45 0.03 250)" }} />
+        <h3
+          className="text-[11px] font-bold uppercase tracking-widest text-foreground/70 shrink-0"
+          style={{ fontFamily: "var(--font-heading)" }}
+        >
+          {title}
+        </h3>
+        <div className="flex-1 h-px bg-border/60" />
+      </div>
+
+      <div className="bg-card border border-border rounded-[10px] overflow-hidden">
+        {loading ? (
+          <div className="grid grid-cols-3 sm:grid-cols-5 divide-x divide-y divide-border/40">
+            {Array.from({ length: metrics.length || 5 }).map((_, i) => (
+              <div key={i} className="py-3.5 px-4 animate-pulse">
+                <div className="h-2.5 w-16 bg-muted rounded mb-2" />
+                <div className="h-5 w-20 bg-muted rounded" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <ConfigurableRows
+            metrics={metrics}
+            values={values}
+            onMetricClick={onMetricClick}
+            onManualSave={onManualSave}
+            configuredKeys={configuredKeys}
+            targets={targets}
+            onConfigure={onConfigure}
+          />
+        )}
+      </div>
+    </section>
+  );
+}
+
+/** Balanced rows (reuses balancedRows) of configurable MetricCells. */
+function ConfigurableRows({
+  metrics,
+  values,
+  onMetricClick,
+  onManualSave,
+  configuredKeys,
+  targets,
+  onConfigure,
+}: {
+  metrics: MetricDef[];
+  values: Record<string, MetricValue | undefined>;
+  onMetricClick?: (key: string) => void;
+  onManualSave?: (key: string, value: number) => void;
+  configuredKeys: Set<string>;
+  targets: Record<string, MetricTarget>;
+  onConfigure: (key: string) => void;
+}) {
+  const cells = metrics.map((def) => {
+    const mv = values[def.key];
+    return (
+      <MetricCell
+        key={def.key}
+        def={def}
+        value={mv?.value}
+        spark={mv?.spark}
+        sub={mv?.sub}
+        status={mv?.status}
+        target={targets[def.key]}
+        onClick={onMetricClick ? () => onMetricClick(def.key) : undefined}
+        onManualSave={def.manual && onManualSave ? (v) => onManualSave(def.key, v) : undefined}
+        configurable
+        configured={configuredKeys.has(def.key)}
+        onConfigure={() => onConfigure(def.key)}
+      />
+    );
+  });
+
+  // Slice into balanced rows up front (mirrors BalancedMetricGrid).
+  const rows = balancedRows(cells.length);
+  const slices: (typeof cells)[] = [];
+  let offset = 0;
+  for (const count of rows) {
+    slices.push(cells.slice(offset, offset + count));
+    offset += count;
+  }
+
+  return (
+    <div>
+      {slices.map((rowCells, ri) => (
+        <div key={ri} className={cn("flex divide-x divide-border/40", ri > 0 && "border-t border-border/40")}>
+          {rowCells.map((c, ci) => (
+            <div key={ci} className="flex-1 basis-0 min-w-0">
+              {c}
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
@@ -421,10 +689,18 @@ function FunnelSection({
   funnel,
   dateRange,
   onMetricClick,
+  targets,
+  isAdmin,
+  configuredKeys,
+  onConfigure,
 }: {
   funnel: OfferFunnel;
   dateRange: ActiveRange;
   onMetricClick: (key: string) => void;
+  targets: Record<string, MetricTarget>;
+  isAdmin?: boolean;
+  configuredKeys: Set<string>;
+  onConfigure: (key: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -482,14 +758,28 @@ function FunnelSection({
                     className="grid divide-x divide-border/40"
                     style={{ gridTemplateColumns: `repeat(${group.metrics.length}, 1fr)` }}
                   >
-                    {group.metrics.map((def) => (
-                      <MetricCell
-                        key={def.key}
-                        def={def}
-                        value={metricsData[def.key] ?? null}
-                        onClick={onMetricClick ? () => onMetricClick(def.key) : undefined}
-                      />
-                    ))}
+                    {group.metrics.map((def) => {
+                      // Per-funnel config key — each funnel wires its offer metrics
+                      // independently (the Bolt funnel ≠ the Free Design funnel).
+                      const nsKey = `offer:${funnel.id}:${def.key}`;
+                      const isConfigured = configuredKeys.has(nsKey);
+                      return (
+                        <MetricCell
+                          key={def.key}
+                          def={def}
+                          value={metricsData[def.key] ?? null}
+                          // An offer-scoped target (set via this card's gear) wins;
+                          // otherwise fall back to a global target for the base key.
+                          target={targets[nsKey] ?? targets[def.key]}
+                          // Configured metrics drill into the engine rows (the exact
+                          // appointments/records); unconfigured use the legacy catalog.
+                          onClick={() => onMetricClick(isConfigured ? nsKey : def.key)}
+                          configurable={isAdmin}
+                          configured={isConfigured}
+                          onConfigure={isAdmin ? () => onConfigure(nsKey) : undefined}
+                        />
+                      );
+                    })}
                   </div>
                 </div>
               ))}

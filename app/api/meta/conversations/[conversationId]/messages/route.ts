@@ -3,6 +3,7 @@ import { meta, pageId } from "@/lib/meta/client";
 import { db } from "@/lib/db";
 import { platformReplies } from "@/lib/db/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { getSessionUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -99,8 +100,10 @@ export async function POST(
       message: { text },
     });
 
-    // Track reply time so the queue knows we've responded
-    // (table has no unique constraint — delete stale row then insert fresh)
+    // Track reply time + who replied so the queue knows we've responded and can
+    // scope this thread to the responding rep (app-side ownership).
+    const sessionUser = await getSessionUser().catch(() => null);
+    const responderUserId = sessionUser?.ghlUserId ?? null;
     const client = db();
     const platformName = platform ?? "facebook";
     const existing = await client
@@ -111,12 +114,12 @@ export async function POST(
     if (existing.length > 0) {
       await client
         .update(platformReplies)
-        .set({ repliedAt: new Date() })
+        .set({ repliedAt: new Date(), responderUserId })
         .where(eq(platformReplies.id, existing[0].id));
     } else {
       await client
         .insert(platformReplies)
-        .values({ platform: platformName, externalId: conversationId, repliedAt: new Date() });
+        .values({ platform: platformName, externalId: conversationId, repliedAt: new Date(), responderUserId });
     }
 
     return NextResponse.json({ messageId: res.message_id });

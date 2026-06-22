@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KPI Wiring SOP · Kracked</title>
+<style>
+  :root{
+    --navy:#0F3A5C; --gold:#D4A574; --gold-ink:#7A4A1A; --cream:#FAFAF7;
+    --ink:#1C2333; --muted:#5C6473; --line:#E3DED6; --card:#FFFFFF;
+    --green:#2D5E3F; --green-bg:#E7F0EA; --amber:#B45309; --amber-bg:#FBF1E3; --red:#B23B3B; --red-bg:#F8EAEA;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+    background:var(--cream);color:var(--ink);line-height:1.6;
+    -webkit-font-smoothing:antialiased;padding:40px 20px 80px}
+  .wrap{max-width:880px;margin:0 auto}
+
+  header{border-bottom:2px solid var(--navy);padding-bottom:22px;margin-bottom:32px}
+  .eyebrow{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold-ink);font-weight:600}
+  h1{font-size:32px;letter-spacing:-.02em;line-height:1.1;margin-top:8px;color:var(--navy)}
+  .sub{margin-top:10px;color:var(--muted);font-size:15px;max-width:60ch}
+
+  h2{font-size:20px;letter-spacing:-.01em;color:var(--navy);margin:40px 0 14px;
+    padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:15px;color:var(--ink);margin:22px 0 8px}
+  p{margin:10px 0;max-width:68ch}
+  strong{color:var(--ink)}
+  code{background:#F0EDE7;border:1px solid var(--line);border-radius:5px;padding:1px 6px;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.86em;color:var(--navy)}
+
+  .lede{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--navy);
+    border-radius:10px;padding:18px 20px;margin:18px 0}
+  .callout{background:var(--amber-bg);border:1px solid #E9D4B0;border-radius:10px;padding:16px 20px;margin:18px 0}
+  .callout h3{margin-top:0;color:var(--amber)}
+
+  ol.steps{counter-reset:s;list-style:none;margin:16px 0}
+  ol.steps>li{counter-increment:s;position:relative;padding:14px 0 14px 52px;border-bottom:1px solid var(--line)}
+  ol.steps>li:last-child{border-bottom:none}
+  ol.steps>li::before{content:counter(s);position:absolute;left:0;top:12px;width:34px;height:34px;
+    background:var(--navy);color:#fff;border-radius:9px;display:grid;place-items:center;font-weight:700;font-size:15px}
+  ol.steps b{display:block;font-size:15px}
+  ol.steps span{color:var(--muted);font-size:14px}
+
+  table{width:100%;border-collapse:separate;border-spacing:0;margin:14px 0;font-size:13.5px}
+  th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+    font-weight:600;padding:8px 10px;border-bottom:2px solid var(--line)}
+  td{padding:10px;border-bottom:1px solid var(--line);vertical-align:top}
+  td.kpi{font-weight:600;color:var(--ink);white-space:nowrap}
+  .recipe{color:var(--navy)}
+  .expect{color:var(--muted);font-size:12.5px}
+
+  .pill{display:inline-block;font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px;white-space:nowrap}
+  .go{background:var(--green-bg);color:var(--green)}
+  .wait{background:var(--amber-bg);color:var(--amber)}
+  .stop{background:var(--red-bg);color:var(--red)}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0 4px;font-size:13px;color:var(--muted)}
+
+  .group-tag{display:inline-block;background:var(--navy);color:#fff;font-size:11px;font-weight:600;
+    letter-spacing:.05em;text-transform:uppercase;padding:4px 10px;border-radius:6px;margin:24px 0 6px}
+
+  .check{background:var(--green-bg);border:1px solid #C5DBCB;border-radius:10px;padding:16px 20px;margin:18px 0}
+  .check h3{margin-top:0;color:var(--green)}
+  footer{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+  .verified{color:var(--green);font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">Standard Operating Procedure</div>
+    <h1>Wiring the KPIs correctly</h1>
+    <p class="sub">How to configure each KPI on the <code>/kpis</code> page so every number is provably correct, and you and Gage can trust them 100%. Follow it top to bottom.</p>
+  </header>
+
+  <h2>1 · How it works (read this first)</h2>
+  <div class="lede">
+    <p style="margin-top:0"><strong>Configuring a KPI is safe.</strong> Each KPI you wire <em>overrides</em> the old calculation just for that one metric. Anything you haven't wired keeps showing today's trusted number. So you can wire them one at a time, and nothing else on the page ever changes or breaks.</p>
+    <p><strong>The preview is the truth.</strong> When you configure a KPI, a live preview shows the exact number and the records behind it <em>before</em> you save. The rule for 100% confidence is simple: <strong>only save once the preview matches the number already on the card.</strong></p>
+    <p style="margin-bottom:0"><strong>You can't break it.</strong> A nonsensical configuration can't even be saved, and one KPI can never affect another. Worst case, you cancel and the card is untouched.</p>
+  </div>
+
+  <h2>2 · The wiring process (repeat for each KPI)</h2>
+  <ol class="steps">
+    <li><b>Open the KPI</b><span>On <code>/kpis</code>, hover the KPI and click the gear (⚙), or click <em>Configure</em> on an unwired one.</span></li>
+    <li><b>Pick the Integration</b><span>Where the data lives: Stripe (money in), Meta (ad spend), Proposals, GHL, Internal (expenses), or Σ Combine.</span></li>
+    <li><b>Pick the Scope</b><span>Which set of records — e.g. "Money paid in", "Invoices", "Subscriptions", "Proposals".</span></li>
+    <li><b>Set the Measure</b><span>What to do with them — "Add up the total" (of an amount) or "Count how many" — and, if adding up, which amount.</span></li>
+    <li><b>Add Filters &amp; the date</b><span>Narrow it (e.g. status = Paid) and choose "count it by which date", or "a running total as of now" for live balances.</span></li>
+    <li><b>Match the preview, then Save</b><span>Confirm the preview number equals the card for the same month. If it matches → <strong>Save config</strong>. If not → adjust before saving.</span></li>
+  </ol>
+
+  <h2>3 · The recipes (your cheat-sheet)</h2>
+  <p>Each recipe is written in the configurator's own words. <span class="verified">Bold expected values were verified against the live database.</span></p>
+  <div class="legend">
+    <span><span class="pill go">Wire now</span> ready &amp; verified</span>
+    <span><span class="pill wait">Decide first</span> a choice changes the number</span>
+    <span><span class="pill stop">Leave on legacy</span> not wireable yet — already correct</span>
+  </div>
+
+  <div class="group-tag">Business</div>
+  <table>
+    <tr><th>KPI</th><th>Recipe</th><th>Expect / verify</th><th>Status</th></tr>
+    <tr><td class="kpi">Cash Collected</td><td class="recipe">Stripe → Money paid in → Add up the total → Amount paid → status = Paid → by Date paid</td><td class="expect">= the Cash card</td><td><span class="pill go">Wire now</span></td></tr>
+    <tr><td class="kpi">Outstanding Payments</td><td class="recipe">Stripe → Invoices → Add up → Amount still owed → status = Unpaid + Past due = Yes → <strong>Snapshot</strong></td><td class="expect">past-due owed</td><td><span class="pill go">Wire now</span></td></tr>
+    <tr><td class="kpi">Outstanding Proposals</td><td class="recipe">Proposals → Add up → Deal value → status is any of (Sent, Signed, Part-paid) → <strong>Snapshot</strong></td><td class="expect verified">$19,260 · 5 records</td><td><span class="pill go">Wire now</span></td></tr>
+    <tr><td class="kpi">Total MRR</td><td class="recipe">Stripe → Subscriptions → Add up → Monthly amount → status = Active → Snapshot</td><td class="expect">drops the software part — see decision 1</td><td><span class="pill wait">Decide first</span></td></tr>
+    <tr><td class="kpi">Total Expenses</td><td class="recipe">Software + Other + Ad spend, but can't reach Stripe fees yet</td><td class="expect">legacy is more complete</td><td><span class="pill stop">Leave on legacy</span></td></tr>
+    <tr><td class="kpi">Net P/L</td><td class="recipe">Combine: Cash in − Total Expenses (needs children wired)</td><td class="expect">—</td><td><span class="pill stop">Leave on legacy</span></td></tr>
+  </table>
+
+  <div class="group-tag">Management</div>
+  <table>
+    <tr><th>KPI</th><th>Recipe</th><th>Expect / verify</th><th>Status</th></tr>
+    <tr><td class="kpi">Management MRR</td><td class="recipe">Stripe → Subscriptions → Add up → Monthly amount → status = Active → Snapshot</td><td class="expect">= the MRR card</td><td><span class="pill go">Wire now</span></td></tr>
+    <tr><td class="kpi">New Management MRR</td><td class="recipe">Stripe → Subscriptions → Add up → Monthly amount → by Date started</td><td class="expect">new MRR this period</td><td><span class="pill go">Wire now</span></td></tr>
+    <tr><td class="kpi">Churned Management MRR</td><td class="recipe">Stripe → Subscriptions → Add up → Monthly amount → status = Cancelled → by Date cancelled</td><td class="expect">churned MRR</td><td><span class="pill go">Wire now</span></td></tr>
+    <tr><td class="kpi"># Management Clients</td><td class="recipe">Stripe → Subscriptions → Count how many → status = Active → Snapshot</td><td class="expect">counts subscriptions — see decision 2</td><td><span class="pill wait">Decide first</span></td></tr>
+    <tr><td class="kpi">Client Retention Rate</td><td class="recipe">A ratio (one number ÷ another)</td><td class="expect">ratio builder not in UI yet</td><td><span class="pill stop">Leave on legacy</span></td></tr>
+  </table>
+
+  <div class="group-tag">Project</div>
+  <table>
+    <tr><th>KPI</th><th>Recipe</th><th>Expect / verify</th><th>Status</th></tr>
+    <tr><td class="kpi">New Project Value</td><td class="recipe">Proposals → Add up → Deal value → type = One-off project → by Date paid</td><td class="expect verified">$7,547 · 8 (last month)</td><td><span class="pill go">Wire now</span></td></tr>
+    <tr><td class="kpi"># Active Projects</td><td class="recipe">Proposals → Count → type = One-off project → status is any of (Sent, Signed, Paid) → Snapshot</td><td class="expect verified">4</td><td><span class="pill go">Wire now</span></td></tr>
+  </table>
+
+  <div class="group-tag">Sales</div>
+  <table>
+    <tr><th>KPI</th><th>Recipe</th><th>Expect / verify</th><th>Status</th></tr>
+    <tr><td class="kpi">Mgmt Proposal Value Sent</td><td class="recipe">Proposals → Add up → Deal value → type = Retainer → by Date sent</td><td class="expect verified">$6,311 · 5 (last month)</td><td><span class="pill go">Wire now</span></td></tr>
+    <tr><td class="kpi">Mgmt Proposal Value Lost</td><td class="recipe">Proposals → Add up → Deal value → type = Retainer → by Date lost</td><td class="expect verified">$0 (no losses yet)</td><td><span class="pill go">Wire now</span></td></tr>
+    <tr><td class="kpi">Project Proposal Value Sent</td><td class="recipe">Proposals → Add up → Deal value → type = One-off project → by Date sent</td><td class="expect verified">$7,547 · 8 (last month)</td><td><span class="pill go">Wire now</span></td></tr>
+    <tr><td class="kpi">Project Proposal Value Lost</td><td class="recipe">Proposals → Add up → Deal value → type = One-off project → by Date lost</td><td class="expect verified">$0 (no losses yet)</td><td><span class="pill go">Wire now</span></td></tr>
+    <tr><td class="kpi">Meta Ad Spend</td><td class="recipe">Meta ads → Add up → spend → by Date spent</td><td class="expect">= the Meta spend card</td><td><span class="pill go">Wire now</span></td></tr>
+    <tr><td class="kpi">TikTok Ad Spend</td><td class="recipe">No TikTok integration yet</td><td class="expect">—</td><td><span class="pill stop">Leave on legacy</span></td></tr>
+  </table>
+
+  <div class="group-tag">Funnel</div>
+  <table>
+    <tr><th>KPI</th><th>Recipe</th><th>Expect / verify</th><th>Status</th></tr>
+    <tr><td class="kpi">Leads</td><td class="recipe">GHL → Pipeline deals → Count → by Date created</td><td class="expect">= the Leads card</td><td><span class="pill go">Wire now</span></td></tr>
+    <tr><td class="kpi">Ad Spend</td><td class="recipe">Meta ads → Add up → spend → by Date spent</td><td class="expect">= the Ad Spend card</td><td><span class="pill go">Wire now</span></td></tr>
+    <tr><td class="kpi">Booked Calls</td><td class="recipe">GHL → Booked calls → Count → by Date booked</td><td class="expect">approximate (stage-name based)</td><td><span class="pill wait">Decide first</span></td></tr>
+    <tr><td class="kpi">Audits Requested / Completed</td><td class="recipe">ClickUp → Count → list = Account Audits → by Date created / completed</td><td class="expect">status filter is manual</td><td><span class="pill wait">Decide first</span></td></tr>
+    <tr><td class="kpi">Demos Submitted / Completed</td><td class="recipe">Demo boards → Count → by Date sent / booked</td><td class="expect">agree the definition first</td><td><span class="pill wait">Decide first</span></td></tr>
+    <tr><td class="kpi">ROAS · CPL · Booking Rate · Cost-per-call/demo</td><td class="recipe">Ratios (one number ÷ another)</td><td class="expect">ratio builder not in UI yet</td><td><span class="pill stop">Leave on legacy</span></td></tr>
+  </table>
+
+  <h2>4 · Two decisions to make with Gage</h2>
+  <div class="callout">
+    <h3>Decision 1 — Total MRR</h3>
+    <p style="margin-bottom:0">Your current Total MRR card = subscriptions <strong>plus software costs</strong>. A clean Stripe configuration would be subscriptions only. Either wire it and rename the card to "Subscription MRR", or leave Total MRR on the existing calculation and wire <strong>Management MRR</strong> instead.</p>
+  </div>
+  <div class="callout">
+    <h3>Decision 2 — # Management Clients</h3>
+    <p style="margin-bottom:0">The configured version counts <strong>active subscriptions</strong>; the existing card counts <strong>distinct customers</strong>. These are identical unless one customer holds two or more subscriptions. Fine to wire today — just know the difference for the future.</p>
+  </div>
+
+  <h2>5 · The one rule that guarantees confidence</h2>
+  <div class="check">
+    <h3>✓ Preview must equal the card before you save</h3>
+    <p style="margin-bottom:0">For every KPI you wire, set the period to the same month the card is showing, and confirm the live preview number matches the card. If it matches, you've proven the wiring is correct — save it. If it doesn't, adjust the recipe (usually the date field or a missing status filter) until it does. Never save a preview that doesn't match.</p>
+  </div>
+
+  <footer>
+    Kracked Sales · KPI Wiring SOP · generated 15 Jun 2026.
+    Full technical audit (per-metric SQL verification) in <code>tasks/kpi-audit.md</code>.
+    Numbers marked verified were checked directly against the production database (read-only).
+  </footer>
+
+</div>
+</body>
+</html>

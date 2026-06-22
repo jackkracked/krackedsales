@@ -1,53 +1,21 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { BarChart2, Pencil } from "lucide-react";
-import { cn } from "@/lib/utils/cn";
-import { KpiCard } from "./kpi-card";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { BarChart2, Pencil, Plus } from "lucide-react";
+import { fmtNumber, type MetricDef } from "@/components/kpis/metric-cell";
+import { BalancedMetricGrid, type MetricValue } from "@/components/kpis/balanced-metric-grid";
 import { KpiEditSheet } from "./kpi-edit-sheet";
 import { KpiDetailSheet } from "@/components/kpis/KpiDetailSheet";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { getDefaults, getKpiDef, getPoolForRole } from "@/lib/dashboard-kpis";
 import type { KpiMetricResult } from "@/app/api/dashboard/kpis/route";
 
-interface KpiHealthEntry {
-  status: "ok" | "error";
-  override?: boolean;
-  lastCheckedAt: string | null;
-}
-
-type KpiHealthData = Record<string, KpiHealthEntry>;
-
-function deriveHealthStatus(entry: KpiHealthEntry | undefined): "healthy" | "stale" | "error" | "override" {
-  if (!entry) return "stale";
-  if (entry.override) return "override";
-  if (entry.status === "error") return "error";
-  if (!entry.lastCheckedAt) return "stale";
-  const age = Date.now() - new Date(entry.lastCheckedAt).getTime();
-  if (age > 30 * 60 * 1000) return "stale";
-  return "healthy";
-}
-
 interface KpiWidgetProps {
   role: "admin" | "rep";
   userId: string;
   ghlUserId?: string | null;
   email?: string;
-}
-
-/** Trailing phrase for the delta tooltip, e.g. "X vs Y last month". */
-function compareLabelFor(preset?: string): string {
-  switch (preset) {
-    case "today":     return "yesterday";
-    case "yesterday": return "the prior day";
-    case "7d":        return "the prior 7 days";
-    case "30d":       return "the prior 30 days";
-    case "wtd":       return "last week";
-    case "mtd":       return "last month";
-    case "ytd":       return "last year";
-    default:          return "the prior period";
-  }
 }
 
 /** Human label for the selected range, used in the detail drawer. */
@@ -64,6 +32,31 @@ function periodLabelFor(preset?: string): string {
   }
 }
 
+/** Folded sub-text under a cell: a target or an "as of" marker (no delta arrow). */
+function subFor(data?: KpiMetricResult): string | undefined {
+  if (!data) return undefined;
+  if (data.asOfLabel) return data.asOfLabel;
+  if (data.target != null) return `of ${fmtNumber(data.target)} target`;
+  return undefined;
+}
+
+/** Quiet "add a metric" affordance that fills the last balanced slot (until the 8 max). */
+function AddKpiCell({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Add a KPI"
+      className="group/add w-full h-full min-h-[72px] flex flex-col items-center justify-center gap-1.5 py-3.5 px-4 text-muted-foreground/60 transition-all duration-150 hover:bg-muted/20 hover:text-foreground motion-safe:hover:-translate-y-px"
+    >
+      <span className="w-7 h-7 rounded-full border border-dashed border-border flex items-center justify-center transition-colors group-hover/add:border-primary/60 group-hover/add:text-primary">
+        <Plus className="w-3.5 h-3.5" />
+      </span>
+      <span className="text-[10px] font-semibold uppercase tracking-wider">Add KPI</span>
+    </button>
+  );
+}
+
 export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
   const queryClient = useQueryClient();
   const now = new Date();
@@ -74,7 +67,6 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [dateRange, setDateRange] = useState<{ start: string; end: string; preset?: string }>(defaultRange);
-  const compareLabel = compareLabelFor(dateRange.preset);
   const [editOpen, setEditOpen] = useState(false);
   const [detailKey, setDetailKey] = useState<string | null>(null);
 
@@ -96,19 +88,15 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
   if (ghlUserId) params.set("ghlUserId", ghlUserId);
   if (email) params.set("email", email);
 
-  const { data: kpisData, isLoading } = useQuery<{ metrics: Record<string, KpiMetricResult> }>({
+  const { data: kpisData, isLoading, isFetching } = useQuery<{ metrics: Record<string, KpiMetricResult> }>({
     // start/end are in the key so changing the date filter refetches
     queryKey: ["dashboard-kpis", dateRange.start, dateRange.end, selectedKeys.join(","), userId],
     queryFn: () => fetch(`/api/dashboard/kpis?${params}`).then((r) => r.json()),
     staleTime: 60_000,
     refetchInterval: 3 * 60_000,
-  });
-
-  const { data: healthData } = useQuery<KpiHealthData>({
-    queryKey: ["kpi-health"],
-    queryFn: () => fetch("/api/kpis/health").then((r) => r.json()),
-    staleTime: 60_000,
-    refetchInterval: 5 * 60_000,
+    // Keep the previous values on screen while a background refresh runs, so a
+    // refetch never flashes skeletons/zeros — the data just updates in place.
+    placeholderData: keepPreviousData,
   });
 
   // Save prefs mutation
@@ -127,9 +115,9 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
 
   return (
     <>
-      <div className="bg-card border border-border rounded-[10px] p-5">
+      <div className="bg-card border border-border rounded-[10px] overflow-hidden shrink-0">
         {/* Header */}
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center justify-between p-5 pb-4">
           <div className="flex items-center gap-2">
             <BarChart2 className="w-4 h-4 text-muted-foreground" />
             <h3
@@ -138,6 +126,12 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
             >
               KPIs
             </h3>
+            {isFetching && !isLoading && (
+              <span
+                title="Refreshing…"
+                className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 animate-pulse"
+              />
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -152,23 +146,35 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
           </div>
         </div>
 
-        {/* Cards */}
-        <div className="flex gap-4 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-          {selectedKeys.map((key) => {
-            const def = getKpiDef(key);
-            if (!def) return null;
+        {/* Cards — balanced rows; the last slot is a quiet "Add KPI" affordance */}
+        <div className="border-t border-border/60">
+          {(() => {
+            const mdefs: MetricDef[] = selectedKeys
+              .map((key) => {
+                const def = getKpiDef(key);
+                return def ? { key, label: def.label, unit: def.unit } : null;
+              })
+              .filter((d): d is MetricDef => d !== null);
+            const vals: Record<string, MetricValue | undefined> = {};
+            for (const key of selectedKeys) {
+              const data = kpisData?.metrics?.[key];
+              vals[key] = data ? { value: data.value, spark: data.series, sub: subFor(data), status: data.status } : undefined;
+            }
             return (
-              <KpiCard
-                key={key}
-                def={def}
-                data={kpisData?.metrics?.[key]}
-                isLoading={isLoading}
-                compareLabel={compareLabel}
-                healthStatus={healthData ? deriveHealthStatus(healthData[key]) : undefined}
-                onClick={() => setDetailKey(key)}
+              <BalancedMetricGrid
+                metrics={mdefs}
+                values={vals}
+                loading={isLoading}
+                loadingCount={selectedKeys.length || 3}
+                onMetricClick={(key) => setDetailKey(key)}
+                addCell={
+                  !isLoading && selectedKeys.length < 8 ? (
+                    <AddKpiCell onClick={() => setEditOpen(true)} />
+                  ) : undefined
+                }
               />
             );
-          })}
+          })()}
         </div>
       </div>
 

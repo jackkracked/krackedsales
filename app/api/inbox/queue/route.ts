@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { platformReplies, users } from "@/lib/db/schema";
+import { platformReplies, users, localConversations } from "@/lib/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { meta } from "@/lib/meta/client";
@@ -34,6 +34,7 @@ export interface QueueItem {
   recipientId?: string; // Meta: participant ID needed for sending
   assignedTo?: string;  // Assigned rep display name (resolved)
   assignedToId?: string; // Raw GHL user id of the assigned rep (for filtering)
+  lastResponderId?: string; // GHL user id of the rep who last personally replied
 }
 
 interface GHLConversation {
@@ -110,6 +111,26 @@ export async function GET(req: NextRequest) {
     const data = await ghl.get<GHLConversationsResponse>(
       `/conversations/search?locationId=${loc}&limit=100&sortBy=last_message_date&sortOrder=desc`
     );
+
+    // Enrich with locally-owned "last responder" data (our source of truth for
+    // who personally handled each thread — GHL doesn't expose this on search).
+    const convIds = (data.conversations ?? []).map((c) => c.id);
+    const lastResponderById = new Map<string, string>();
+    if (convIds.length > 0) {
+      try {
+        const rows = await db()
+          .select({
+            id: localConversations.id,
+            lastResponderUserId: localConversations.lastResponderUserId,
+          })
+          .from(localConversations)
+          .where(inArray(localConversations.id, convIds));
+        for (const r of rows) {
+          if (r.lastResponderUserId) lastResponderById.set(r.id, r.lastResponderUserId);
+        }
+      } catch {}
+    }
+
     for (const conv of data.conversations ?? []) {
       const isAwaiting =
         conv.lastMessageDirection === "inbound" || (conv.unreadCount ?? 0) > 0;
@@ -135,6 +156,7 @@ export async function GET(req: NextRequest) {
         contactId: conv.contactId,
         assignedTo: conv.assignedTo ? (ghlUserMap.get(conv.assignedTo) ?? undefined) : undefined,
         assignedToId: conv.assignedTo ?? undefined,
+        lastResponderId: lastResponderById.get(conv.id) ?? undefined,
       });
     }
   } catch (err) {
@@ -160,6 +182,7 @@ export async function GET(req: NextRequest) {
       : [];
 
     const replyMap = new Map(replyRows.map((r) => [r.externalId, r.repliedAt]));
+    const responderMap = new Map(replyRows.map((r) => [r.externalId, r.responderUserId]));
 
     for (const conv of data.conversations ?? []) {
       const updatedAt = conv.updatedAt ?? new Date().toISOString();
@@ -176,6 +199,7 @@ export async function GET(req: NextRequest) {
         updatedAt,
         staleDays: staleDays(updatedAt),
         recipientId: conv.participantId,
+        lastResponderId: responderMap.get(conv.id) ?? undefined,
       });
     }
   } catch (err) {
@@ -190,7 +214,19 @@ export async function GET(req: NextRequest) {
       max_count: "50",
     })) as TikTokListResponse;
 
-    for (const conv of res.data?.conversations ?? []) {
+    const tiktokConvs = res.data?.conversations ?? [];
+    // Who last replied to each TikTok thread (app-side ownership for scoping)
+    const tiktokIds = tiktokConvs.map((c) => c.conversation_id);
+    const tiktokResponder = new Map<string, string | null>();
+    if (tiktokIds.length > 0) {
+      const rows = await db()
+        .select({ externalId: platformReplies.externalId, responderUserId: platformReplies.responderUserId })
+        .from(platformReplies)
+        .where(and(eq(platformReplies.platform, "tiktok"), inArray(platformReplies.externalId, tiktokIds)));
+      for (const r of rows) tiktokResponder.set(r.externalId, r.responderUserId);
+    }
+
+    for (const conv of tiktokConvs) {
       if ((conv.unread_count ?? 0) === 0) continue;
       const updatedAt = conv.update_time
         ? new Date(conv.update_time * 1000).toISOString()
@@ -205,6 +241,7 @@ export async function GET(req: NextRequest) {
         lastMessage: conv.latest_message?.text ?? "",
         updatedAt,
         staleDays: staleDays(updatedAt),
+        lastResponderId: tiktokResponder.get(conv.conversation_id) ?? undefined,
       });
     }
   } catch (err) {
@@ -217,17 +254,23 @@ export async function GET(req: NextRequest) {
   // Rank: stalest first (most urgent)
   items.sort((a, b) => b.staleDays - a.staleDays);
 
-  // Personalised dashboard view (scope=mine): a rep sees only conversations
-  // assigned to them; admins still see everything (full overview). The full
+  // Personalised dashboard view (scope=mine). A rep sees the shared pool +
+  // their own book: conversations assigned to them, OR that they were the last
+  // to personally respond to, OR that are unassigned (the claimable pool that
+  // any rep can pick up). Admins always see everything (full overview). The full
   // inbox page does NOT pass scope=mine, so it is unaffected.
   // Reps without a linked GHL user id fall back to all (can't scope safely).
-  // TODO(phase 2): also include conversations the rep last responded to, once we
-  // capture message authors (see lastRespondedBy plan).
   const scope = req.nextUrl.searchParams.get("scope");
   const isRep = user.role !== "admin";
+  const me = user.ghlUserId;
   const visibleItems =
-    scope === "mine" && isRep && user.ghlUserId
-      ? items.filter((it) => it.assignedToId === user.ghlUserId)
+    scope === "mine" && isRep && me
+      ? items.filter(
+          (it) =>
+            it.assignedToId === me || // assigned to me
+            it.lastResponderId === me || // I last responded
+            (!it.assignedToId && !it.lastResponderId) // truly unclaimed → shared pool
+        )
       : items;
 
   return NextResponse.json({ items: visibleItems, total: visibleItems.length });

@@ -24,6 +24,7 @@ import {
   FileText,
   Activity,
   Workflow,
+  LayoutGrid,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { NotificationBell } from "@/components/layout/notification-bell";
@@ -43,6 +44,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
       { href: "/pipeline",   label: "Pipeline",  icon: GitMerge },
       { href: "/contacts",   label: "Contacts",  icon: Users },
       { href: "/proposals",  label: "Proposals", icon: FileText },
+      { href: "/boards",     label: "Boards",    icon: LayoutGrid },
       { href: "/calls",      label: "Calls",     icon: Phone },
       { href: "/calendar",   label: "Calendar",  icon: CalendarDays },
       { href: "/tasks",      label: "Tasks",     icon: ListTodo },

@@ -1,31 +1,44 @@
-# KPI Page Overhaul — Execution Plan
+# Proposal Builder Redesign — Guided Wizard (impeccable craft)
 
-## Phase 1: Data Layer
-- [ ] 1.1 Create `offer_funnels` table (name, pipelineIds, campaignFilter, adPlatform)
-- [ ] 1.2 Create `manual_expenses` table (name, amount, month, category)
-- [ ] 1.3 Create `kpi_visibility` table (section, metricKey, visible, position)
-- [ ] 1.4 Run migrations
+**Status:** in progress · 2026-06-11 · Jack approved the shape brief ("go for it, build it")
 
-## Phase 2: API Layer — Metrics Computation
-- [ ] 2.1 Rewrite `/api/kpis/business` — Cash Collected, Outstanding, Total MRR, Total Expenses, Net P/L
-- [ ] 2.2 New `/api/kpis/management` — Mgmt MRR, New Mgmt MRR, Churned MRR, # Clients, Retention Rate
-- [ ] 2.3 New `/api/kpis/project` — New Project Value, # Active Projects (manual override)
-- [ ] 2.4 New `/api/kpis/sales` — Proposal values sent/lost by type, Ad Spend total + by channel
-- [ ] 2.5 Rewrite `/api/kpis/offer` — funnel-aware with pipeline mapping + campaign filter
-- [ ] 2.6 CRUD endpoints: offer funnels, manual expenses, kpi visibility toggles
+## Design (approved)
+Guided wizard, one decision per screen, plain-language deal shapes, persistent live "deal line", and a document-grade animated reveal. Reuses the proven billing engine (self-cancelling subscription, discount engine, server guardrails) — re-skin, not a billing rewrite.
 
-## Phase 3: UI — Complete Page Rebuild
-- [ ] 3.1 New MetricCell component (section-band layout, not floating cards)
-- [ ] 3.2 New MetricSection component (header + responsive fill-width grid)
-- [ ] 3.3 Rebuild kpis-client.tsx — all sections + offer funnels + period picker
-- [ ] 3.4 Settings panel (right slide — metric toggles + offer funnel config)
-- [ ] 3.5 Manual expense entry (Total Expenses card → manage panel)
-- [ ] 3.6 Inline manual entry for # Active Projects
+## Spine (dynamic steps)
+client → work → scope → deal → price → [schedule?] → reveal
+- schedule only when: project + split (instalments) OR management retainer + deposit.
 
-## Phase 4: Health Page
-- [ ] 4.1 Rebuild health-client to mirror new metric sections (full-width layout)
-- [ ] 4.2 Update health definitions for all new metrics + source systems
+## Deal shapes (friendly UI over existing form fields)
+- Management: "Auto-renewing retainer" (autoRenew=true + cadence + optional deposit) · "Fixed term, paid once" (autoRenew=false + length months)
+- Project: "One payment" (single) · "Split into payments" (instalment)
 
-## Phase 5: Verification & Deploy
-- [ ] 5.1 Type-check, verify all metrics compute correctly
-- [ ] 5.2 Deploy to production
+## Preserve verbatim (revenue-critical)
+FormState, billedTotalOf, compileScope, ContactSearch, FlowPill, handleSubmit + the API payload, the discount/billed math. Only the rendering/navigation changes.
+
+## Build steps — ✅ COMPLETE (2026-06-11)
+- [x] Rewrote proposal-create-modal.tsx as the guided wizard (motion transitions, AnimatePresence between steps, reveal price count-up + staggered nodes + savings pill; reduced-motion respected via useReducedMotion)
+- [x] tsc + eslint clean (0 errors)
+- [x] deployed + screenshot-verified all 7 screens on prod (Playwright harness, since removed) — ZERO console errors end-to-end
+- [x] polish pass: fixed the reveal "Covers" node (now shows duration "6 months", not a truncated date range)
+- [x] harden reasoning: $0 blocked, no-discount gated, long names use firstName, reduced-motion handled, submit shows Sending… + disabled
+- [x] cleaned up temp harness + playwright; redeployed READY
+
+Outcome: dead-simple guided wizard. Deal shapes (Auto-renewing retainer / Fixed term paid once · One payment / Split) are a friendly layer over the existing autoRenew + paymentStructure form fields — the proven handleSubmit payload + billing engine are UNCHANGED. Verified beautiful + flawless on prod.
+
+## Visual elevation pass ("The Instrument") — ✅ COMPLETE (2026-06-11)
+Jack: "make it magnificently beautiful / outrageously creative / one hell of an experience" + fix the contact dropdown being clipped. Used emil-design-eng (motion) + impeccable craft.
+- [x] Contact dropdown CLIPPING FIXED — portaled to document.body (position:fixed, repositions on scroll/resize) so the modal's overflow can't clip it.
+- [x] Cinematic shell: richer ink/45 backdrop + blur, paper #FBFBF9 card, premium layered shadow + ring, scale-in entrance (EASE_OUT 0.28s).
+- [x] Refined header: `02 / 06` tabular counter + step label + animated filling progress rail.
+- [x] Bigger editorial headings (1.6rem, -0.02em, balance).
+- [x] ChoiceCard: bold full-navy selected for cards w/o sub-options (work, project-deal); rich navy-tint for cards w/ controls (retainer/fixed-term, legibility); hover lift, press scale, spring-expanding sub-options, inverted icon tile, springing radio.
+- [x] Segmented control with "magic" sliding navy pill (layoutId spring) for cadence/length — 4 presets one row + "or set a custom period" link (no wrap).
+- [x] Deal line: refined navy strip, updates in place.
+- [x] Reveal: soft glow behind a bigger 3.25rem count-up, shimmering green savings pill, nodes with connectors that draw in.
+- [x] Footer: primary press scale + arrow nudge on hover; back active-scale.
+- [x] All ease-out custom curves, reduced-motion fully handled (useReducedMotion).
+- [x] Verified on prod via Playwright screenshots (since removed): all screens render, ZERO console errors. tsc + eslint clean. Engine UNCHANGED.
+
+## Design tokens (real)
+paper #FAFAF7 · ink #1C2333 · primary petrol-navy #0F3A5C · forest-green #2D5E3F (savings only) · Plus Jakarta Sans headings · radius 8/10px
