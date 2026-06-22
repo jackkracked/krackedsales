@@ -11,11 +11,25 @@ export const dynamic = "force-dynamic";
 interface EnrichedEvent extends GHLCalendarEvent {
   repEmail?: string;
   repName?: string;
+  calendarName?: string;
   isPast: boolean;
 }
 
 interface GHLCalendarResponse {
   events?: GHLCalendarEvent[];
+}
+
+/** Map of GHL calendarId → calendar name (e.g. "Demo Intro Call"), so each
+ * call tile can show what the call is for. Non-fatal: empty map on failure. */
+async function fetchCalendarNames(): Promise<Map<string, string>> {
+  try {
+    const data = await ghl.get<{ calendars?: Array<{ id: string; name: string }> }>(
+      `/calendars/?locationId=${locationId()}`
+    );
+    return new Map((data.calendars ?? []).map((c) => [c.id, c.name]));
+  } catch {
+    return new Map();
+  }
 }
 
 async function fetchEventsForUser(
@@ -85,12 +99,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ events: [], repOptions });
   }
 
-  // Fetch GHL events for all target users in parallel
-  const eventArrays = await Promise.all(
-    targetUsers.map((u) =>
-      fetchEventsForUser(u.ghlUserId, startMs, endMs, u.email, u.name)
-    )
-  );
+  // Fetch GHL events for all target users + the calendar-name map in parallel
+  const [eventArrays, calendarNames] = await Promise.all([
+    Promise.all(
+      targetUsers.map((u) =>
+        fetchEventsForUser(u.ghlUserId, startMs, endMs, u.email, u.name)
+      )
+    ),
+    fetchCalendarNames(),
+  ]);
   const rawEvents = eventArrays.flat();
 
   // Deduplicate across reps: same call appears in multiple calendars when
@@ -139,7 +156,10 @@ export async function GET(req: NextRequest) {
   // Only show the 4 most recent past calls — reps won't remember older ones
   const recentPast = pastPending.slice(-4);
 
-  const pending = [...recentPast, ...upcomingPending];
+  const pending = [...recentPast, ...upcomingPending].map((e) => ({
+    ...e,
+    calendarName: e.calendarId ? calendarNames.get(e.calendarId) ?? null : null,
+  }));
 
   return NextResponse.json({ events: pending, repOptions });
 }

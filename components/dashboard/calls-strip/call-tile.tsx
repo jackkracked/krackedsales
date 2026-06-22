@@ -49,6 +49,7 @@ export interface CallEvent {
   contactName?: string;
   repEmail?: string;
   repName?: string;
+  calendarName?: string | null;
   isPast: boolean;
 }
 
@@ -639,6 +640,17 @@ export function CallTile({ event, isNext, isAdmin, onDispositioned }: CallTilePr
         >
           {clientName}
         </p>
+
+        {/* Call type — which GHL calendar was booked, so reps know what to prep */}
+        {event.calendarName && (
+          <span
+            className="inline-flex items-center gap-1 self-start max-w-full mb-1.5 px-2 py-0.5 rounded-full bg-primary/[0.06] ring-1 ring-inset ring-primary/15 text-[11px] font-medium text-primary"
+            title={event.calendarName}
+          >
+            <CalendarCheck className="w-3 h-3 shrink-0" />
+            <span className="truncate">{event.calendarName}</span>
+          </span>
+        )}
 
         {/* Time */}
         <p className="text-xs text-muted-foreground mb-4">
