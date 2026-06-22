@@ -103,9 +103,48 @@ async function findGeminiNotesUrl(repEmail: string, startedAt: Date): Promise<st
   }
 }
 
+// ─── GHL calendar bookings (the booked Google Meet calls) ────────────────────
+
+interface GHLApptEvent {
+  id?: string;
+  contactId?: string;
+  title?: string;
+  appointmentStatus?: string; // "confirmed" | "showed" | "noshow" | "cancelled"
+  status?: string;            // older payloads
+  startTime?: string;
+  endTime?: string;
+  contactName?: string;
+  assignedUserId?: string;
+  calendarId?: string;
+}
+
+async function fetchAllCalendars(loc: string): Promise<{ id: string; name: string }[]> {
+  try {
+    const data = await ghl.get<{ calendars?: { id: string; name: string }[] }>(
+      `/calendars/?locationId=${loc}`
+    );
+    return (data.calendars ?? []).filter((c) => c.id);
+  } catch (err) {
+    console.error("[calls/sync] calendar list failed:", err);
+    return [];
+  }
+}
+
+async function fetchCalendarEvents(loc: string, calId: string, startMs: number, endMs: number): Promise<GHLApptEvent[]> {
+  try {
+    const data = await ghl.get<{ events?: GHLApptEvent[] }>(
+      `/calendars/events?locationId=${loc}&calendarId=${calId}&startTime=${startMs}&endTime=${endMs}`
+    );
+    return data.events ?? [];
+  } catch (err) {
+    console.error(`[calls/sync] events fetch failed for ${calId}:`, err);
+    return [];
+  }
+}
+
 // ─── Sync logic (shared between POST and cron GET) ────────────────────────────
 
-export async function runSync(): Promise<{ meet: number; dialer: number }> {
+export async function runSync(): Promise<{ meet: number; dialer: number; calendar: number }> {
   const client = db();
   const loc    = locationId();
 
@@ -122,8 +161,9 @@ export async function runSync(): Promise<{ meet: number; dialer: number }> {
     .from(userCalendars)
     .where(eq(userCalendars.isActive, true));
 
-  let dialerCount = 0;
-  let meetCount   = 0;
+  let dialerCount   = 0;
+  let meetCount     = 0;
+  let calendarCount = 0;
 
   // ── Source 1: GHL Dialer calls ─────────────────────────────────────────────
 
@@ -224,11 +264,60 @@ export async function runSync(): Promise<{ meet: number; dialer: number }> {
     }
   }
 
-  // ── Source 2: Google Meet ──────────────────────────────────────────────────
+  // ── Source 2: GHL calendar bookings (each booking = a booked Google Meet call) ─
+  // Every GHL calendar booking carries a Google Meet link, so these ARE the meet
+  // calls. Stored as callType "meet", deduped on the appointment id.
+  {
+    const userByGhlId = new Map(
+      ghlUsers.map((u) => [u.ghlUserId!, { email: u.email, name: u.name }])
+    );
+    const now = Date.now();
+    const startMs = now - 90 * 24 * 60 * 60 * 1000; // last 90 days
+    const endMs   = now + 30 * 24 * 60 * 60 * 1000; // + next 30 days
+    const calendars = await fetchAllCalendars(loc);
+
+    for (const cal of calendars) {
+      const events = await fetchCalendarEvents(loc, cal.id, startMs, endMs);
+      for (const ev of events) {
+        if (!ev.id || !ev.startTime) continue;
+        const statusVal = (ev.appointmentStatus ?? ev.status ?? "").toLowerCase();
+        if (statusVal === "cancelled") continue; // booked = confirmed/showed/noshow
+        const startedAt = new Date(ev.startTime);
+        if (Number.isNaN(startedAt.getTime())) continue;
+        const durationSeconds = ev.endTime
+          ? Math.max(0, Math.round((new Date(ev.endTime).getTime() - startedAt.getTime()) / 1000))
+          : null;
+        const rep = ev.assignedUserId ? userByGhlId.get(ev.assignedUserId) : undefined;
+        try {
+          await client
+            .insert(calls)
+            .values({
+              callType:            "meet",
+              direction:           null,
+              contactId:           ev.contactId ?? null,
+              contactName:         ev.contactName ?? null,
+              repEmail:            rep?.email ?? null,
+              repName:             rep?.name ?? null,
+              startedAt,
+              durationSeconds,
+              meetConferenceId:    `ghlappt_${ev.id}`, // dedup key (unique column)
+              transcriptAvailable: false,
+              recordingAvailable:  false,
+            })
+            .onConflictDoNothing({ target: calls.meetConferenceId });
+          calendarCount++;
+        } catch (err) {
+          console.error(`[calls/sync] Failed upserting calendar call ${ev.id}:`, err);
+        }
+      }
+    }
+  }
+
+  // ── Source 3: Google Meet API (only if a Workspace service account is wired) ──
 
   if (!isGoogleConfigured()) {
-    console.log("[calls/sync] Google not configured — skipping Meet sync");
-    return { meet: meetCount, dialer: dialerCount };
+    console.log("[calls/sync] Google not configured — skipping Meet API sync");
+    return { meet: meetCount, dialer: dialerCount, calendar: calendarCount };
   }
 
   for (const rep of activeReps) {
@@ -365,7 +454,7 @@ export async function runSync(): Promise<{ meet: number; dialer: number }> {
     }
   }
 
-  return { meet: meetCount, dialer: dialerCount };
+  return { meet: meetCount, dialer: dialerCount, calendar: calendarCount };
 }
 
 // ─── Route handler ─────────────────────────────────────────────────────────────
