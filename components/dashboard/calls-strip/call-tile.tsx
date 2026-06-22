@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils/cn";
 import { useUserTimezone } from "@/providers/timezone-provider";
 import { toZonedDate, isTodayInTz, isPastInTz } from "@/lib/utils/timezone";
 import {
-  X, CheckCircle, FileText, Loader2,
+  X, CheckCircle, FileText, Loader2, Sparkles,
   UserX, BadgeCheck, FileEdit, Send, CalendarCheck, XCircle,
   CircleDollarSign, Clock, type LucideIcon,
 } from "lucide-react";
@@ -556,11 +556,6 @@ export function CallTile({ event, isNext, isAdmin, onDispositioned }: CallTilePr
     }
   }
 
-  function handleTileClick() {
-    if (!event.contactId) return;
-    setPrepModalOpen(true);
-  }
-
   async function handleSetOutcome(e: React.MouseEvent) {
     e.stopPropagation(); // Prevent tile click from firing
     setOutcomeModalOpen(true);
@@ -584,10 +579,8 @@ export function CallTile({ event, isNext, isAdmin, onDispositioned }: CallTilePr
   return (
     <>
       <div
-        onClick={handleTileClick}
         className={cn(
           "flex flex-col rounded-[10px] border bg-card p-4 h-full transition-all duration-300",
-          event.contactId && "cursor-pointer hover:shadow-md hover:border-primary/30",
           leaving && "opacity-0 scale-95",
           isNext && "border-primary shadow-sm shadow-primary/10",
           isOverdue && !isNext && "border-amber-400",
@@ -613,6 +606,15 @@ export function CallTile({ event, isNext, isAdmin, onDispositioned }: CallTilePr
               <span className="text-[10px] text-muted-foreground font-medium truncate max-w-[80px]">
                 {event.repName.split(" ")[0]}
               </span>
+            )}
+            {event.contactId && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setPrepModalOpen(true); }}
+                title="Pre-call prep"
+                className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/[0.06] transition-colors"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+              </button>
             )}
             {event.contactId && (
               <button
@@ -652,7 +654,7 @@ export function CallTile({ event, isNext, isAdmin, onDispositioned }: CallTilePr
         </button>
       </div>
 
-      {/* Call Prep Modal — opens when tile is clicked */}
+      {/* Call Prep Modal — opens via the prep (sparkles) icon, not the whole tile */}
       {prepModalOpen && event.contactId && (
         <CallPrepModal
           eventId={event.id}
