@@ -53,7 +53,8 @@ export type TriState = "yes" | "no" | null;
 export interface ContactFilters {
   optIn: string[]; // platform values
   channel: string[]; // lastChannel data values ("SMS" | "Email" | "Instagram")
-  stageId: string[]; // GHL stage ids
+  pipelineId: string | null; // GHL pipeline id — picked first; stageId is scoped to it
+  stageId: string[]; // GHL stage ids (within the selected pipeline)
   rep: string[]; // assignedTo ids, plus UNASSIGNED
   urgency: string | null; // "today" | "3to5" | "7plus" | "<number>" (custom days+)
   daysInStage: number | null; // matches > N days in current stage
@@ -66,6 +67,7 @@ export interface ContactFilters {
 export const EMPTY_FILTERS: ContactFilters = {
   optIn: [],
   channel: [],
+  pipelineId: null,
   stageId: [],
   rep: [],
   urgency: null,
@@ -133,6 +135,7 @@ export function countActive(f: ContactFilters): number {
   return (
     (f.optIn.length ? 1 : 0) +
     (f.channel.length ? 1 : 0) +
+    (f.pipelineId ? 1 : 0) +
     (f.stageId.length ? 1 : 0) +
     (f.rep.length ? 1 : 0) +
     (f.urgency ? 1 : 0) +
@@ -158,6 +161,7 @@ export function filtersToRules(f: ContactFilters): FilterRule[] {
 
   if (f.optIn.length) push("platform", "is_any_of", f.optIn);
   if (f.channel.length) push("channel", "is_any_of", f.channel);
+  if (f.pipelineId) push("pipelineId", "is_any_of", [f.pipelineId]);
   if (f.stageId.length) push("stageId", "is_any_of", f.stageId);
   if (f.rep.length) push("assignedTo", "is_any_of", f.rep);
   if (f.urgency) push("urgency", "is", [f.urgency]);
@@ -176,6 +180,7 @@ export function filtersToParams(f: ContactFilters): Record<string, string> {
   const p: Record<string, string> = {};
   if (f.optIn.length) p.optin = f.optIn.join(",");
   if (f.channel.length) p.ch = f.channel.join(",");
+  if (f.pipelineId) p.pipe = f.pipelineId;
   if (f.stageId.length) p.stage = f.stageId.join(",");
   if (f.rep.length) p.rep = f.rep.join(",");
   if (f.urgency) p.urg = f.urgency;
@@ -200,6 +205,7 @@ export function parseFilters(sp: URLSearchParams): ContactFilters {
   return {
     optIn: list("optin"),
     channel: list("ch"),
+    pipelineId: sp.get("pipe") || null,
     stageId: list("stage"),
     rep: list("rep"),
     urgency: sp.get("urg") || null,

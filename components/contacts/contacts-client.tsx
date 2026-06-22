@@ -180,16 +180,6 @@ export function ContactsClient() {
   );
 
   // Pill catalogs for the filter sheet, sourced from live data
-  const stageOptions = (() => {
-    const seen = new Set<string>();
-    const out: { value: string; label: string }[] = [];
-    for (const p of pipelines) {
-      for (const s of p.stages) {
-        if (!seen.has(s.id)) { seen.add(s.id); out.push({ value: s.id, label: s.name }); }
-      }
-    }
-    return out;
-  })();
   const repOptions = [
     ...(teamData?.users ?? []).filter((u) => u.ghlUserId).map((u) => ({ value: u.ghlUserId!, label: u.name })),
     { value: UNASSIGNED, label: "Unassigned" },
@@ -562,7 +552,7 @@ export function ContactsClient() {
         matchCount={total}
         baselineCount={baselineCount}
         loading={isFetching && !isLoading}
-        stages={stageOptions}
+        pipelines={pipelines}
         reps={repOptions}
       />
 

@@ -25,7 +25,7 @@ interface FilterSheetProps {
   matchCount: number;
   baselineCount: number;
   loading: boolean;
-  stages: { value: string; label: string }[];
+  pipelines: { id: string; name: string; stages: { id: string; name: string }[] }[];
   reps: { value: string; label: string }[];
 }
 
@@ -167,9 +167,13 @@ export function FilterSheet({
   matchCount,
   baselineCount,
   loading,
-  stages,
+  pipelines,
   reps,
 }: FilterSheetProps) {
+  // Pipeline → stage cascade: choosing a pipeline scopes (and resets) the stages.
+  const selectPipeline = (id: string | null) =>
+    onChange({ ...filters, pipelineId: id, stageId: [] });
+  const selectedPipeline = pipelines.find((p) => p.id === filters.pipelineId);
   const displayCount = useCountUp(matchCount);
   const active = countActive(filters);
 
@@ -288,13 +292,42 @@ export function FilterSheet({
               ))}
             </Group>
 
-            <Group label="Pipeline stage" full>
-              {stages.length === 0 ? (
-                <span className="text-xs text-muted-foreground/60">No stages available</span>
+            <Group label="Pipeline & stage" full>
+              {pipelines.length === 0 ? (
+                <span className="text-xs text-muted-foreground/60">No pipelines available</span>
               ) : (
-                stages.map((s) => (
-                  <StagePill key={s.value} active={filters.stageId.includes(s.value)} label={s.label} onClick={() => toggle("stageId", s.value)} />
-                ))
+                <div className="w-full space-y-2.5">
+                  {/* Step 1 — pick one pipeline */}
+                  <div className="flex flex-wrap gap-1.5 items-center">
+                    {pipelines.map((p) => (
+                      <Pill
+                        key={p.id}
+                        active={filters.pipelineId === p.id}
+                        onClick={() => selectPipeline(filters.pipelineId === p.id ? null : p.id)}
+                      >
+                        {p.name}
+                      </Pill>
+                    ))}
+                  </div>
+
+                  {/* Step 2 — stages of the chosen pipeline */}
+                  {!selectedPipeline ? (
+                    <p className="text-xs text-muted-foreground/60">Select a pipeline to choose stages.</p>
+                  ) : selectedPipeline.stages.length === 0 ? (
+                    <p className="text-xs text-muted-foreground/60">This pipeline has no stages.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5 items-center border-t border-border/50 pt-2.5">
+                      {selectedPipeline.stages.map((s) => (
+                        <StagePill
+                          key={s.id}
+                          active={filters.stageId.includes(s.id)}
+                          label={s.name}
+                          onClick={() => toggle("stageId", s.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </Group>
 
