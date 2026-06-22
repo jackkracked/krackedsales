@@ -19,6 +19,7 @@ export type FilterField =
   | "daysInCurrentStage"
   | "hasDemo"
   | "hasProposal"
+  | "auditDelivered"
   | "reachableChannels"
   // legacy fields still understood by the API (back-compat / search):
   | "source"
@@ -58,6 +59,7 @@ export interface ContactFilters {
   daysInStage: number | null; // matches > N days in current stage
   demo: TriState;
   proposal: TriState;
+  audit: TriState; // "Audit delivered": yes = delivered, no = not delivered
   avail: string[]; // "email_only" | "sms_only" | "both"
 }
 
@@ -70,6 +72,7 @@ export const EMPTY_FILTERS: ContactFilters = {
   daysInStage: null,
   demo: null,
   proposal: null,
+  audit: null,
   avail: [],
 };
 
@@ -136,6 +139,7 @@ export function countActive(f: ContactFilters): number {
     (f.daysInStage != null ? 1 : 0) +
     (f.demo ? 1 : 0) +
     (f.proposal ? 1 : 0) +
+    (f.audit ? 1 : 0) +
     (f.avail.length ? 1 : 0)
   );
 }
@@ -160,6 +164,7 @@ export function filtersToRules(f: ContactFilters): FilterRule[] {
   if (f.daysInStage != null) push("daysInCurrentStage", "gt", [String(f.daysInStage)]);
   if (f.demo) push("hasDemo", "is_any_of", [f.demo === "yes" ? "true" : "false"]);
   if (f.proposal) push("hasProposal", "is_any_of", [f.proposal === "yes" ? "true" : "false"]);
+  if (f.audit) push("auditDelivered", "is_any_of", [f.audit === "yes" ? "true" : "false"]);
   if (f.avail.length) push("reachableChannels", "is_any_of", f.avail);
 
   return rules;
@@ -177,6 +182,7 @@ export function filtersToParams(f: ContactFilters): Record<string, string> {
   if (f.daysInStage != null) p.instage = String(f.daysInStage);
   if (f.demo) p.demo = f.demo;
   if (f.proposal) p.prop = f.proposal;
+  if (f.audit) p.audit = f.audit;
   if (f.avail.length) p.avail = f.avail.join(",");
   return p;
 }
@@ -200,6 +206,7 @@ export function parseFilters(sp: URLSearchParams): ContactFilters {
     daysInStage: instage != null && instage !== "" && !Number.isNaN(Number(instage)) ? Number(instage) : null,
     demo: tri("demo"),
     proposal: tri("prop"),
+    audit: tri("audit"),
     avail: list("avail"),
   };
 }

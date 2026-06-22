@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { SlidersHorizontal, X, RotateCcw, Lock } from "lucide-react";
+import { SlidersHorizontal, X, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { Avatar } from "@/components/ui/avatar";
 import {
@@ -369,11 +369,7 @@ export function FilterSheet({
             </Group>
 
             <Group label="Audit delivered">
-              <Tri value={null} onChange={() => {}} disabled />
-              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground/70 ml-1.5">
-                <Lock className="w-2.5 h-2.5" />
-                Coming soon
-              </span>
+              <Tri value={filters.audit} onChange={(v) => onChange({ ...filters, audit: v })} />
             </Group>
 
             <Group label="Proposal sent">

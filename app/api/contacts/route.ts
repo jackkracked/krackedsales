@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { desc, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { commentLeads, brandCategories, demoGhlLinks, proposals, localContacts } from "@/lib/db/schema";
+import { commentLeads, brandCategories, demoGhlLinks, proposals, localContacts, audits } from "@/lib/db/schema";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { fetchAllOpportunities } from "@/lib/ghl/paginate";
 import { daysAgo } from "@/lib/utils/date";
@@ -81,6 +81,12 @@ function applyRule(c: UnifiedContact, rule: FilterRule): boolean {
       if (operator === "is_any_of")  return values.map((v) => v === "true").includes(c.hasProposal);
       if (operator === "is_none_of") return !values.map((v) => v === "true").includes(c.hasProposal);
       return true;
+    case "auditDelivered": {
+      const delivered = c.auditStatus === "delivered";
+      if (operator === "is_any_of")  return values.map((v) => v === "true").includes(delivered);
+      if (operator === "is_none_of") return !values.map((v) => v === "true").includes(delivered);
+      return true;
+    }
     case "daysInCurrentStage": {
       if (c.daysInCurrentStage == null) return false;
       const n = Number(values[0] ?? 0);
@@ -276,7 +282,7 @@ export async function GET(req: NextRequest) {
   try {
     const database = db();
 
-    const [allOpps, clRows, catRows, demoRows, convMap, proposalRows, dndRows] = await Promise.all([
+    const [allOpps, clRows, catRows, demoRows, convMap, proposalRows, dndRows, auditRows] = await Promise.all([
       getAllOpportunities(),
       database.select().from(commentLeads).orderBy(desc(commentLeads.createdAt)),
       database.select().from(brandCategories),
@@ -284,10 +290,19 @@ export async function GET(req: NextRequest) {
       getConversationChannelMap(),
       database.select({ ghlContactId: proposals.ghlContactId, status: proposals.status }).from(proposals).where(isNotNull(proposals.ghlContactId)),
       database.select({ id: localContacts.id, dnd: localContacts.dnd }).from(localContacts),
+      database.select({ ghlContactId: audits.ghlContactId, status: audits.status }).from(audits).where(isNotNull(audits.ghlContactId)),
     ]);
 
     const catMap = new Map(catRows.map((r) => [r.domain, r.category]));
     const demoContactIds = new Set(demoRows.map((r) => r.ghlContactId).filter(Boolean) as string[]);
+
+    // Audit status per contact: "delivered" wins over "requested".
+    const auditMap = new Map<string, string>();
+    for (const a of auditRows) {
+      if (!a.ghlContactId) continue;
+      const existing = auditMap.get(a.ghlContactId);
+      if (existing !== "delivered") auditMap.set(a.ghlContactId, a.status);
+    }
 
     // Proposal status per contact (best status wins: paid > signed > sent > draft)
     const proposalMap = new Map<string, string>();
@@ -331,6 +346,7 @@ export async function GET(req: NextRequest) {
       else responseStatus = "awaiting_reply";
 
       const propStatus = proposalMap.get(c.id) ?? null;
+      const auditStatus = auditMap.get(c.id) ?? null;
 
       ghlUnified.push({
         uid: `ghl_${c.id}`,
@@ -354,6 +370,8 @@ export async function GET(req: NextRequest) {
         hasDemo: demoContactIds.has(c.id),
         hasProposal: !!propStatus,
         proposalStatus: propStatus,
+        hasAudit: !!auditStatus,
+        auditStatus,
         awaitingReply: false,
         lastChannel: convMap.get(c.id) ?? null,
         daysSinceLastTouch: daysSince,
@@ -401,6 +419,8 @@ export async function GET(req: NextRequest) {
         hasDemo: false,
         hasProposal: false,
         proposalStatus: null,
+        hasAudit: false,
+        auditStatus: null,
         awaitingReply: !cl.contactedAt,
         lastChannel: null,
         daysSinceLastTouch: clDaysSince,

@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { audits } from "@/lib/db/schema";
+import { getSessionUserId } from "@/lib/auth/session";
 
 const AUDIT_LIST_ID = process.env.CLICKUP_AUDIT_LIST_ID ?? "901702704831";
 const API_TOKEN = process.env.CLICKUP_API_TOKEN ?? "";
@@ -17,7 +20,7 @@ const F_CLIENT_CONTACT = "6c634ac6-4a3b-491a-bbf8-a5ef2fa49482";
 export async function POST(req: NextRequest) {
   const body = await req.json();
 
-  const { brandName, website, esp, management, flows, hiroPull, details, strategist, reviewer, clientContact } = body;
+  const { brandName, website, esp, management, flows, hiroPull, details, strategist, reviewer, clientContact, ghlContactId } = body;
 
   if (!brandName?.trim()) {
     return NextResponse.json({ error: "Brand name is required" }, { status: 400 });
@@ -55,5 +58,27 @@ export async function POST(req: NextRequest) {
   }
 
   const data = await res.json();
+
+  // Mirror the audit into our DB so the contacts list + "Audit delivered" filter
+  // can track it. Non-fatal: the ClickUp task is the source of truth, so a DB
+  // failure here must not fail the request (a daily cron can still reconcile).
+  try {
+    const createdBy = await getSessionUserId();
+    await db()
+      .insert(audits)
+      .values({
+        clickupTaskId: String(data.id),
+        ghlContactId: ghlContactId?.trim() || null,
+        brandName: brandName.trim(),
+        website: website?.trim() || null,
+        details: details?.trim() || null,
+        status: "requested",
+        createdBy: createdBy ?? null,
+      })
+      .onConflictDoNothing({ target: audits.clickupTaskId });
+  } catch (err) {
+    console.error("[create-audit] failed to record audit in DB:", err);
+  }
+
   return NextResponse.json({ id: data.id, url: data.url }, { status: 201 });
 }

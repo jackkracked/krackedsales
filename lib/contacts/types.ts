@@ -20,6 +20,8 @@ export interface UnifiedContact {
   hasDemo: boolean;
   hasProposal: boolean;
   proposalStatus: string | null; // "draft" | "sent" | "signed" | "paid" etc.
+  hasAudit: boolean;
+  auditStatus: string | null; // "requested" | "delivered"
   awaitingReply: boolean;
   lastChannel: string | null;
   daysSinceLastTouch: number;

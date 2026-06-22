@@ -39,6 +39,10 @@
     {
       "path": "/api/cron/call-prep",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/sync-audits",
+      "schedule": "0 10 * * *"
     }
   ]
 }
