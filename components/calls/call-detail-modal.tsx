@@ -128,7 +128,10 @@ function VideoPlayer({
       if (cancelled) return;
       if (Hls.isSupported()) {
         const instance = new Hls({ maxBufferLength: 30 });
-        instance.on(Hls.Events.ERROR, (_e, data) => { if (data.fatal) setError(true); });
+        instance.on(Hls.Events.ERROR, (_e, data) => {
+          console.error("[hls]", data.type, data.details, "fatal=" + data.fatal, (data as { reason?: string }).reason ?? "");
+          if (data.fatal) setError(true);
+        });
         instance.loadSource(src);
         instance.attachMedia(video);
         hls = instance;
