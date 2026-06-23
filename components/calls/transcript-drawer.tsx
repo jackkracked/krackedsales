@@ -277,7 +277,9 @@ function SimpleMarkdown({ text }: { text: string }) {
 }
 
 /** Render bold (**text**) and italic (*text*) inline */
-function renderInline(text: string): React.ReactNode {
+function renderInline(input: string): React.ReactNode {
+  // Drop markdown backslash-escapes (e.g. "\~1,000" → "~1,000").
+  const text = input.replace(/\\([~*_`#\-.])/g, "$1");
   // Tokenize markdown links [text](url) and **bold** in one pass.
   const parts: React.ReactNode[] = [];
   const regex = /\[([^\]]+)\]\(([^)]+)\)|\*\*(.+?)\*\*/g;
@@ -297,7 +299,7 @@ function renderInline(text: string): React.ReactNode {
           rel="noopener noreferrer"
           className="text-primary underline decoration-primary/30 underline-offset-2 hover:decoration-primary"
         >
-          {match[1]}
+          {renderInline(match[1])}
         </a>
       );
     } else {
