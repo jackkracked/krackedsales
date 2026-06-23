@@ -122,22 +122,22 @@ function VideoPlayer({
     let hls: { destroy: () => void } | null = null;
     let cancelled = false;
 
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = src; // Safari plays HLS natively
-    } else {
-      import("hls.js").then(({ default: Hls }) => {
-        if (cancelled) return;
-        if (Hls.isSupported()) {
-          const instance = new Hls({ maxBufferLength: 30 });
-          instance.on(Hls.Events.ERROR, (_e, data) => { if (data.fatal) setError(true); });
-          instance.loadSource(src);
-          instance.attachMedia(video);
-          hls = instance;
-        } else {
-          setError(true);
-        }
-      }).catch(() => setError(true));
-    }
+    // Prefer hls.js (Chrome/Firefox/Edge). Only fall back to native HLS on
+    // Safari, where hls.js isn't supported but the <video> plays HLS directly.
+    import("hls.js").then(({ default: Hls }) => {
+      if (cancelled) return;
+      if (Hls.isSupported()) {
+        const instance = new Hls({ maxBufferLength: 30 });
+        instance.on(Hls.Events.ERROR, (_e, data) => { if (data.fatal) setError(true); });
+        instance.loadSource(src);
+        instance.attachMedia(video);
+        hls = instance;
+      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = src;
+      } else {
+        setError(true);
+      }
+    }).catch(() => setError(true));
     return () => { cancelled = true; hls?.destroy(); };
   }, [callId, videoRef]);
 
