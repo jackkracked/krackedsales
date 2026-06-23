@@ -127,7 +127,10 @@ function VideoPlayer({
     import("hls.js").then(({ default: Hls }) => {
       if (cancelled) return;
       if (Hls.isSupported()) {
-        const instance = new Hls({ maxBufferLength: 30 });
+        // enableWorker:false — the app's CSP blocks blob: workers, which makes
+        // hls.js fail to demux silently. Main-thread demux is slightly slower
+        // but reliable here.
+        const instance = new Hls({ maxBufferLength: 30, enableWorker: false });
         instance.on(Hls.Events.ERROR, (_e, data) => {
           console.error("[hls]", data.type, data.details, "fatal=" + data.fatal, (data as { reason?: string }).reason ?? "");
           if (data.fatal) setError(true);
