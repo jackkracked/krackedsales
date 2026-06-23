@@ -6,7 +6,7 @@
 
 import { db } from "@/lib/db";
 import { calls, users, localContacts } from "@/lib/db/schema";
-import { and, eq, isNotNull, or, ilike } from "drizzle-orm";
+import { and, eq, isNull, isNotNull, or, ilike } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { generateAndStoreInsights } from "@/lib/ai/call-insights";
 import {
@@ -272,10 +272,17 @@ async function syncMeetings(
       let attachedId: string | null = null;
       let attachedContactId: string | null = matched?.contactId ?? null;
       if (meeting.meeting_url) {
+        // Only attach to a call not already linked to a recording — so recurring
+        // meetings (which reuse a Meet link) each grab a distinct un-attached call
+        // instead of overwriting one another.
         const [match] = await client
           .select({ id: calls.id, contactId: calls.contactId })
           .from(calls)
-          .where(and(eq(calls.meetingUrl, meeting.meeting_url), eq(calls.callType, "meet")))
+          .where(and(
+            eq(calls.meetingUrl, meeting.meeting_url),
+            eq(calls.callType, "meet"),
+            isNull(calls.fathomRecordingId),
+          ))
           .orderBy(calls.startedAt)
           .limit(1);
         if (match) {

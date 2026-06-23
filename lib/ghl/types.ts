@@ -99,6 +99,7 @@ export interface GHLCalendarEvent {
   contactName?: string;
   status: string;
   calendarId: string;
+  address?: string; // Google Meet/Zoom link
 }
 
 export interface GHLContact {

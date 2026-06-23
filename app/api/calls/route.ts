@@ -19,6 +19,7 @@ interface UnifiedCall {
   repName: string | null;
   startedAt: string; // ISO date
   durationSeconds: number | null;
+  meetingUrl: string | null; // Google Meet/Zoom link
   status: string | null; // "booked" | "confirmed" | "showed" | "noshow" | "cancelled" | "completed"
   transcriptAvailable: boolean;
   recordingAvailable: boolean;
@@ -60,6 +61,7 @@ async function fetchGHLEventsForUser(
         repName,
         startedAt: e.startTime,
         durationSeconds: durationSeconds > 0 ? durationSeconds : null,
+        meetingUrl: e.address ?? null,
         status: start.getTime() > Date.now() ? "upcoming" : "completed",
         transcriptAvailable: false,
         recordingAvailable: false,
@@ -172,6 +174,7 @@ export async function GET(req: NextRequest) {
         repName: r.repName,
         startedAt: r.startedAt.toISOString(),
         durationSeconds: r.durationSeconds,
+        meetingUrl: r.meetingUrl,
         status: r.callType === "meet" ? meetStatus(r) : (r.status ?? "completed"),
         transcriptAvailable: r.transcriptAvailable,
         recordingAvailable: r.recordingAvailable,

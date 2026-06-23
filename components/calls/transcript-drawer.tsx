@@ -11,9 +11,18 @@ import {
   ShieldAlert,
   ListChecks,
   AlertTriangle,
+  PlayCircle,
+  Video,
+  Phone,
+  Clock,
+  ArrowUp,
+  ArrowDown,
+  StickyNote,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { formatDateTime } from "@/lib/utils/date";
+import { Avatar } from "@/components/ui/avatar";
+import type { Call } from "./calls-client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -46,8 +55,96 @@ interface CallInsight {
 }
 
 interface TranscriptDrawerProps {
-  callId: string | null;
+  call: Call | null;
   onClose: () => void;
+}
+
+// ─── Call-meta helpers (header) ───────────────────────────────────────────────
+
+function formatDuration(seconds: number | null): string {
+  if (!seconds || seconds <= 0) return "—";
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m >= 60) {
+    const h = Math.floor(m / 60);
+    return `${h}h ${m % 60}m`;
+  }
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+const CALL_STATUS_META: Record<string, { label: string; cls: string }> = {
+  upcoming:  { label: "Upcoming",  cls: "bg-sky-50 text-sky-700 ring-1 ring-sky-200" },
+  booked:    { label: "Booked",    cls: "bg-sky-50 text-sky-700 ring-1 ring-sky-200" },
+  confirmed: { label: "Confirmed", cls: "bg-sky-50 text-sky-700 ring-1 ring-sky-200" },
+  showed:    { label: "Showed",    cls: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" },
+  completed: { label: "Completed", cls: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" },
+  noshow:    { label: "No-show",   cls: "bg-rose-50 text-rose-700 ring-1 ring-rose-200" },
+  cancelled: { label: "Cancelled", cls: "bg-zinc-100 text-zinc-500 ring-1 ring-zinc-200" },
+};
+
+function CallMetaChip({ icon: Icon, children, className }: { icon?: typeof Clock; children: React.ReactNode; className?: string }) {
+  return (
+    <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground", className)}>
+      {Icon && <Icon className="w-3 h-3 shrink-0" />}
+      {children}
+    </span>
+  );
+}
+
+/**
+ * Prominent call actions: the Fathom recording is the hero CTA when present;
+ * otherwise an upcoming call surfaces a Join button. Meet link + Smart Notes are
+ * secondary links.
+ */
+function CallActionPanel({ call }: { call: Call }) {
+  const isUpcoming = new Date(call.startedAt).getTime() > Date.now();
+  const primary = call.fathomShareUrl
+    ? { href: call.fathomShareUrl, Icon: PlayCircle, title: "Watch the recording", sub: "Full video + transcript on Fathom" }
+    : isUpcoming && call.meetingUrl
+      ? { href: call.meetingUrl, Icon: Video, title: "Join Google Meet", sub: "Opens the meeting link" }
+      : null;
+
+  const secondary: { href: string; Icon: typeof Video; label: string }[] = [];
+  if (call.fathomShareUrl && call.meetingUrl) secondary.push({ href: call.meetingUrl, Icon: Video, label: "Meet link" });
+  if (call.smartNotesUrl) secondary.push({ href: call.smartNotesUrl, Icon: StickyNote, label: "Smart Notes" });
+
+  if (!primary && secondary.length === 0) return null;
+
+  return (
+    <div className="mt-3 space-y-2">
+      {primary && (
+        <a
+          href={primary.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group flex items-center gap-3 rounded-[10px] bg-primary px-3.5 py-2.5 text-primary-foreground shadow-sm transition-[filter] hover:brightness-110"
+        >
+          <primary.Icon className="w-5 h-5 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] font-semibold leading-tight">{primary.title}</p>
+            <p className="text-[10.5px] text-primary-foreground/70 leading-tight">{primary.sub}</p>
+          </div>
+          <ExternalLink className="w-3.5 h-3.5 opacity-70 transition-opacity group-hover:opacity-100" />
+        </a>
+      )}
+      {secondary.length > 0 && (
+        <div className="flex items-center gap-3">
+          {secondary.map((s) => (
+            <a
+              key={s.label}
+              href={s.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-primary hover:underline"
+            >
+              <s.Icon className="w-3 h-3" />
+              {s.label}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Speaker dot colors ───────────────────────────────────────────────────────
@@ -335,8 +432,9 @@ function formatStartTime(startTime?: string): string {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export function TranscriptDrawer({ callId, onClose }: TranscriptDrawerProps) {
-  const isOpen = callId !== null;
+export function TranscriptDrawer({ call, onClose }: TranscriptDrawerProps) {
+  const callId = call?.id ?? null;
+  const isOpen = call !== null;
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const { data, isLoading } = useQuery<TranscriptData>({
@@ -419,14 +517,16 @@ export function TranscriptDrawer({ callId, onClose }: TranscriptDrawerProps) {
         aria-modal="true"
       >
         {/* ── Header ── */}
-        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-border shrink-0">
+        <div className="flex items-start gap-3 px-5 pt-5 pb-4 border-b border-border bg-gradient-to-b from-muted/30 to-transparent shrink-0">
+          <Avatar name={call?.contactName ?? "Unknown"} size={44} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <p className="text-sm font-semibold text-foreground truncate">
-                {isLoading
-                  ? "Loading..."
-                  : data?.contactName ?? "Unknown Contact"}
-              </p>
+              <h2
+                className="text-[15px] font-semibold text-foreground truncate"
+                style={{ fontFamily: "var(--font-heading)" }}
+              >
+                {call?.contactName ?? "Unknown contact"}
+              </h2>
               {/* Sentiment badge */}
               {insights?.sentimentLabel && (
                 <SentimentBadge
@@ -435,39 +535,33 @@ export function TranscriptDrawer({ callId, onClose }: TranscriptDrawerProps) {
                 />
               )}
             </div>
-            {!isLoading && data && (
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {data.repName ?? "\u2014"} &middot;{" "}
-                {formatDateTime(data.startedAt)}
-              </p>
-            )}
-            {/* Action links */}
-            {!isLoading && data && (
-              <div className="flex items-center gap-3 mt-2">
-                {data.fathomShareUrl && (
-                  <a
-                    href={data.fathomShareUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-violet-600 hover:underline"
-                  >
-                    Open in Fathom
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
+            {call && (
+              <div className="flex items-center gap-x-2.5 gap-y-1 flex-wrap mt-1.5">
+                <span className={cn(
+                  "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold",
+                  call.callType === "dialer" ? "bg-slate-100 text-slate-600" : "bg-blue-50 text-blue-700"
+                )}>
+                  {call.callType === "dialer" ? <Phone className="w-2.5 h-2.5" /> : <Video className="w-2.5 h-2.5" />}
+                  {call.callType === "dialer" ? "Dialer" : "Meet"}
+                </span>
+                {call.status && CALL_STATUS_META[call.status] && (
+                  <span className={cn("px-1.5 py-0.5 rounded-full text-[10px] font-semibold", CALL_STATUS_META[call.status].cls)}>
+                    {CALL_STATUS_META[call.status].label}
+                  </span>
                 )}
-                {data.smartNotesUrl && (
-                  <a
-                    href={data.smartNotesUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-primary hover:underline"
-                  >
-                    Smart Notes
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
+                {call.direction && (
+                  <CallMetaChip icon={call.direction === "outbound" ? ArrowUp : ArrowDown}>
+                    {call.direction === "outbound" ? "Outbound" : "Inbound"}
+                  </CallMetaChip>
                 )}
+                {call.repName && <CallMetaChip>{call.repName}</CallMetaChip>}
+                <CallMetaChip icon={Clock}>{formatDuration(call.durationSeconds)}</CallMetaChip>
               </div>
             )}
+            {call && (
+              <p className="text-[11px] text-muted-foreground/80 mt-1">{formatDateTime(call.startedAt)}</p>
+            )}
+            {call && <CallActionPanel call={call} />}
           </div>
           <button
             onClick={onClose}
@@ -509,12 +603,21 @@ export function TranscriptDrawer({ callId, onClose }: TranscriptDrawerProps) {
               ))}
             </div>
           ) : !data || data.entries.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center py-16">
+            <div className="flex flex-col items-center justify-center h-full text-center py-16 px-6">
+              <div className="w-11 h-11 rounded-full bg-muted/60 flex items-center justify-center mb-3">
+                {call && new Date(call.startedAt).getTime() > Date.now()
+                  ? <Clock className="w-5 h-5 text-muted-foreground/50" />
+                  : <Video className="w-5 h-5 text-muted-foreground/50" />}
+              </div>
               <p className="text-sm font-medium text-foreground mb-1">
-                No transcript available
+                {call && new Date(call.startedAt).getTime() > Date.now()
+                  ? "This call hasn't happened yet"
+                  : "No recording for this call"}
               </p>
-              <p className="text-xs text-muted-foreground">
-                This call does not have a transcript attached.
+              <p className="text-xs text-muted-foreground max-w-[260px] leading-relaxed">
+                {call && new Date(call.startedAt).getTime() > Date.now()
+                  ? "Once it's recorded with Fathom, the video, transcript and AI summary appear here automatically."
+                  : "This call wasn't captured by Fathom, so there's no transcript or recording to show."}
               </p>
             </div>
           ) : (

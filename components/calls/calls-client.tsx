@@ -21,7 +21,7 @@ import { TranscriptDrawer } from "./transcript-drawer";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Call {
+export interface Call {
   id: string;
   callType: "meet" | "dialer" | "scheduled";
   direction: "inbound" | "outbound" | null;
@@ -31,6 +31,7 @@ interface Call {
   repName: string | null;
   startedAt: string;
   durationSeconds: number | null;
+  meetingUrl?: string | null;
   status: string | null;
   transcriptAvailable: boolean;
   recordingAvailable: boolean;
@@ -217,7 +218,7 @@ export function CallsClient() {
   const [until, setUntil]                       = useState(defaultUntil);
   const [search, setSearch]                     = useState("");
   const [debouncedSearch, setDebouncedSearch]   = useState("");
-  const [openTranscriptCallId, setOpenTranscriptCallId] = useState<string | null>(null);
+  const [selectedCall, setSelectedCall] = useState<Call | null>(null);
   const [syncing, setSyncing]                   = useState(false);
 
   const queryClient = useQueryClient();
@@ -455,7 +456,7 @@ export function CallsClient() {
                 <CallRow
                   key={call.id}
                   call={call}
-                  onOpenTranscript={() => setOpenTranscriptCallId(call.id)}
+                  onOpen={() => setSelectedCall(call)}
                 />
               ))
             )}
@@ -463,10 +464,10 @@ export function CallsClient() {
         </table>
       </div>
 
-      {/* ── Transcript drawer ── */}
+      {/* ── Call detail drawer ── */}
       <TranscriptDrawer
-        callId={openTranscriptCallId}
-        onClose={() => setOpenTranscriptCallId(null)}
+        call={selectedCall}
+        onClose={() => setSelectedCall(null)}
       />
     </div>
   );
@@ -476,17 +477,20 @@ export function CallsClient() {
 
 function CallRow({
   call,
-  onOpenTranscript,
+  onOpen,
 }: {
   call: Call;
-  onOpenTranscript: () => void;
+  onOpen: () => void;
 }) {
   const isFuture = new Date(call.startedAt) > new Date();
   return (
-    <tr className={cn(
-      "border-b border-border/30 transition-colors duration-100 hover:bg-muted/20",
-      isFuture && "bg-emerald-50/30"
-    )}>
+    <tr
+      onClick={onOpen}
+      className={cn(
+        "border-b border-border/30 transition-colors duration-100 hover:bg-muted/40 cursor-pointer",
+        isFuture && "bg-emerald-50/30"
+      )}
+    >
       {/* Type */}
       <td className="px-4 py-3">
         <CallTypeBadge type={call.callType} />
@@ -570,26 +574,21 @@ function CallRow({
             </span>
           )}
           <button
-            onClick={call.transcriptAvailable ? onOpenTranscript : undefined}
-            disabled={!call.transcriptAvailable}
-            title={call.transcriptAvailable ? "View transcript" : "No transcript"}
+            onClick={(e) => { e.stopPropagation(); onOpen(); }}
+            title={call.transcriptAvailable ? "View transcript" : "Open call"}
             className={cn(
-              "p-1.5 rounded-md transition-colors",
-              call.transcriptAvailable
-                ? "text-muted-foreground hover:text-foreground hover:bg-muted"
-                : "text-muted-foreground/25 cursor-not-allowed"
+              "p-1.5 rounded-md transition-colors hover:bg-muted",
+              call.transcriptAvailable ? "text-foreground" : "text-muted-foreground/30"
             )}
           >
             <FileText className="w-3.5 h-3.5" />
           </button>
           <button
-            disabled={!call.recordingAvailable}
-            title={call.recordingAvailable ? "Play recording" : "No recording"}
+            onClick={(e) => { e.stopPropagation(); onOpen(); }}
+            title={call.recordingAvailable ? "View recording" : "Open call"}
             className={cn(
-              "p-1.5 rounded-md transition-colors",
-              call.recordingAvailable
-                ? "text-muted-foreground hover:text-foreground hover:bg-muted"
-                : "text-muted-foreground/25 cursor-not-allowed"
+              "p-1.5 rounded-md transition-colors hover:bg-muted",
+              call.recordingAvailable ? "text-foreground" : "text-muted-foreground/30"
             )}
           >
             <Volume2 className="w-3.5 h-3.5" />
