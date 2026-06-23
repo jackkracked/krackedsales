@@ -17,7 +17,7 @@ import {
 import { cn } from "@/lib/utils/cn";
 import { relativeTime, formatDate } from "@/lib/utils/date";
 import { Avatar } from "@/components/ui/avatar";
-import { TranscriptDrawer } from "./transcript-drawer";
+import { CallDetailModal } from "./call-detail-modal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -464,8 +464,8 @@ export function CallsClient() {
         </table>
       </div>
 
-      {/* ── Call detail drawer ── */}
-      <TranscriptDrawer
+      {/* ── Call detail modal (video + word-synced transcript) ── */}
+      <CallDetailModal
         call={selectedCall}
         onClose={() => setSelectedCall(null)}
       />
