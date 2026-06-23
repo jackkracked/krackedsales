@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, avg, count, desc, eq, gte, ilike, isNotNull, lte, sum } from "drizzle-orm";
+import { and, avg, count, desc, eq, gte, ilike, inArray, isNotNull, lte, sum } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { calls, users } from "@/lib/db/schema";
+import { calls, users, callDispositions } from "@/lib/db/schema";
 import { ghl, locationId } from "@/lib/ghl/client";
 import type { GHLCalendarEvent } from "@/lib/ghl/types";
 
@@ -60,7 +60,7 @@ async function fetchGHLEventsForUser(
         repName,
         startedAt: e.startTime,
         durationSeconds: durationSeconds > 0 ? durationSeconds : null,
-        status: e.status ?? null,
+        status: start.getTime() > Date.now() ? "upcoming" : "completed",
         transcriptAvailable: false,
         recordingAvailable: false,
       };
@@ -135,6 +135,33 @@ export async function GET(req: NextRequest) {
         .where(where)
         .orderBy(desc(calls.startedAt));
 
+      // Real outcome for scheduled calls lives in dispositions (the rep's set
+      // outcome), keyed by the GHL appointment id = meetConferenceId minus the
+      // "ghlappt_" prefix. Use it to show no-show / completed instead of a flat
+      // "confirmed".
+      const apptIds = rawRows
+        .map((r) => r.meetConferenceId)
+        .filter((m): m is string => !!m && m.startsWith("ghlappt_"))
+        .map((m) => m.slice("ghlappt_".length));
+      const dispoMap = new Map<string, string>();
+      if (apptIds.length > 0) {
+        const dispos = await client
+          .select({ calendarEventId: callDispositions.calendarEventId, outcome: callDispositions.outcome })
+          .from(callDispositions)
+          .where(inArray(callDispositions.calendarEventId, apptIds));
+        for (const d of dispos) dispoMap.set(d.calendarEventId, d.outcome);
+      }
+      const nowMs = Date.now();
+
+      function meetStatus(r: typeof rawRows[number]): string {
+        if (r.startedAt.getTime() > nowMs) return "upcoming";
+        const apptId = r.meetConferenceId?.startsWith("ghlappt_") ? r.meetConferenceId.slice(8) : null;
+        const outcome = apptId ? dispoMap.get(apptId) : undefined;
+        if (outcome === "no_show") return "noshow";
+        if (outcome) return "completed";
+        return "completed"; // past, held — no outcome logged yet
+      }
+
       dbRows = rawRows.map((r) => ({
         id: r.id,
         callType: r.callType as "meet" | "dialer",
@@ -145,7 +172,7 @@ export async function GET(req: NextRequest) {
         repName: r.repName,
         startedAt: r.startedAt.toISOString(),
         durationSeconds: r.durationSeconds,
-        status: null,
+        status: r.callType === "meet" ? meetStatus(r) : (r.status ?? "completed"),
         transcriptAvailable: r.transcriptAvailable,
         recordingAvailable: r.recordingAvailable,
         meetConferenceId: r.meetConferenceId ?? undefined,

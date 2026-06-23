@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { calls, userCalendars, users } from "@/lib/db/schema";
 import { ghl, locationId } from "@/lib/ghl/client";
@@ -115,7 +115,32 @@ interface GHLApptEvent {
   endTime?: string;
   contactName?: string;
   assignedUserId?: string;
+  users?: string[];           // attendee GHL user ids (rep fallback)
   calendarId?: string;
+}
+
+/**
+ * Resolve a clean contact name from a calendar event. GHL's calendar list omits
+ * contactName, but the booking title is "{Contact} x Kracked Retention[: …]", so
+ * we take the part before " x ". Falls back to contactName when present.
+ */
+export function contactNameFromEvent(ev: { title?: string; contactName?: string }): string | null {
+  if (ev.contactName?.trim()) return ev.contactName.trim();
+  const title = (ev.title ?? "").trim();
+  if (!title) return null;
+  const name = title.split(/\s+x\s+/i)[0].split(/\s*[:|]\s*/)[0].trim();
+  return name || null;
+}
+
+/** Normalise GHL appointmentStatus into our stored vocabulary. */
+export function normalizeApptStatus(raw?: string): string {
+  const v = (raw ?? "").toLowerCase().replace(/[^a-z]/g, "");
+  if (v.includes("noshow")) return "noshow";
+  if (v.includes("showed") || v.includes("show")) return "showed";
+  if (v.includes("complete")) return "completed";
+  if (v.includes("confirm")) return "confirmed";
+  if (v.includes("invalid")) return "cancelled";
+  return v || "booked";
 }
 
 async function fetchAllCalendars(loc: string): Promise<{ id: string; name: string }[]> {
@@ -287,15 +312,20 @@ export async function runSync(): Promise<{ meet: number; dialer: number; calenda
         const durationSeconds = ev.endTime
           ? Math.max(0, Math.round((new Date(ev.endTime).getTime() - startedAt.getTime()) / 1000))
           : null;
-        const rep = ev.assignedUserId ? userByGhlId.get(ev.assignedUserId) : undefined;
+        // Rep: prefer the assigned user, else the first attendee that maps to a rep.
+        const repId = ev.assignedUserId ?? ev.users?.find((u) => userByGhlId.has(u));
+        const rep = repId ? userByGhlId.get(repId) : undefined;
+        const contactName = contactNameFromEvent(ev);
+        const status = normalizeApptStatus(ev.appointmentStatus ?? ev.status);
         try {
           await client
             .insert(calls)
             .values({
               callType:            "meet",
               direction:           null,
+              status,
               contactId:           ev.contactId ?? null,
-              contactName:         ev.contactName ?? null,
+              contactName,
               repEmail:            rep?.email ?? null,
               repName:             rep?.name ?? null,
               startedAt,
@@ -304,7 +334,19 @@ export async function runSync(): Promise<{ meet: number; dialer: number; calenda
               transcriptAvailable: false,
               recordingAvailable:  false,
             })
-            .onConflictDoNothing({ target: calls.meetConferenceId });
+            // Re-sync should heal earlier rows that were stored without a name/
+            // status/rep, and keep status fresh (showed/noshow set after the call).
+            .onConflictDoUpdate({
+              target: calls.meetConferenceId,
+              // Never wipe a good value with null; always refresh status.
+              set: {
+                status,
+                contactId:   sql`coalesce(${ev.contactId ?? null}::text, ${calls.contactId})`,
+                contactName: sql`coalesce(${contactName}::text, ${calls.contactName})`,
+                repEmail:    sql`coalesce(${rep?.email ?? null}::text, ${calls.repEmail})`,
+                repName:     sql`coalesce(${rep?.name ?? null}::text, ${calls.repName})`,
+              },
+            });
           calendarCount++;
         } catch (err) {
           console.error(`[calls/sync] Failed upserting calendar call ${ev.id}:`, err);

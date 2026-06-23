@@ -462,6 +462,7 @@ export const calls = pgTable("calls", {
   id: uuid("id").primaryKey().defaultRandom(),
   callType: text("call_type").notNull(), // "meet" | "dialer"
   direction: text("direction"),          // "inbound" | "outbound" | null (Meet has no direction)
+  status: text("status"),                // "booked"|"confirmed"|"showed"|"noshow"|"completed" (scheduled); null for dialer
   contactId: text("contact_id"),         // GHL contact ID (may be null for orphaned calls)
   contactName: text("contact_name"),
   repEmail: text("rep_email"),           // Google email (Meet) or GHL user email (Dialer)

@@ -613,12 +613,13 @@ function CallTypeBadge({ type }: { type: "meet" | "dialer" | "scheduled" }) {
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  booked:    "bg-sky-100 text-sky-700",
-  confirmed: "bg-emerald-100 text-emerald-700",
-  showed:    "bg-green-100 text-green-700",
-  completed: "bg-green-100 text-green-700",
-  noshow:    "bg-red-100 text-red-700",
-  cancelled: "bg-zinc-100 text-zinc-500",
+  upcoming:  "bg-sky-50 text-sky-700 ring-1 ring-sky-200",
+  booked:    "bg-sky-50 text-sky-700 ring-1 ring-sky-200",
+  confirmed: "bg-sky-50 text-sky-700 ring-1 ring-sky-200",
+  showed:    "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
+  completed: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
+  noshow:    "bg-rose-50 text-rose-700 ring-1 ring-rose-200",
+  cancelled: "bg-zinc-100 text-zinc-500 ring-1 ring-zinc-200",
 };
 
 function AppointmentStatusBadge({ status }: { status: string }) {
