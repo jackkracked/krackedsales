@@ -278,27 +278,39 @@ function SimpleMarkdown({ text }: { text: string }) {
 
 /** Render bold (**text**) and italic (*text*) inline */
 function renderInline(text: string): React.ReactNode {
-  // Split on **bold** patterns, then handle *italic* inside each segment
+  // Tokenize markdown links [text](url) and **bold** in one pass.
   const parts: React.ReactNode[] = [];
-  const boldRegex = /\*\*(.+?)\*\*/g;
+  const regex = /\[([^\]]+)\]\(([^)]+)\)|\*\*(.+?)\*\*/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
+  let key = 0;
 
-  while ((match = boldRegex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+    if (match[1] !== undefined) {
+      // Markdown link → clickable, label only
+      parts.push(
+        <a
+          key={`l${key++}`}
+          href={match[2]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary underline decoration-primary/30 underline-offset-2 hover:decoration-primary"
+        >
+          {match[1]}
+        </a>
+      );
+    } else {
+      parts.push(
+        <strong key={`b${key++}`} className="font-semibold text-foreground">
+          {match[3]}
+        </strong>
+      );
     }
-    parts.push(
-      <strong key={match.index} className="font-semibold text-foreground">
-        {match[1]}
-      </strong>
-    );
     lastIndex = match.index + match[0].length;
   }
 
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
-  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
 
   return parts.length === 1 ? parts[0] : <>{parts}</>;
 }
