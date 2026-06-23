@@ -35,7 +35,8 @@ interface GHLConversationSearchResponse {
 interface GHLMessage {
   id: string;
   messageType: string;
-  type: number; // 1 = inbound, 2 = outbound
+  type: number;            // GHL stamps calls as type:1 regardless of direction
+  direction?: string;      // "inbound" | "outbound" — the real direction
   dateAdded: string;
   meta?: {
     duration?: number; // seconds
@@ -295,7 +296,10 @@ export async function runSync(): Promise<{ meet: number; dialer: number; calenda
         );
 
         for (const msg of callMessages) {
-          const direction = msg.type === 1 ? "inbound" : "outbound";
+          // GHL stamps every call message with type:1, so use the `direction`
+          // field for the real inbound/outbound (the type-based check labelled
+          // every call inbound).
+          const direction = msg.direction === "outbound" ? "outbound" : "inbound";
           const startedAt = new Date(msg.dateAdded);
           const durationSeconds =
             typeof msg.meta?.duration === "number" ? msg.meta.duration : null;
@@ -317,7 +321,9 @@ export async function runSync(): Promise<{ meet: number; dialer: number; calenda
                 transcriptAvailable: false,
                 recordingAvailable:  false,
               })
-              .onConflictDoNothing();
+              // Heal the direction on already-synced calls (they were all
+              // mislabelled inbound before the fix).
+              .onConflictDoUpdate({ target: calls.ghlMessageId, set: { direction } });
             dialerCount++;
           } catch (err) {
             console.error(
