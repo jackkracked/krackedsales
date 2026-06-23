@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import {
@@ -47,6 +47,11 @@ function fmtDuration(seconds: number | null): string {
   const m = Math.floor(seconds / 60);
   if (m >= 60) return `${Math.floor(m / 60)}h ${m % 60}m`;
   return `${m}:${String(seconds % 60).padStart(2, "0")}`;
+}
+function shareIdFromUrl(url?: string | null): string | null {
+  if (!url) return null;
+  const m = url.match(/\/share\/([A-Za-z0-9_-]+)/);
+  return m ? m[1] : null;
 }
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
@@ -108,71 +113,15 @@ const INSIGHT_CARDS = [
   { key: "redFlagsText" as const, label: "Red Flags", Icon: AlertTriangle, color: "text-rose-500" },
 ] as const;
 
-// ─── HLS video player ─────────────────────────────────────────────────────────
-
-function VideoPlayer({
-  callId, videoRef,
-}: { callId: string; videoRef: React.RefObject<HTMLVideoElement | null> }) {
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    const src = `/api/calls/${callId}/stream`;
-    let hls: { destroy: () => void } | null = null;
-    let cancelled = false;
-
-    // Prefer hls.js (Chrome/Firefox/Edge). Only fall back to native HLS on
-    // Safari, where hls.js isn't supported but the <video> plays HLS directly.
-    import("hls.js").then(({ default: Hls }) => {
-      if (cancelled) return;
-      if (Hls.isSupported()) {
-        // enableWorker:false — the app's CSP blocks blob: workers (silent demux
-        // failure). Canonical init order: attach media first, then loadSource on
-        // MEDIA_ATTACHED so the stream-controller starts cleanly.
-        const instance = new Hls({ enableWorker: false });
-        instance.on(Hls.Events.ERROR, (_e, data) => {
-          console.error("[hlserr]", data.type, data.details, "fatal=" + data.fatal);
-          if (data.fatal) setError(true);
-        });
-        instance.loadSource(src);
-        instance.attachMedia(video);
-        hls = instance;
-      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = src;
-      } else {
-        setError(true);
-      }
-    }).catch(() => setError(true));
-    return () => { cancelled = true; hls?.destroy(); };
-  }, [callId, videoRef]);
-
-  if (error) {
-    return (
-      <div className="aspect-video w-full rounded-[10px] bg-ink/90 flex items-center justify-center text-center px-6">
-        <p className="text-sm text-white/70">Couldn&apos;t load the in-app player. Use &ldquo;Watch on Fathom&rdquo; above.</p>
-      </div>
-    );
-  }
-  return (
-    <video
-      ref={videoRef}
-      controls
-      playsInline
-      className="aspect-video w-full rounded-[10px] bg-black shadow-lg"
-    />
-  );
-}
-
 // ─── Main modal ───────────────────────────────────────────────────────────────
 
 export function CallDetailModal({ call, onClose }: { call: Call | null; onClose: () => void }) {
   const callId = call?.id ?? null;
   const isOpen = call !== null;
   const [mounted, setMounted] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
   const [summaryOpen, setSummaryOpen] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const [seekSec, setSeekSec] = useState<number | null>(null);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLButtonElement>(null);
 
@@ -190,43 +139,20 @@ export function CallDetailModal({ call, onClose }: { call: Call | null; onClose:
   });
   const insights = insightsData?.insights ?? null;
 
-  const hasVideo = !!call?.fathomShareUrl;
+  const shareId = shareIdFromUrl(call?.fathomShareUrl);
+  const hasVideo = !!shareId;
   const entries = useMemo(() => (data?.entries ?? []).map((e) => ({ ...e, sec: tsToSec(e.startTime) })), [data?.entries]);
   const repLower = (call?.repName ?? data?.repName ?? "").toLowerCase().split(" ")[0];
 
-  // Active transcript segment = last entry whose timestamp has passed.
-  const activeIndex = useMemo(() => {
-    if (!entries.length) return -1;
-    let lo = 0, hi = entries.length - 1, ans = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (entries[mid].sec <= currentTime + 0.25) { ans = mid; lo = mid + 1; } else hi = mid - 1;
-    }
-    return ans;
-  }, [entries, currentTime]);
+  const embedSrc = shareId
+    ? `https://fathom.video/embed/${shareId}${seekSec != null ? `?timestamp=${Math.floor(seekSec)}` : ""}`
+    : null;
 
-  // Auto-scroll the active line into view while the video plays.
+  // Keep the chosen line scrolled into view.
   useEffect(() => {
-    if (activeIndex < 0 || !activeRef.current || !transcriptScrollRef.current) return;
+    if (activeIndex < 0 || !activeRef.current) return;
     activeRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [activeIndex]);
-
-  // Time updates from the video drive the highlight.
-  const onTimeUpdate = useCallback(() => {
-    const v = videoRef.current;
-    if (v) setCurrentTime(v.currentTime);
-  }, []);
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    v.addEventListener("timeupdate", onTimeUpdate);
-    return () => v.removeEventListener("timeupdate", onTimeUpdate);
-  }, [onTimeUpdate, hasVideo, data]);
-
-  const seekTo = useCallback((sec: number) => {
-    const v = videoRef.current;
-    if (v) { v.currentTime = sec; v.play().catch(() => {}); }
-  }, []);
 
   // Escape + scroll lock
   useEffect(() => {
@@ -238,22 +164,19 @@ export function CallDetailModal({ call, onClose }: { call: Call | null; onClose:
     return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
   }, [isOpen, onClose]);
 
-  // Reset playback state when switching calls
-  useEffect(() => { setCurrentTime(0); setSummaryOpen(false); }, [callId]);
+  // Reset when switching calls
+  useEffect(() => { setSeekSec(null); setActiveIndex(-1); setSummaryOpen(false); }, [callId]);
 
   if (!isOpen || !mounted) return null;
 
   const cards = INSIGHT_CARDS.filter((c) => insights?.[c.key]);
+  const isUpcoming = new Date(call!.startedAt).getTime() > Date.now();
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
       <div className="absolute inset-0 bg-ink/55 backdrop-blur-sm" onClick={onClose} />
 
-      <div
-        className="relative z-10 flex w-full max-w-[1000px] max-h-[92vh] flex-col overflow-hidden rounded-[16px] bg-card shadow-2xl ring-1 ring-border"
-        role="dialog"
-        aria-modal="true"
-      >
+      <div className="relative z-10 flex w-full max-w-[1000px] max-h-[92vh] flex-col overflow-hidden rounded-[16px] bg-card shadow-2xl ring-1 ring-border" role="dialog" aria-modal="true">
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-border bg-gradient-to-b from-muted/30 to-transparent px-5 py-4 shrink-0">
           <Avatar name={call!.contactName ?? "Unknown"} size={40} />
@@ -302,13 +225,20 @@ export function CallDetailModal({ call, onClose }: { call: Call | null; onClose:
           {/* Left: video + summary/insights */}
           <div className="min-h-0 overflow-y-auto border-b md:border-b-0 md:border-r border-border p-4 space-y-4">
             {hasVideo ? (
-              <VideoPlayer callId={callId!} videoRef={videoRef} />
+              <iframe
+                key={seekSec ?? "start"}
+                src={embedSrc!}
+                title="Call recording"
+                allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
+                allowFullScreen
+                className="aspect-video w-full rounded-[10px] border-0 bg-black shadow-lg"
+              />
             ) : (
               <div className="aspect-video w-full rounded-[10px] bg-muted/40 ring-1 ring-border flex flex-col items-center justify-center text-center px-6">
                 <div className="w-11 h-11 rounded-full bg-muted flex items-center justify-center mb-2">
-                  {new Date(call!.startedAt).getTime() > Date.now() ? <Clock className="w-5 h-5 text-muted-foreground/50" /> : <Video className="w-5 h-5 text-muted-foreground/50" />}
+                  {isUpcoming ? <Clock className="w-5 h-5 text-muted-foreground/50" /> : <Video className="w-5 h-5 text-muted-foreground/50" />}
                 </div>
-                <p className="text-sm font-medium text-foreground">{new Date(call!.startedAt).getTime() > Date.now() ? "This call hasn't happened yet" : "No recording for this call"}</p>
+                <p className="text-sm font-medium text-foreground">{isUpcoming ? "This call hasn't happened yet" : "No recording for this call"}</p>
                 <p className="text-xs text-muted-foreground mt-0.5 max-w-[280px]">Once it's recorded with Fathom, the video, transcript and AI summary appear here automatically.</p>
               </div>
             )}
@@ -318,7 +248,7 @@ export function CallDetailModal({ call, onClose }: { call: Call | null; onClose:
               {call!.fathomShareUrl && (
                 <a href={call!.fathomShareUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-primary hover:underline"><PlayCircle className="w-3.5 h-3.5" />Watch on Fathom</a>
               )}
-              {new Date(call!.startedAt).getTime() > Date.now() && call!.meetingUrl && (
+              {isUpcoming && call!.meetingUrl && (
                 <a href={call!.meetingUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-primary hover:underline"><Video className="w-3.5 h-3.5" />Join Google Meet</a>
               )}
               {call!.smartNotesUrl && (
@@ -351,12 +281,12 @@ export function CallDetailModal({ call, onClose }: { call: Call | null; onClose:
             )}
           </div>
 
-          {/* Right: transcript with live karaoke highlight */}
+          {/* Right: transcript — click any line to jump the recording to that moment */}
           <div className="flex min-h-0 flex-col">
             <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border shrink-0">
               <Captions className="w-3.5 h-3.5 text-muted-foreground" />
               <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Transcript</span>
-              {hasVideo && entries.length > 0 && <span className="ml-auto text-[10.5px] text-muted-foreground/70 tabular-nums">{fmtClock(currentTime)}</span>}
+              {hasVideo && entries.length > 0 && <span className="ml-auto text-[10px] text-muted-foreground/60">Click a line to jump the video</span>}
             </div>
             <div ref={transcriptScrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
               {entries.length === 0 ? (
@@ -381,17 +311,19 @@ export function CallDetailModal({ call, onClose }: { call: Call | null; onClose:
                         )}
                         <button
                           ref={isActive ? activeRef : undefined}
-                          onClick={() => hasVideo && seekTo(e.sec)}
+                          onClick={() => { if (hasVideo) { setSeekSec(e.sec); setActiveIndex(i); } }}
                           disabled={!hasVideo}
+                          title={hasVideo ? `Jump to ${fmtClock(e.sec)}` : undefined}
                           className={cn(
-                            "block w-full text-left text-[13px] leading-relaxed rounded-[6px] px-2 py-1 transition-colors",
+                            "group flex w-full items-start gap-2 text-left text-[13px] leading-relaxed rounded-[6px] px-2 py-1 transition-colors",
                             hasVideo && "cursor-pointer hover:bg-muted/50",
-                            isActive
-                              ? "bg-primary/10 text-foreground ring-1 ring-primary/25 font-medium"
-                              : "text-muted-foreground",
+                            isActive ? "bg-primary/10 text-foreground ring-1 ring-primary/25 font-medium" : "text-muted-foreground",
                           )}
                         >
-                          {e.text}
+                          {hasVideo && (
+                            <span className="shrink-0 mt-0.5 text-[10px] tabular-nums text-muted-foreground/50 group-hover:text-primary w-9">{fmtClock(e.sec)}</span>
+                          )}
+                          <span className="min-w-0">{e.text}</span>
                         </button>
                       </div>
                     );
