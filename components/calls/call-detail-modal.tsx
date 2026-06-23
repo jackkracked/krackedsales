@@ -127,15 +127,12 @@ function VideoPlayer({
     import("hls.js").then(({ default: Hls }) => {
       if (cancelled) return;
       if (Hls.isSupported()) {
-        // enableWorker:false — the app's CSP blocks blob: workers, which makes
-        // hls.js fail to demux silently. Main-thread demux is slightly slower
-        // but reliable here.
-        const instance = new Hls({ maxBufferLength: 30, enableWorker: false, debug: true });
-        instance.on(Hls.Events.ERROR, (_e, data) => {
-          console.error("[hls]", data.type, data.details, "fatal=" + data.fatal, (data as { reason?: string }).reason ?? "");
-          if (data.fatal) setError(true);
-        });
-        instance.loadSource(src);
+        // enableWorker:false — the app's CSP blocks blob: workers (silent demux
+        // failure). Canonical init order: attach media first, then loadSource on
+        // MEDIA_ATTACHED so the stream-controller starts cleanly.
+        const instance = new Hls({ enableWorker: false });
+        instance.on(Hls.Events.ERROR, (_e, data) => { if (data.fatal) setError(true); });
+        instance.on(Hls.Events.MEDIA_ATTACHED, () => instance.loadSource(src));
         instance.attachMedia(video);
         hls = instance;
       } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
