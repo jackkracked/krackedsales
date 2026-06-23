@@ -130,12 +130,12 @@ function VideoPlayer({
         // enableWorker:false — the app's CSP blocks blob: workers (silent demux
         // failure). Canonical init order: attach media first, then loadSource on
         // MEDIA_ATTACHED so the stream-controller starts cleanly.
-        const instance = new Hls({ enableWorker: false, debug: true });
+        const instance = new Hls({ enableWorker: false });
         instance.on(Hls.Events.ERROR, (_e, data) => {
           console.error("[hlserr]", data.type, data.details, "fatal=" + data.fatal);
           if (data.fatal) setError(true);
         });
-        instance.on(Hls.Events.MEDIA_ATTACHED, () => instance.loadSource(src));
+        instance.loadSource(src);
         instance.attachMedia(video);
         hls = instance;
       } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
