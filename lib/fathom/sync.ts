@@ -6,7 +6,7 @@
 
 import { db } from "@/lib/db";
 import { calls, users, localContacts } from "@/lib/db/schema";
-import { eq, isNotNull, or, ilike } from "drizzle-orm";
+import { and, eq, isNotNull, or, ilike } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { generateAndStoreInsights } from "@/lib/ai/call-insights";
 import {
@@ -171,8 +171,9 @@ function calcDurationSeconds(start: string, end: string): number {
 export async function syncFathomForUser(
   userId: string,
   apiKey: string,
+  sinceDays = 1,
 ): Promise<number> {
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000).toISOString();
   return syncMeetings(userId, apiKey, since);
 }
 
@@ -193,7 +194,7 @@ export async function backfillFathom(
  * Errors for individual users are caught and logged — one user's failure
  * does not block others.
  */
-export async function syncFathomForAllUsers(): Promise<number> {
+export async function syncFathomForAllUsers(sinceDays = 1): Promise<number> {
   const client = db();
   const fathomUsers = await client
     .select({ id: users.id, fathomApiKey: users.fathomApiKey })
@@ -204,7 +205,7 @@ export async function syncFathomForAllUsers(): Promise<number> {
 
   for (const user of fathomUsers) {
     try {
-      const count = await syncFathomForUser(user.id, user.fathomApiKey!);
+      const count = await syncFathomForUser(user.id, user.fathomApiKey!, sinceDays);
       total += count;
     } catch (err) {
       console.error(
@@ -235,16 +236,15 @@ async function syncMeetings(
 
   for (const meeting of meetings) {
     try {
-      // Check if already synced (dedup by fathomRecordingId)
-      const existing = await client
+      // Already attached/synced this recording? (dedup by fathomRecordingId)
+      const already = await client
         .select({ id: calls.id })
         .from(calls)
         .where(eq(calls.fathomRecordingId, meeting.recording_id))
         .limit(1);
+      if (already.length > 0) continue;
 
-      if (existing.length > 0) continue;
-
-      // Match external invitees to a GHL contact
+      // Match external invitees to a GHL contact (best-effort, improves display)
       const matched = await matchFathomContact(
         meeting.calendar_invitees ?? [],
         meeting.recorded_by.email,
@@ -255,37 +255,71 @@ async function syncMeetings(
       const hasTranscript = transcriptItems.length > 0;
       const plainText = hasTranscript ? buildPlainText(transcriptItems) : null;
 
-      // Insert call record
-      const [inserted] = await client
-        .insert(calls)
-        .values({
-          callType: "meet",
-          contactId: matched?.contactId ?? null,
-          contactName: matched?.contactName ?? null,
-          repEmail: meeting.recorded_by.email,
-          repName: meeting.recorded_by.name,
-          startedAt: new Date(meeting.recording_start_time),
-          durationSeconds: calcDurationSeconds(
-            meeting.recording_start_time,
-            meeting.recording_end_time,
-          ),
-          transcriptAvailable: hasTranscript,
-          transcriptText: hasTranscript
-            ? JSON.stringify(transcriptItems)
-            : null,
-          fathomRecordingId: meeting.recording_id,
-          fathomSummary: meeting.default_summary?.markdown_formatted ?? null,
-          fathomSyncedAt: new Date(),
-          fathomShareUrl: meeting.share_url ?? null,
-        })
-        .returning({ id: calls.id });
+      const fathomFields = {
+        transcriptAvailable: hasTranscript,
+        transcriptText: hasTranscript ? JSON.stringify(transcriptItems) : null,
+        recordingAvailable: true,
+        fathomRecordingId: meeting.recording_id,
+        fathomSummary: meeting.default_summary?.markdown_formatted ?? null,
+        fathomSyncedAt: new Date(),
+        fathomShareUrl: meeting.share_url ?? null,
+      };
 
-      // Generate AI insights from transcript
-      if (inserted && plainText) {
-        await generateAndStoreInsights(
-          inserted.id,
-          matched?.contactId ?? null,
-          plainText,
+      // ── Attach to the existing booked call when we can match it ──────────────
+      // The Meet link (meeting_url) equals the GHL event address we store on the
+      // call, so it's a deterministic match. This puts the recording + transcript
+      // on the SAME call row the rest of the app already shows.
+      let attachedId: string | null = null;
+      let attachedContactId: string | null = matched?.contactId ?? null;
+      if (meeting.meeting_url) {
+        const [match] = await client
+          .select({ id: calls.id, contactId: calls.contactId })
+          .from(calls)
+          .where(and(eq(calls.meetingUrl, meeting.meeting_url), eq(calls.callType, "meet")))
+          .orderBy(calls.startedAt)
+          .limit(1);
+        if (match) {
+          await client
+            .update(calls)
+            .set({
+              ...fathomFields,
+              // Prefer a real matched contact over a generic event title.
+              contactId: matched?.contactId ?? match.contactId ?? null,
+              ...(matched?.contactName ? { contactName: matched.contactName } : {}),
+            })
+            .where(eq(calls.id, match.id));
+          attachedId = match.id;
+          attachedContactId = matched?.contactId ?? match.contactId ?? null;
+        }
+      }
+
+      // ── No existing call to attach to → insert a standalone Fathom call ──────
+      if (!attachedId) {
+        const [inserted] = await client
+          .insert(calls)
+          .values({
+            callType: "meet",
+            status: "completed",
+            contactId: matched?.contactId ?? null,
+            contactName: matched?.contactName ?? meeting.title ?? null,
+            meetingUrl: meeting.meeting_url ?? null,
+            repEmail: meeting.recorded_by.email,
+            repName: meeting.recorded_by.name,
+            startedAt: new Date(meeting.recording_start_time),
+            durationSeconds: calcDurationSeconds(
+              meeting.recording_start_time,
+              meeting.recording_end_time,
+            ),
+            ...fathomFields,
+          })
+          .returning({ id: calls.id });
+        attachedId = inserted?.id ?? null;
+      }
+
+      // Generate AI insights from the transcript (non-fatal)
+      if (attachedId && plainText) {
+        await generateAndStoreInsights(attachedId, attachedContactId, plainText).catch(
+          (err) => console.error("[fathom-sync] insight generation failed:", err),
         );
       }
 

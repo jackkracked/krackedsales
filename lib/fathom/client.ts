@@ -26,9 +26,13 @@ export interface FathomTranscriptItem {
 export interface FathomMeeting {
   recording_id: number;
   title: string;
-  url: string;
-  share_url: string;
+  meeting_title?: string;
+  url: string;             // recording view URL on fathom.video
+  meeting_url?: string;    // the Google Meet / Zoom link (matches GHL event address)
+  share_url: string;       // public share link to the recording
   created_at: string;
+  scheduled_start_time?: string;
+  scheduled_end_time?: string;
   recording_start_time: string;
   recording_end_time: string;
   recorded_by: { name: string; email: string; email_domain: string };
@@ -40,8 +44,9 @@ export interface FathomMeeting {
   };
 }
 
+// The Fathom external API returns meetings under `items` (not `meetings`).
 interface ListMeetingsResponse {
-  meetings: FathomMeeting[];
+  items: FathomMeeting[];
   next_cursor: string | null;
 }
 
@@ -114,7 +119,7 @@ export async function listMeetings(
     const path = `/meetings${qs ? `?${qs}` : ""}`;
 
     const page = await fathomFetch<ListMeetingsResponse>(apiKey, path);
-    all.push(...page.meetings);
+    all.push(...(page.items ?? []));
     cursor = page.next_cursor;
   } while (cursor);
 

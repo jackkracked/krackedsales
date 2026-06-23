@@ -117,6 +117,7 @@ interface GHLApptEvent {
   assignedUserId?: string;
   users?: string[];           // attendee GHL user ids (rep fallback)
   calendarId?: string;
+  address?: string;           // the Google Meet/Zoom link
 }
 
 /**
@@ -326,6 +327,7 @@ export async function runSync(): Promise<{ meet: number; dialer: number; calenda
               status,
               contactId:           ev.contactId ?? null,
               contactName,
+              meetingUrl:          ev.address ?? null,
               repEmail:            rep?.email ?? null,
               repName:             rep?.name ?? null,
               startedAt,
@@ -343,6 +345,7 @@ export async function runSync(): Promise<{ meet: number; dialer: number; calenda
                 status,
                 contactId:   sql`coalesce(${ev.contactId ?? null}::text, ${calls.contactId})`,
                 contactName: sql`coalesce(${contactName}::text, ${calls.contactName})`,
+                meetingUrl:  sql`coalesce(${ev.address ?? null}::text, ${calls.meetingUrl})`,
                 repEmail:    sql`coalesce(${rep?.email ?? null}::text, ${calls.repEmail})`,
                 repName:     sql`coalesce(${rep?.name ?? null}::text, ${calls.repName})`,
               },

@@ -21,9 +21,12 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const synced = await syncFathomForAllUsers();
-    console.log("[cron/sync-fathom] Sync complete:", synced);
-    return NextResponse.json({ synced });
+    // ?days=N widens the look-back window for a one-time backfill (default 1 day).
+    const daysParam = Number(req.nextUrl.searchParams.get("days"));
+    const sinceDays = Number.isFinite(daysParam) && daysParam > 0 ? Math.min(daysParam, 365) : 1;
+    const synced = await syncFathomForAllUsers(sinceDays);
+    console.log(`[cron/sync-fathom] Sync complete (sinceDays=${sinceDays}):`, synced);
+    return NextResponse.json({ synced, sinceDays });
   } catch (err) {
     console.error("[cron/sync-fathom] Sync failed:", err);
     return NextResponse.json({ error: "Sync failed" }, { status: 500 });
