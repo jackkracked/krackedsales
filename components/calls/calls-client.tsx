@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { relativeTime, formatDate } from "@/lib/utils/date";
+import { Avatar } from "@/components/ui/avatar";
 import { TranscriptDrawer } from "./transcript-drawer";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -493,11 +494,15 @@ function CallRow({
 
       {/* Contact */}
       <td className="px-4 py-3">
-        {call.contactName ? (
-          <span className="text-sm font-medium text-foreground">{call.contactName}</span>
-        ) : (
-          <span className="text-muted-foreground/40 text-sm">Unknown</span>
-        )}
+        <div className="flex items-center gap-2.5 min-w-0">
+          <Avatar name={call.contactName ?? "Unknown"} size={30} />
+          <span className={cn(
+            "text-sm font-medium truncate max-w-[240px]",
+            call.contactName ? "text-foreground" : "text-muted-foreground/50"
+          )}>
+            {call.contactName ?? "Unknown"}
+          </span>
+        </div>
       </td>
 
       {/* Rep */}
