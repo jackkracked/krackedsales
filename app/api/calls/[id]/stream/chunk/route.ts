@@ -24,12 +24,16 @@ export async function GET(req: NextRequest) {
 
   try {
     const res = await fetch(target, { cache: "no-store" });
-    if (!res.ok || !res.body) {
+    if (!res.ok) {
       return NextResponse.json({ error: "Segment unavailable" }, { status: 502 });
     }
-    return new NextResponse(res.body, {
+    // Buffer the full segment so hls.js gets a clean, complete arraybuffer with a
+    // known length (streaming res.body can leave Content-Length unset).
+    const buf = await res.arrayBuffer();
+    return new NextResponse(buf, {
       headers: {
         "Content-Type": "video/mp2t",
+        "Content-Length": String(buf.byteLength),
         "Cache-Control": "private, max-age=3600",
       },
     });

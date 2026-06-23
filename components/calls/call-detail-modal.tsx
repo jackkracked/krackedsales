@@ -130,7 +130,7 @@ function VideoPlayer({
         // enableWorker:false — the app's CSP blocks blob: workers, which makes
         // hls.js fail to demux silently. Main-thread demux is slightly slower
         // but reliable here.
-        const instance = new Hls({ maxBufferLength: 30, enableWorker: false });
+        const instance = new Hls({ maxBufferLength: 30, enableWorker: false, debug: true });
         instance.on(Hls.Events.ERROR, (_e, data) => {
           console.error("[hls]", data.type, data.details, "fatal=" + data.fatal, (data as { reason?: string }).reason ?? "");
           if (data.fatal) setError(true);
