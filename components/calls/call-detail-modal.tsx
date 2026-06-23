@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import {
-  X, Video, Phone, Clock, ArrowUp, ArrowDown, ExternalLink, StickyNote,
+  X, Video, Phone, Clock, ArrowUp, ArrowDown, StickyNote,
   ChevronDown, Target, ShieldAlert, ListChecks, AlertTriangle, PlayCircle, Captions,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
@@ -47,11 +47,6 @@ function fmtDuration(seconds: number | null): string {
   const m = Math.floor(seconds / 60);
   if (m >= 60) return `${Math.floor(m / 60)}h ${m % 60}m`;
   return `${m}:${String(seconds % 60).padStart(2, "0")}`;
-}
-function shareIdFromUrl(url?: string | null): string | null {
-  if (!url) return null;
-  const m = url.match(/\/share\/([A-Za-z0-9_-]+)/);
-  return m ? m[1] : null;
 }
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
@@ -113,16 +108,61 @@ const INSIGHT_CARDS = [
   { key: "redFlagsText" as const, label: "Red Flags", Icon: AlertTriangle, color: "text-rose-500" },
 ] as const;
 
+// ─── HLS video player (self-hosted via our same-origin proxy) ─────────────────
+
+function VideoPlayer({
+  callId, videoRef, shareUrl,
+}: { callId: string; videoRef: React.RefObject<HTMLVideoElement | null>; shareUrl?: string | null }) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const src = `/api/calls/${callId}/stream`;
+    let hls: { destroy: () => void } | null = null;
+    let cancelled = false;
+
+    import("hls.js").then(({ default: Hls }) => {
+      if (cancelled) return;
+      if (Hls.isSupported()) {
+        const instance = new Hls({ enableWorker: false });
+        instance.on(Hls.Events.ERROR, (_e, data) => { if (data.fatal) setFailed(true); });
+        instance.loadSource(src);
+        instance.attachMedia(video);
+        hls = instance;
+      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = src;
+      } else {
+        setFailed(true);
+      }
+    }).catch(() => setFailed(true));
+    return () => { cancelled = true; hls?.destroy(); };
+  }, [callId, videoRef]);
+
+  if (failed) {
+    return (
+      <div className="aspect-video w-full rounded-[10px] bg-ink flex flex-col items-center justify-center text-center px-6 gap-2">
+        <p className="text-sm text-white/80">In-app playback isn&apos;t available for this recording.</p>
+        {shareUrl && (
+          <a href={shareUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-white/25 transition-colors">
+            <PlayCircle className="w-4 h-4" /> Watch on Fathom
+          </a>
+        )}
+      </div>
+    );
+  }
+  return <video ref={videoRef} controls playsInline className="aspect-video w-full rounded-[10px] bg-black shadow-lg" />;
+}
+
 // ─── Main modal ───────────────────────────────────────────────────────────────
 
 export function CallDetailModal({ call, onClose }: { call: Call | null; onClose: () => void }) {
   const callId = call?.id ?? null;
   const isOpen = call !== null;
   const [mounted, setMounted] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
   const [summaryOpen, setSummaryOpen] = useState(false);
-  const [seekSec, setSeekSec] = useState<number | null>(null);
-  const [activeIndex, setActiveIndex] = useState(-1);
-  const transcriptScrollRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const activeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => setMounted(true), []);
@@ -139,22 +179,43 @@ export function CallDetailModal({ call, onClose }: { call: Call | null; onClose:
   });
   const insights = insightsData?.insights ?? null;
 
-  const shareId = shareIdFromUrl(call?.fathomShareUrl);
-  const hasVideo = !!shareId;
+  const hasVideo = !!call?.fathomShareUrl;
   const entries = useMemo(() => (data?.entries ?? []).map((e) => ({ ...e, sec: tsToSec(e.startTime) })), [data?.entries]);
   const repLower = (call?.repName ?? data?.repName ?? "").toLowerCase().split(" ")[0];
 
-  const embedSrc = shareId
-    ? `https://fathom.video/embed/${shareId}${seekSec != null ? `?timestamp=${Math.floor(seekSec)}` : ""}`
-    : null;
+  // Active transcript line = last line whose timestamp has passed.
+  const activeIndex = useMemo(() => {
+    if (!entries.length) return -1;
+    let lo = 0, hi = entries.length - 1, ans = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (entries[mid].sec <= currentTime + 0.25) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    return ans;
+  }, [entries, currentTime]);
 
-  // Keep the chosen line scrolled into view.
   useEffect(() => {
     if (activeIndex < 0 || !activeRef.current) return;
     activeRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [activeIndex]);
 
-  // Escape + scroll lock
+  // Drive the karaoke highlight from the video's playback time.
+  const onTimeUpdate = useCallback(() => {
+    const v = videoRef.current;
+    if (v) setCurrentTime(v.currentTime);
+  }, []);
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.addEventListener("timeupdate", onTimeUpdate);
+    return () => v.removeEventListener("timeupdate", onTimeUpdate);
+  }, [onTimeUpdate, hasVideo, data]);
+
+  const seekTo = useCallback((sec: number) => {
+    const v = videoRef.current;
+    if (v) { v.currentTime = sec; v.play().catch(() => {}); }
+  }, []);
+
   useEffect(() => {
     if (!isOpen) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -164,8 +225,7 @@ export function CallDetailModal({ call, onClose }: { call: Call | null; onClose:
     return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
   }, [isOpen, onClose]);
 
-  // Reset when switching calls
-  useEffect(() => { setSeekSec(null); setActiveIndex(-1); setSummaryOpen(false); }, [callId]);
+  useEffect(() => { setCurrentTime(0); setSummaryOpen(false); }, [callId]);
 
   if (!isOpen || !mounted) return null;
 
@@ -225,14 +285,7 @@ export function CallDetailModal({ call, onClose }: { call: Call | null; onClose:
           {/* Left: video + summary/insights */}
           <div className="min-h-0 overflow-y-auto border-b md:border-b-0 md:border-r border-border p-4 space-y-4">
             {hasVideo ? (
-              <iframe
-                key={seekSec ?? "start"}
-                src={embedSrc!}
-                title="Call recording"
-                allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
-                allowFullScreen
-                className="aspect-video w-full rounded-[10px] border-0 bg-black shadow-lg"
-              />
+              <VideoPlayer callId={callId!} videoRef={videoRef} shareUrl={call!.fathomShareUrl} />
             ) : (
               <div className="aspect-video w-full rounded-[10px] bg-muted/40 ring-1 ring-border flex flex-col items-center justify-center text-center px-6">
                 <div className="w-11 h-11 rounded-full bg-muted flex items-center justify-center mb-2">
@@ -281,14 +334,14 @@ export function CallDetailModal({ call, onClose }: { call: Call | null; onClose:
             )}
           </div>
 
-          {/* Right: transcript — click any line to jump the recording to that moment */}
+          {/* Right: transcript — highlights in sync with playback; click any line to seek */}
           <div className="flex min-h-0 flex-col">
             <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border shrink-0">
               <Captions className="w-3.5 h-3.5 text-muted-foreground" />
               <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Transcript</span>
-              {hasVideo && entries.length > 0 && <span className="ml-auto text-[10px] text-muted-foreground/60">Click a line to jump the video</span>}
+              {hasVideo && entries.length > 0 && <span className="ml-auto text-[10px] tabular-nums text-muted-foreground/60">{fmtClock(currentTime)}</span>}
             </div>
-            <div ref={transcriptScrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
               {entries.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center text-center py-12">
                   <p className="text-sm font-medium text-foreground mb-1">No transcript</p>
@@ -311,7 +364,7 @@ export function CallDetailModal({ call, onClose }: { call: Call | null; onClose:
                         )}
                         <button
                           ref={isActive ? activeRef : undefined}
-                          onClick={() => { if (hasVideo) { setSeekSec(e.sec); setActiveIndex(i); } }}
+                          onClick={() => hasVideo && seekTo(e.sec)}
                           disabled={!hasVideo}
                           title={hasVideo ? `Jump to ${fmtClock(e.sec)}` : undefined}
                           className={cn(
@@ -321,7 +374,7 @@ export function CallDetailModal({ call, onClose }: { call: Call | null; onClose:
                           )}
                         >
                           {hasVideo && (
-                            <span className="shrink-0 mt-0.5 text-[10px] tabular-nums text-muted-foreground/50 group-hover:text-primary w-9">{fmtClock(e.sec)}</span>
+                            <span className={cn("shrink-0 mt-0.5 text-[10px] tabular-nums w-9", isActive ? "text-primary" : "text-muted-foreground/40 group-hover:text-primary")}>{fmtClock(e.sec)}</span>
                           )}
                           <span className="min-w-0">{e.text}</span>
                         </button>
