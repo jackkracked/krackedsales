@@ -276,7 +276,7 @@ async function syncMeetings(
         // meetings (which reuse a Meet link) each grab a distinct un-attached call
         // instead of overwriting one another.
         const [match] = await client
-          .select({ id: calls.id, contactId: calls.contactId })
+          .select({ id: calls.id, contactId: calls.contactId, repEmail: calls.repEmail })
           .from(calls)
           .where(and(
             eq(calls.meetingUrl, meeting.meeting_url),
@@ -293,6 +293,8 @@ async function syncMeetings(
               // Prefer a real matched contact over a generic event title.
               contactId: matched?.contactId ?? match.contactId ?? null,
               ...(matched?.contactName ? { contactName: matched.contactName } : {}),
+              // Fill the rep from who recorded the call when it's missing.
+              ...(!match.repEmail ? { repEmail: meeting.recorded_by.email, repName: meeting.recorded_by.name } : {}),
             })
             .where(eq(calls.id, match.id));
           attachedId = match.id;

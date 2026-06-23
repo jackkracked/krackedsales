@@ -144,15 +144,57 @@ export function normalizeApptStatus(raw?: string): string {
   return v || "booked";
 }
 
-async function fetchAllCalendars(loc: string): Promise<{ id: string; name: string }[]> {
+interface GHLCalendarMeta {
+  id: string;
+  name: string;
+  teamMembers?: Array<{ userId?: string; isPrimary?: boolean; selected?: boolean }>;
+}
+
+async function fetchAllCalendars(loc: string): Promise<GHLCalendarMeta[]> {
   try {
-    const data = await ghl.get<{ calendars?: { id: string; name: string }[] }>(
+    const data = await ghl.get<{ calendars?: GHLCalendarMeta[] }>(
       `/calendars/?locationId=${loc}`
     );
     return (data.calendars ?? []).filter((c) => c.id);
   } catch (err) {
     console.error("[calls/sync] calendar list failed:", err);
     return [];
+  }
+}
+
+/** The team member who owns a calendar (primary, else first selected) — the rep
+ * fallback for Google-synced events that carry no assignedUserId. */
+function calendarPrimaryUserId(cal: GHLCalendarMeta): string | undefined {
+  const members = cal.teamMembers ?? [];
+  return (members.find((m) => m.isPrimary && m.userId) ?? members.find((m) => m.userId))?.userId;
+}
+
+/** The GHL user who owns a contact (assignedTo) — final rep fallback for events
+ * that carry no rep info at all (e.g. the intro-call calendar). */
+async function fetchContactOwner(contactId: string): Promise<string | undefined> {
+  try {
+    const d = await ghl.get<{ contact?: { assignedTo?: string }; assignedTo?: string }>(`/contacts/${contactId}`);
+    return d.contact?.assignedTo ?? d.assignedTo ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Map of every GHL location user id → { email, name } (all 7 team members, not
+ * just the app's own users). */
+async function fetchGhlUserMap(loc: string): Promise<Map<string, { email: string; name: string }>> {
+  try {
+    const data = await ghl.get<{ users?: Array<{ id: string; name?: string; email?: string }> }>(
+      `/users/?locationId=${loc}`
+    );
+    const map = new Map<string, { email: string; name: string }>();
+    for (const u of data.users ?? []) {
+      if (u.id) map.set(u.id, { email: u.email ?? "", name: u.name ?? u.email ?? "Rep" });
+    }
+    return map;
+  } catch (err) {
+    console.error("[calls/sync] user list failed:", err);
+    return new Map();
   }
 }
 
@@ -294,13 +336,15 @@ export async function runSync(): Promise<{ meet: number; dialer: number; calenda
   // Every GHL calendar booking carries a Google Meet link, so these ARE the meet
   // calls. Stored as callType "meet", deduped on the appointment id.
   {
-    const userByGhlId = new Map(
-      ghlUsers.map((u) => [u.ghlUserId!, { email: u.email, name: u.name }])
-    );
+    // Map against ALL GHL team members (7), not just the app's own users.
+    const userByGhlId = await fetchGhlUserMap(loc);
     const now = Date.now();
     const startMs = now - 90 * 24 * 60 * 60 * 1000; // last 90 days
     const endMs   = now + 30 * 24 * 60 * 60 * 1000; // + next 30 days
     const calendars = await fetchAllCalendars(loc);
+    // calendarId → owning team member (rep fallback for Google-synced events).
+    const calOwner = new Map(calendars.map((c) => [c.id, calendarPrimaryUserId(c)]));
+    const contactOwnerCache = new Map<string, string | undefined>();
 
     for (const cal of calendars) {
       const events = await fetchCalendarEvents(loc, cal.id, startMs, endMs);
@@ -313,8 +357,17 @@ export async function runSync(): Promise<{ meet: number; dialer: number; calenda
         const durationSeconds = ev.endTime
           ? Math.max(0, Math.round((new Date(ev.endTime).getTime() - startedAt.getTime()) / 1000))
           : null;
-        // Rep: prefer the assigned user, else the first attendee that maps to a rep.
-        const repId = ev.assignedUserId ?? ev.users?.find((u) => userByGhlId.has(u));
+        // Rep: assigned user → attendee → calendar owner → the contact's owner.
+        let repId = ev.assignedUserId
+          ?? ev.users?.find((u) => userByGhlId.has(u))
+          ?? (ev.calendarId ? calOwner.get(ev.calendarId) : undefined)
+          ?? calOwner.get(cal.id);
+        if (!repId && ev.contactId) {
+          if (!contactOwnerCache.has(ev.contactId)) {
+            contactOwnerCache.set(ev.contactId, await fetchContactOwner(ev.contactId));
+          }
+          repId = contactOwnerCache.get(ev.contactId);
+        }
         const rep = repId ? userByGhlId.get(repId) : undefined;
         const contactName = contactNameFromEvent(ev);
         const status = normalizeApptStatus(ev.appointmentStatus ?? ev.status);
