@@ -34,7 +34,7 @@
     },
     {
       "path": "/api/cron/weekly-summary",
-      "schedule": "0 6 * * 1"
+      "schedule": "0 11 * * *"
     },
     {
       "path": "/api/cron/call-prep",
