@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { BarChart2, Pencil, Plus } from "lucide-react";
-import { fmtNumber, type MetricDef } from "@/components/kpis/metric-cell";
+import { fmtNumber, type MetricDef, type MetricTarget } from "@/components/kpis/metric-cell";
 import { BalancedMetricGrid, type MetricValue } from "@/components/kpis/balanced-metric-grid";
 import { KpiEditSheet } from "./kpi-edit-sheet";
 import { KpiDetailSheet } from "@/components/kpis/KpiDetailSheet";
@@ -37,6 +37,24 @@ function subFor(data?: KpiMetricResult): string | undefined {
   if (!data) return undefined;
   if (data.asOfLabel) return data.asOfLabel;
   if (data.target != null) return `of ${fmtNumber(data.target)} target`;
+  return undefined;
+}
+
+// Dashboard metric keys map to admin target keys (same goals the KPIs page uses).
+const TARGET_KEY_ALIAS: Record<string, string> = { mrr: "managementMrr" };
+// Offer-scoped targets are stored as `offer:<id>:<suffix>`; match by suffix.
+const TARGET_OFFER_SUFFIX: Record<string, string> = { roas: "roas", leads: "leads", ad_spend: "adSpend" };
+
+/** Resolve a dashboard KPI key to its admin-set target (same as the KPIs page). */
+function resolveTarget(key: string, targets: Record<string, MetricTarget>): MetricTarget | undefined {
+  if (targets[key]) return targets[key];
+  const alias = TARGET_KEY_ALIAS[key];
+  if (alias && targets[alias]) return targets[alias];
+  const suffix = TARGET_OFFER_SUFFIX[key];
+  if (suffix) {
+    const k = Object.keys(targets).find((t) => t.endsWith(`:${suffix}`));
+    if (k) return targets[k];
+  }
   return undefined;
 }
 
@@ -79,6 +97,16 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
 
   const selectedKeys = prefsData?.keys ?? getDefaults(role);
   const pool = getPoolForRole(role);
+
+  // Admin-set targets — same goals the KPIs page uses, so cards show the same
+  // over/under badge (admin only; reps have no targets endpoint).
+  const { data: targetsData } = useQuery<{ targets: Record<string, MetricTarget> }>({
+    queryKey: ["kpi-targets"],
+    queryFn: () => fetch("/api/kpis/targets").then((r) => (r.ok ? r.json() : { targets: {} })),
+    staleTime: 5 * 60_000,
+    enabled: role === "admin",
+  });
+  const targets = targetsData?.targets ?? {};
 
   // Build query params for metric data — pass the real selected date range
   const params = new URLSearchParams({ role, start: dateRange.start, end: dateRange.end });
@@ -158,7 +186,7 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
             const vals: Record<string, MetricValue | undefined> = {};
             for (const key of selectedKeys) {
               const data = kpisData?.metrics?.[key];
-              vals[key] = data ? { value: data.value, spark: data.series, sub: subFor(data), status: data.status } : undefined;
+              vals[key] = data ? { value: data.value, spark: data.series, sub: subFor(data), status: data.status, target: resolveTarget(key, targets) } : undefined;
             }
             return (
               <BalancedMetricGrid

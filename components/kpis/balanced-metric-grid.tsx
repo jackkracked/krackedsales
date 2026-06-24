@@ -2,13 +2,15 @@
 
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils/cn";
-import { MetricCell, MetricCellSkeleton, type MetricDef, type SparkPoint } from "./metric-cell";
+import { MetricCell, MetricCellSkeleton, type MetricDef, type MetricTarget, type SparkPoint } from "./metric-cell";
 
 export interface MetricValue {
   value: number | null | undefined;
   spark?: SparkPoint[];
   sub?: string;
   status?: "ok" | "stale";
+  /** Admin-set goal → renders the over/under target badge on the cell. */
+  target?: MetricTarget;
 }
 
 interface BalancedMetricGridProps {
@@ -62,6 +64,7 @@ export function BalancedMetricGrid({
         spark={mv?.spark}
         sub={mv?.sub}
         status={mv?.status}
+        target={mv?.target}
         onClick={onMetricClick ? () => onMetricClick(def.key) : undefined}
         onManualSave={def.manual && onManualSave ? (v) => onManualSave(def.key, v) : undefined}
       />
