@@ -91,61 +91,17 @@ export async function GET(req: NextRequest) {
     console.error("[rep-performance] GHL fetch failed:", err);
   }
 
-  // Fetch ClickUp demo tasks (in progress = demos booked)
-  let demoTasks: Array<{ assignees: Array<{ email?: string }>; status: { status: string } }> = [];
-  try {
-    const origin = new URL(req.url).origin;
-    const params = new URLSearchParams();
-    if (start) params.set("since", start.toISOString().slice(0, 10));
-    params.set("until", end.toISOString().slice(0, 10));
-    const demoRes = await fetch(`${origin}/api/clickup/demos/list?${params}`, {
-      cache: "no-store",
-      headers: { Cookie: req.headers.get("cookie") ?? "" },
-    });
-    if (demoRes.ok) {
-      const data = await demoRes.json();
-      demoTasks = data.tasks ?? [];
-    }
-  } catch (err) {
-    console.error("[rep-performance] ClickUp fetch failed:", err);
-  }
-
-  // Fetch GHL calendar events for call counting
-  let allCalendarEvents: Array<{ startTime: string; assignedUserId?: string; calendarId?: string }> = [];
-  try {
-    const locId = locationId();
-    const startMs = start ? start.getTime() : new Date(Date.now() - 90 * 86400000).getTime();
-    const endMs = end.getTime();
-    // Fetch events for all users with ghlUserId
-    const eventPromises = allUsers
-      .filter((u) => u.ghlUserId)
-      .map(async (u) => {
-        try {
-          const data = await ghl.get<{ events?: Array<{ startTime: string }> }>(
-            `/calendars/events?locationId=${locId}&userId=${u.ghlUserId}&startTime=${startMs}&endTime=${endMs}`
-          );
-          return (data.events ?? []).map((e) => ({ ...e, assignedUserId: u.ghlUserId! }));
-        } catch { return []; }
-      });
-    const results = await Promise.all(eventPromises);
-    allCalendarEvents = results.flat();
-  } catch (err) {
-    console.error("[rep-performance] Calendar events fetch failed:", err);
-  }
-
   // Build per-rep metrics
   const reps = await Promise.all(
     allUsers.map(async (user) => {
-      // Calls — count from DB (synced calls) + GHL calendar events (scheduled meetings)
+      // Calls — count from the DB calls table only (synced meet + dialer calls).
+      // We deliberately do NOT also add live calendar events: booked calls are
+      // already in the DB as "meet", so adding them double-counted the tally.
       const callWhere = start
         ? and(eq(calls.repEmail, user.email), gte(calls.startedAt, start), lte(calls.startedAt, end))
         : eq(calls.repEmail, user.email);
       const [callRow] = await db().select({ c: count() }).from(calls).where(callWhere);
-      // Add calendar events for this user
-      const calendarCallCount = user.ghlUserId
-        ? allCalendarEvents.filter((e) => e.assignedUserId === user.ghlUserId).length
-        : 0;
-      const totalCalls = Number(callRow?.c ?? 0) + calendarCallCount;
+      const totalCalls = Number(callRow?.c ?? 0);
 
       // Proposals sent (sentAt within range, created by this user)
       const propSentWhere = start
@@ -171,18 +127,12 @@ export async function GET(req: NextRequest) {
         ? allOpps.filter((o) => o.assignedTo === user.ghlUserId && o.status === "open").length
         : 0;
 
-      // Demos booked (ClickUp tasks where this user is an assignee)
-      const demos = demoTasks.filter((t) =>
-        t.assignees?.some((a) => a.email === user.email)
-      ).length;
-
       return {
         id: user.id,
         name: user.name,
         role: user.role,
         isActive: user.isActive,
         calls: totalCalls,
-        demos,
         proposalsSent: Number(propRow?.c ?? 0),
         dealsClosed: totalClosed,
         closedValue,
