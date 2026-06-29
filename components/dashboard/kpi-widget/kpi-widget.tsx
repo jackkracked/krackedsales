@@ -40,8 +40,12 @@ function subFor(data?: KpiMetricResult): string | undefined {
   return undefined;
 }
 
-// Dashboard metric keys map to admin target keys (same goals the KPIs page uses).
-const TARGET_KEY_ALIAS: Record<string, string> = { mrr: "managementMrr" };
+// Dashboard metric keys map to the business-level admin target keys the KPIs page
+// saves (kpi_targets.metric_key), so a target set on /kpis shows the SAME badge here.
+// Cash Collected is stored as `cashCollected`; without this the dashboard cash card
+// found no target and showed no goal (the /kpis page did). Keep this in sync with the
+// DASH_TO_KPI value bridge in /api/dashboard/kpis so value and target share a source.
+const TARGET_KEY_ALIAS: Record<string, string> = { mrr: "managementMrr", cash: "cashCollected" };
 // Offer-scoped targets are stored as `offer:<id>:<suffix>`; match by suffix.
 const TARGET_OFFER_SUFFIX: Record<string, string> = { roas: "roas", leads: "leads", ad_spend: "adSpend" };
 
@@ -143,12 +147,13 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
 
   return (
     <>
-      <div className="bg-card border border-border rounded-[10px] overflow-hidden shrink-0">
+      <div data-r10n-card className="bg-card border border-border rounded-[10px] overflow-hidden shrink-0">
         {/* Header */}
         <div className="flex items-center justify-between p-5 pb-4">
           <div className="flex items-center gap-2">
-            <BarChart2 className="w-4 h-4 text-muted-foreground" />
+            <BarChart2 data-r10n-section-icon className="w-4 h-4 text-muted-foreground" />
             <h3
+              data-r10n-section-title
               className="text-sm font-semibold text-foreground"
               style={{ fontFamily: "var(--font-heading)" }}
             >
@@ -195,6 +200,7 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
                 loading={isLoading}
                 loadingCount={selectedKeys.length || 3}
                 onMetricClick={(key) => setDetailKey(key)}
+                window={{ start: dateRange.start, end: dateRange.end }}
                 addCell={
                   !isLoading && selectedKeys.length < 8 ? (
                     <AddKpiCell onClick={() => setEditOpen(true)} />
