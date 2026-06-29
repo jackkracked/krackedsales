@@ -7,8 +7,11 @@ import { fmtNumber, type MetricDef, type MetricTarget } from "@/components/kpis/
 import { BalancedMetricGrid, type MetricValue } from "@/components/kpis/balanced-metric-grid";
 import { KpiEditSheet } from "./kpi-edit-sheet";
 import { KpiDetailSheet } from "@/components/kpis/KpiDetailSheet";
+import { KpiConfigurator } from "@/components/kpis/kpi-configurator";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { getDefaults, getKpiDef, getPoolForRole } from "@/lib/dashboard-kpis";
+import { METRIC_CATALOG } from "@/lib/kpi/metric-catalog";
+import type { MetricConfigInput } from "@/lib/kpi/engine/types";
 import type { KpiMetricResult } from "@/app/api/dashboard/kpis/route";
 
 interface KpiWidgetProps {
@@ -62,6 +65,37 @@ function resolveTarget(key: string, targets: Record<string, MetricTarget>): Metr
   return undefined;
 }
 
+// Resolve a dashboard KPI key to the canonical /kpis config key its gear should open
+// (so the dashboard configurator edits the exact same metric the KPIs page does).
+// Only the metrics that have a configurable /kpis counterpart map; the rest return
+// null → no gear (the KPIs page has nothing to configure for them either).
+const CONFIG_KEY_BUSINESS: Record<string, string> = { cash: "cashCollected", mrr: "managementMrr" };
+const CONFIG_KEY_OFFER_BASE: Record<string, string> = { leads: "leads", ad_spend: "adSpend", roas: "roas" };
+function resolveConfigKey(
+  key: string,
+  targets: Record<string, MetricTarget>,
+  funnelId: string | undefined,
+): string | null {
+  if (CONFIG_KEY_BUSINESS[key]) return CONFIG_KEY_BUSINESS[key];
+  const base = CONFIG_KEY_OFFER_BASE[key];
+  if (base) {
+    // Prefer the funnel that already carries this target; else the active funnel.
+    const existing = Object.keys(targets).find((t) => t.endsWith(`:${base}`));
+    if (existing) return existing;
+    return funnelId ? `offer:${funnelId}:${base}` : null;
+  }
+  return null;
+}
+
+/** Friendly title for the configurator, mirroring the /kpis label for the key. */
+function configLabelFor(configKey: string): string {
+  if (configKey.startsWith("offer:")) {
+    const base = configKey.split(":").slice(2).join(":");
+    return METRIC_CATALOG[base]?.label ?? base;
+  }
+  return METRIC_CATALOG[configKey]?.label ?? configKey;
+}
+
 /** Quiet "add a metric" affordance that fills the last balanced slot (until the 8 max). */
 function AddKpiCell({ onClick }: { onClick: () => void }) {
   return (
@@ -111,6 +145,35 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
     enabled: role === "admin",
   });
   const targets = targetsData?.targets ?? {};
+
+  // ── Per-card settings gear (admin) — opens the SAME configurator as /kpis ──────
+  // The metric whose configurator drawer is open (canonical /kpis key, or null).
+  const [configureKey, setConfigureKey] = useState<string | null>(null);
+
+  // Saved configs (existingConfig lookup) + offer funnels (to scope offer metrics).
+  const { data: configsData } = useQuery<{ configs: MetricConfigInput[] }>({
+    queryKey: ["kpi-configs"],
+    queryFn: () => fetch("/api/kpis/configs").then((r) => (r.ok ? r.json() : { configs: [] })),
+    staleTime: 60_000,
+    enabled: role === "admin",
+  });
+  const { data: funnelsData } = useQuery<{ funnels: { id: string; name: string }[] }>({
+    queryKey: ["offer-funnels"],
+    queryFn: () => fetch("/api/kpis/offer-funnels").then((r) => (r.ok ? r.json() : { funnels: [] })),
+    staleTime: 5 * 60_000,
+    enabled: role === "admin",
+  });
+  const funnelId = funnelsData?.funnels?.[0]?.id;
+
+  // Every metric's friendly label, for the configurator's combine/breakdown dropdowns.
+  const availableMetrics = useMemo(
+    () => Object.entries(METRIC_CATALOG).map(([metricKey, v]) => ({ metricKey, label: v.label })),
+    [],
+  );
+  const existingConfig = useMemo(
+    () => (configureKey ? (configsData?.configs ?? []).find((c) => c.metricKey === configureKey) ?? null : null),
+    [configsData, configureKey],
+  );
 
   // Build query params for metric data — pass the real selected date range
   const params = new URLSearchParams({ role, start: dateRange.start, end: dateRange.end });
@@ -191,7 +254,18 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
             const vals: Record<string, MetricValue | undefined> = {};
             for (const key of selectedKeys) {
               const data = kpisData?.metrics?.[key];
-              vals[key] = data ? { value: data.value, spark: data.series, sub: subFor(data), status: data.status, target: resolveTarget(key, targets) } : undefined;
+              // Admin gear → the metric's canonical /kpis config key (null = no gear).
+              const configKey = role === "admin" ? resolveConfigKey(key, targets, funnelId) : null;
+              vals[key] = data ? {
+                value: data.value,
+                spark: data.series,
+                sub: subFor(data),
+                status: data.status,
+                target: resolveTarget(key, targets),
+                configurable: !!configKey,
+                configured: true,
+                onConfigure: configKey ? () => setConfigureKey(configKey) : undefined,
+              } : undefined;
             }
             return (
               <BalancedMetricGrid
@@ -232,6 +306,26 @@ export function KpiWidget({ role, userId, ghlUserId, email }: KpiWidgetProps) {
           ghlUserId={ghlUserId ?? undefined}
           email={email}
           onClose={() => setDetailKey(null)}
+        />
+      )}
+
+      {/* Per-card settings — the exact same configurator the KPIs page uses, so a
+          target/config set here mirrors to /kpis (and back). Admin only. */}
+      {role === "admin" && (
+        <KpiConfigurator
+          metricKey={configureKey ?? ""}
+          metricLabel={configureKey ? configLabelFor(configureKey) : ""}
+          existingConfig={existingConfig}
+          range={{ start: dateRange.start, end: dateRange.end }}
+          availableMetrics={availableMetrics}
+          open={configureKey !== null}
+          onClose={() => setConfigureKey(null)}
+          onSaved={() => {
+            queryClient.invalidateQueries({ queryKey: ["kpi-targets"] });
+            queryClient.invalidateQueries({ queryKey: ["kpi-configs"] });
+            queryClient.invalidateQueries({ queryKey: ["dashboard-kpis"] });
+            queryClient.invalidateQueries({ queryKey: ["kpi-metrics"] });
+          }}
         />
       )}
     </>

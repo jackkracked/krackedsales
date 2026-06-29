@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils/cn";
-import { MetricCell, MetricCellSkeleton, type MetricDef, type MetricTarget, type SparkPoint } from "./metric-cell";
+import { MetricCell, MetricCellSkeleton, type MetricDef, type MetricTarget, type SparkPoint, type DateWindow } from "./metric-cell";
 
 export interface MetricValue {
   value: number | null | undefined;
@@ -11,6 +11,11 @@ export interface MetricValue {
   status?: "ok" | "stale";
   /** Admin-set goal → renders the over/under target badge on the cell. */
   target?: MetricTarget;
+  /** Admin-only KPI-wiring affordances — when set, the cell shows the gear (same
+   *  configurator as the /kpis page). Omitted → cell behaves exactly as before. */
+  configurable?: boolean;
+  configured?: boolean;
+  onConfigure?: () => void;
 }
 
 interface BalancedMetricGridProps {
@@ -22,6 +27,8 @@ interface BalancedMetricGridProps {
   addCell?: ReactNode;
   loading?: boolean;
   loadingCount?: number;
+  /** The reporting window the grid is showing — paces each cell's target badge. */
+  window?: DateWindow;
 }
 
 /**
@@ -44,6 +51,7 @@ export function BalancedMetricGrid({
   addCell,
   loading,
   loadingCount = 4,
+  window,
 }: BalancedMetricGridProps) {
   if (loading) {
     return (
@@ -65,6 +73,10 @@ export function BalancedMetricGrid({
         sub={mv?.sub}
         status={mv?.status}
         target={mv?.target}
+        configurable={mv?.configurable}
+        configured={mv?.configured}
+        onConfigure={mv?.onConfigure}
+        window={window}
         onClick={onMetricClick ? () => onMetricClick(def.key) : undefined}
         onManualSave={def.manual && onManualSave ? (v) => onManualSave(def.key, v) : undefined}
       />
@@ -84,7 +96,7 @@ function Rows({ rows, cells }: { rows: number[]; cells: ReactNode[] }) {
     offset += count;
   }
   return (
-    <div>
+    <div data-r10n-metric-rows>
       {slices.map((rowCells, ri) => (
         <div
           key={ri}

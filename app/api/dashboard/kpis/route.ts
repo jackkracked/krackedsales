@@ -462,9 +462,12 @@ export async function GET(req: NextRequest) {
   try {
     const enabled = (await listConfigs()).filter((c) => c.enabled);
     if (enabled.length) {
+      // The dashboard "MRR" card represents Management MRR (value + target + gear all
+      // aligned to managementMrr). The base compute is already subscriptions-only
+      // (= Management MRR); this keeps the overlay on the same metric so it can't drift.
       const DASH_TO_KPI: Record<string, string> = {
         cash: "cashCollected",
-        mrr: "totalMrr",
+        mrr: "managementMrr",
         ad_spend: "adSpend",
       };
       const engineVals = await getMetricValues(
