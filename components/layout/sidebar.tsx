@@ -151,8 +151,10 @@ export function Sidebar({ userRole }: SidebarProps) {
           Kracked Sales
         </Link>
 
-        {/* Controls: notifications + collapse — only when expanded. */}
-        <div className={cn("flex items-center gap-0.5 ml-auto transition-all duration-200", sidebarCollapsed ? "w-0 overflow-hidden opacity-0 pointer-events-none" : "opacity-100")}>
+        {/* Controls: notifications + collapse — only when expanded. ml-auto lives in
+            the expanded branch ONLY: an auto margin overrides justify-center and would
+            otherwise shove the collapsed K mark to the left edge instead of centering it. */}
+        <div className={cn("flex items-center gap-0.5 transition-all duration-200", sidebarCollapsed ? "w-0 overflow-hidden opacity-0 pointer-events-none" : "ml-auto opacity-100")}>
           <NotificationBell />
           <button
             onClick={toggleSidebarCollapsed}
