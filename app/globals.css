@@ -1933,13 +1933,24 @@ h1, h2, h3, h4, h5, h6 {
 [data-theme="r10n"] [data-r10n-stage-pill][style*="#2563EB"] {
   color: #1D4ED8 !important;
 }
-/* Active (filtered-to) stage pill in the summary bar: lime hairline + faint lime
-   wash + a calm lift, replacing the loud navy 2px ring. Wins over the hue tint. */
+/* Active (filtered-to) stage pill: keep the pill's OWN hue tint, but wrap it in a
+   hard obsidian frame + soft halo and prepend a filled hue dot. The selected stage
+   then reads as a different KIND of object (a framed token) against the row of pale
+   chips, so it's unmistakable on any hue without graying the others. The obsidian
+   ring is delivered via box-shadow (no 1px layout shift) and wins over the Tailwind
+   ring-2 the JSX sets. Text colour is left to the base rule + the #2563EB ink guard. */
 [data-theme="r10n"] [data-r10n-stage-pill][data-active="true"] {
-  background-color: rgba(37, 99, 235, 0.10) !important;
-  border-color: color-mix(in srgb, var(--r10n-signal) 60%, transparent) !important;
-  color: #1D4ED8 !important;
-  box-shadow: var(--shadow-flat) !important;
+  background-color: color-mix(in srgb, var(--_stage) 18%, transparent) !important;
+  border-color: color-mix(in srgb, var(--_stage) 55%, transparent) !important;
+  box-shadow: 0 0 0 1.5px #0B0B0D, 0 0 0 5px rgba(11, 11, 13, 0.06), 0 1px 2px rgba(11, 11, 13, 0.10) !important;
+}
+[data-theme="r10n"] [data-r10n-stage-pill][data-active="true"]::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background-color: var(--_stage);
+  flex: 0 0 auto;
 }
 [data-theme="r10n"] [data-r10n-stage-count] {
   font-variant-numeric: tabular-nums;

@@ -113,7 +113,6 @@ export function ContactsClient() {
   const [auditContact, setAuditContact]       = useState<UnifiedContact | null>(null);
   const [demoContact, setDemoContact]         = useState<UnifiedContact | null>(null);
   const [stageContact, setStageContact]       = useState<UnifiedContact | null>(null);
-  const [stageBar, setStageBar]               = useState<Array<[string, number]>>([]);
   const [openContactTab, setOpenContactTab]   = useState<"timeline" | undefined>(undefined);
   const [smartLists, setSmartLists]           = useState<SmartList[]>([]);
   const [activeListId, setActiveListId]       = useState<string | null>(null);
@@ -176,7 +175,7 @@ export function ContactsClient() {
     ...(rules.length  && { rules: JSON.stringify(rules) }),
   });
 
-  const { data, isLoading, isFetching } = useQuery<{ contacts: UnifiedContact[]; total: number }>({
+  const { data, isLoading, isFetching } = useQuery<{ contacts: UnifiedContact[]; total: number; stageCounts?: Record<string, number> }>({
     queryKey: ["contacts", params.toString()],
     queryFn:  () => fetch(`/api/contacts?${params}`).then((r) => r.json()),
     staleTime: 30_000,
@@ -271,7 +270,7 @@ export function ContactsClient() {
 
   // Stage moved — optimistically recolor the pill, then reconcile from the server.
   function handleStageMoved(uid: string, newStageId: string, newStageName: string) {
-    queryClient.setQueryData<{ contacts: UnifiedContact[]; total: number }>(
+    queryClient.setQueryData<{ contacts: UnifiedContact[]; total: number; stageCounts?: Record<string, number> }>(
       ["contacts", params.toString()],
       (old) => old
         ? { ...old, contacts: old.contacts.map((c) => c.uid === uid ? { ...c, stage: newStageName, stageId: newStageId, daysInCurrentStage: 0 } : c) }
@@ -280,21 +279,16 @@ export function ContactsClient() {
     queryClient.invalidateQueries({ queryKey: ["contacts"] });
   }
 
-  // Stage summary counts
-  const stageCounts = new Map<string, number>();
-  for (const c of contacts) {
-    const s = c.stage ?? "Unknown";
-    stageCounts.set(s, (stageCounts.get(s) ?? 0) + 1);
-  }
-
-  // Keep a stable set of stage pills (captured when not stage-filtered) so you can
-  // switch between stages even after clicking one.
-  useEffect(() => {
-    if (filters.stageName || isLoading) return;
-    const m = new Map<string, number>();
-    for (const c of contacts) { const s = c.stage ?? "Unknown"; m.set(s, (m.get(s) ?? 0) + 1); }
-    if (m.size) setStageBar([...m.entries()].sort((a, b) => b[1] - a[1]));
-  }, [contacts, filters.stageName, isLoading]);
+  // Stage summary pills: render the server's authoritative per-stage totals (the
+  // whole pipeline population, not the current 50-row page), so each pill's number
+  // is the true count in that stage and matches the filtered list exactly. The
+  // server computes these over the unfiltered set, so the bar stays stable and
+  // accurate even while a stage filter is active.
+  const stageBar: Array<[string, number]> = Object.entries(
+    (data?.stageCounts ?? {}) as Record<string, number>
+  )
+    .filter(([s]) => s && s !== "Unknown")
+    .sort((a, b) => b[1] - a[1]);
 
   return (
     <div data-r10n-contacts className="flex flex-col flex-1 min-h-0 gap-2.5">
@@ -452,9 +446,9 @@ export function ContactsClient() {
       </div>
 
       {/* ── Stage summary bar — click a stage to filter the list to it ── */}
-      {(stageBar.length > 0 || stageCounts.size > 0) && (
+      {stageBar.length > 0 && (
         <div data-r10n-stagebar className="flex items-center gap-2 overflow-x-auto shrink-0">
-          {(stageBar.length > 0 ? stageBar : [...stageCounts.entries()]).map(([stage, count]) => {
+          {stageBar.map(([stage, count]) => {
             const active = filters.stageName === stage;
             return (
               <button

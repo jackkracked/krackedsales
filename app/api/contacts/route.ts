@@ -501,6 +501,17 @@ export async function GET(req: NextRequest) {
 
     let all: UnifiedContact[] = [...ghlUnified, ...clUnified];
 
+    // Authoritative per-stage totals over the FULL population, computed BEFORE any
+    // filter or pagination narrows `all`. The stage-summary pills render these, so
+    // each pill shows the TRUE number of contacts in that stage, not a per-page
+    // sample. Computed once here regardless of the active stage filter, so the bar
+    // stays accurate and you can switch between stages.
+    const stageCounts: Record<string, number> = {};
+    for (const c of all) {
+      if (!c.stage) continue;
+      stageCounts[c.stage] = (stageCounts[c.stage] ?? 0) + 1;
+    }
+
     // ─── Filters ──────────────────────────────────────────────────────────────
     if (search) {
       all = all.filter((c) =>
@@ -537,7 +548,7 @@ export async function GET(req: NextRequest) {
     const total = all.length;
     const contacts = all.slice((page - 1) * pageSize, page * pageSize);
 
-    return NextResponse.json({ contacts, total, page, pageSize });
+    return NextResponse.json({ contacts, total, page, pageSize, stageCounts });
   } catch (err) {
     console.error("[GET /api/contacts]", err);
     return NextResponse.json({ error: "Failed to fetch contacts" }, { status: 500 });
