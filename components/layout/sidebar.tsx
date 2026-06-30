@@ -117,56 +117,51 @@ export function Sidebar({ userRole }: SidebarProps) {
       )}
       style={{ backgroundColor: "var(--sidebar)" }}
     >
-      {/* Logo + collapse toggle */}
-      <div className={cn("flex items-center h-12 border-b border-border shrink-0", sidebarCollapsed ? "justify-center px-0" : "px-3 gap-2")}>
-        {sidebarCollapsed ? (
-          /* Collapsed: K mark doubles as expand button */
+      {/* Logo + collapse toggle — the K mark shows ONLY when collapsed and scales/
+          fades away when expanding, instead of a hard DOM swap. */}
+      <div className={cn("flex items-center h-12 border-b border-border shrink-0 overflow-hidden", sidebarCollapsed ? "justify-center px-0" : "px-3 gap-2")}>
+        {/* K mark: the expand button when collapsed; smoothly disappears when expanded. */}
+        <button
+          onClick={toggleSidebarCollapsed}
+          aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          data-r10n-kmark
+          className={cn(
+            "group flex h-[26px] shrink-0 items-center justify-center overflow-hidden rounded-[7px] bg-primary text-primary-foreground select-none",
+            "transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-primary/80",
+            sidebarCollapsed ? "w-[26px] scale-100 opacity-100" : "w-0 scale-50 opacity-0 pointer-events-none",
+          )}
+        >
+          <span className="group-hover:hidden font-black" style={{ fontFamily: "var(--font-heading)", fontSize: 15, letterSpacing: "-0.04em" }}>
+            K
+          </span>
+          <PanelLeftOpen className="hidden group-hover:block w-3.5 h-3.5" />
+        </button>
+
+        {/* Wordmark: the brand when expanded; collapses away when collapsed. */}
+        <Link
+          href="/dashboard"
+          aria-label="Kracked Sales"
+          data-r10n-wordmark
+          className={cn(
+            "text-sm font-bold text-primary tracking-tight whitespace-nowrap overflow-hidden transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+            sidebarCollapsed ? "max-w-0 opacity-0" : "max-w-[140px] opacity-100",
+          )}
+          style={{ fontFamily: "var(--font-heading)" }}
+        >
+          Kracked Sales
+        </Link>
+
+        {/* Controls: notifications + collapse — only when expanded. */}
+        <div className={cn("flex items-center gap-0.5 ml-auto transition-all duration-200", sidebarCollapsed ? "w-0 overflow-hidden opacity-0 pointer-events-none" : "opacity-100")}>
+          <NotificationBell />
           <button
             onClick={toggleSidebarCollapsed}
-            aria-label="Expand sidebar"
-            data-r10n-kmark
-            className="group flex items-center justify-center rounded-[7px] bg-primary text-primary-foreground select-none transition-colors hover:bg-primary/80"
-            style={{ width: 26, height: 26 }}
+            className="p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Collapse sidebar"
           >
-            <span
-              className="group-hover:hidden font-black"
-              style={{ fontFamily: "var(--font-heading)", fontSize: 15, letterSpacing: "-0.04em" }}
-            >
-              K
-            </span>
-            <PanelLeftOpen className="hidden group-hover:block w-3.5 h-3.5" />
+            <PanelLeftClose className="w-3.5 h-3.5" />
           </button>
-        ) : (
-          <>
-            {/* Expanded: K is a dashboard link */}
-            <Link href="/dashboard" className="shrink-0" aria-label="Kracked Sales">
-              <span
-                data-r10n-kmark
-                className="flex items-center justify-center rounded-[7px] bg-primary text-primary-foreground font-black tracking-tighter select-none"
-                style={{ width: 26, height: 26, fontFamily: "var(--font-heading)", fontSize: 15, letterSpacing: "-0.04em" }}
-              >
-                K
-              </span>
-            </Link>
-            <span
-              data-r10n-wordmark
-              className="text-sm font-bold text-primary tracking-tight whitespace-nowrap overflow-hidden max-w-[140px] opacity-100 transition-all duration-200 ease-in-out"
-              style={{ fontFamily: "var(--font-heading)" }}
-            >
-              Kracked Sales
-            </span>
-            <div className="flex items-center gap-0.5 ml-auto">
-              <NotificationBell />
-              <button
-                onClick={toggleSidebarCollapsed}
-                className="p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors"
-                aria-label="Collapse sidebar"
-              >
-                <PanelLeftClose className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </>
-        )}
+        </div>
       </div>
 
       {/* Navigation */}

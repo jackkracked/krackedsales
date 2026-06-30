@@ -12,11 +12,13 @@ export function CampaignRail({
   campaigns,
   selectedId,
   onSelect,
+  onNewCampaign,
   isAdmin,
 }: {
   campaigns: DialerCampaign[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onNewCampaign: () => void;
   isAdmin: boolean;
 }) {
   return (
@@ -25,15 +27,14 @@ export function CampaignRail({
         <h2 className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground/70" style={{ fontFamily: "var(--font-heading)" }}>
           Campaigns
         </h2>
-        {isAdmin && (
-          <button
+        <button
             type="button"
             title="New campaign"
+            onClick={onNewCampaign}
             className="flex h-6 w-6 items-center justify-center rounded-[7px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
           >
             <Plus className="h-4 w-4" />
           </button>
-        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-2.5 pb-3 space-y-1.5">
@@ -65,7 +66,7 @@ export function CampaignRail({
 
               {/* progress */}
               <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-muted">
-                <div className="h-full rounded-full bg-success transition-all" style={{ width: `${pct}%` }} />
+                <div className="h-full rounded-full bg-info transition-all" style={{ width: `${pct}%` }} />
               </div>
               <div className="mt-1.5 flex items-center justify-between">
                 <span className="text-[10px] font-medium text-muted-foreground tabular-nums">

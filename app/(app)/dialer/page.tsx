@@ -6,6 +6,7 @@ export const metadata = { title: "Dialer — Kracked Sales" };
 export default async function DialerPage() {
   const user = await getSessionUser().catch(() => null);
   const role = user?.role === "admin" ? "admin" : "rep";
+  const userName = user?.name ?? "You";
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -18,7 +19,7 @@ export default async function DialerPage() {
         </p>
       </header>
       <div className="min-h-0 flex-1 border-t border-border">
-        <DialerClient role={role} />
+        <DialerClient role={role} userName={userName} />
       </div>
     </div>
   );

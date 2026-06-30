@@ -46,6 +46,11 @@ export function DialDock(props: DialDockProps) {
   const { state, number, contactName, attempt, muted, durationSec } = props;
   const [showKeypadInCall, setShowKeypadInCall] = useState(false);
   const display = formatPhone(number);
+  // Keep the number on ONE line — shrink the type as it gets longer instead of wrapping.
+  const len = display.length;
+  const numSize = !display
+    ? "text-[26px]"
+    : len <= 13 ? "text-[28px]" : len <= 17 ? "text-[24px]" : len <= 21 ? "text-[20px]" : "text-[16px]";
 
   return (
     <div
@@ -70,11 +75,12 @@ export function DialDock(props: DialDockProps) {
         )}
 
         {/* The number — big, tabular, instrument-grade */}
-        <div className="mt-2.5 flex items-center justify-center gap-2 min-h-[40px]">
+        <div className="mt-2.5 flex items-center justify-center gap-2 min-h-[40px] overflow-hidden">
           <span
             className={cn(
-              "font-mono text-[28px] leading-none tracking-tight text-foreground tabular-nums",
-              !display && "text-muted-foreground/30",
+              "font-mono leading-none tracking-tight tabular-nums whitespace-nowrap",
+              numSize,
+              display ? "text-foreground" : "text-muted-foreground/30",
             )}
           >
             {display || "Enter a number"}
@@ -148,10 +154,9 @@ export function DialDock(props: DialDockProps) {
             {showKeypadInCall ? (
               <Keypad onPress={props.onPress} />
             ) : (
-              <div className="grid grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-2 gap-2.5">
                 <CallControl label={muted ? "Unmute" : "Mute"} active={muted} onClick={props.onToggleMute} icon={muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />} />
                 <CallControl label="Keypad" active={showKeypadInCall} onClick={() => setShowKeypadInCall(true)} icon={<Grid3x3 className="h-5 w-5" />} />
-                <CallControl label="Notes" onClick={() => {}} icon={<span className="text-[16px] font-bold">＋</span>} />
               </div>
             )}
 
