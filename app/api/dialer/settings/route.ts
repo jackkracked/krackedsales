@@ -92,10 +92,14 @@ export async function POST(req: NextRequest) {
   let twimlAppSid = existing?.twimlAppSid ?? null;
 
   // 1) Validate the credentials against the live Twilio API before saving anything.
+  //    Use a call a Standard API Key is actually allowed to make. A bare
+  //    Account-resource fetch returns 401 for API keys (only the parent auth
+  //    token can read it), so we list Applications instead: same auth check,
+  //    without the false "bad credentials" negative.
   let client: ReturnType<typeof twilioClient>;
   try {
     client = twilioClient({ accountSid, apiKeySid, apiKeySecret, twimlAppSid: null, callerId });
-    await client.api.v2010.accounts(accountSid).fetch();
+    await client.applications.list({ limit: 1 });
   } catch {
     return NextResponse.json({ error: "Could not connect to Twilio — check the credentials" }, { status: 400 });
   }
