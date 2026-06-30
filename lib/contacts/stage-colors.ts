@@ -51,7 +51,7 @@ export function stageStatus(stage: string | null | undefined): "won" | "lost" | 
 /** R10N palette anchors (mirror the [data-theme="r10n"] tokens in globals.css). */
 const R10N_INFO = "#2A6FDB"; // blue / sky / indigo / violet family
 const R10N_POSITIVE = "#1FA463"; // green / emerald / teal family (in-flight)
-const R10N_SIGNAL = "#C7FF41"; // lime — reserved for closing "won"/"proposal"/"sale" stages
+const R10N_SIGNAL = "#2563EB"; // signal blue (matches --r10n-signal); was lime #C7FF41 before the accent refresh. Closing "won"/"proposal"/"sale" stages. The globals.css legibility guard `[data-r10n-stage-pill][style*="#2563EB"]` darkens this to readable #1D4ED8 text.
 const R10N_WARNING = "#E08B00"; // amber / orange / yellow family
 const R10N_NEGATIVE = "#D7263D"; // red / rose family
 const R10N_STEEL = "#6E7179"; // gray / slate / zinc / neutral / muted family
