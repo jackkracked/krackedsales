@@ -3,7 +3,16 @@
 import { useState } from "react";
 import { Phone, PhoneOff, Delete, Mic, MicOff, Grid3x3, X, Circle } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { Avatar } from "@/components/ui/avatar";
 import { Keypad } from "./keypad";
+
+/** The loaded contact's identity, shown in the dock between the number and keypad. */
+export interface DockIdentity {
+  name: string;
+  company?: string;
+  email?: string;
+  stage?: string;
+}
 
 export type CallState = "idle" | "dialing" | "connected";
 
@@ -31,6 +40,7 @@ interface DialDockProps {
   state: CallState;
   number: string;
   contactName?: string;
+  identity?: DockIdentity;
   attempt?: { n: number; max: number };
   muted: boolean;
   durationSec: number;
@@ -43,7 +53,7 @@ interface DialDockProps {
 }
 
 export function DialDock(props: DialDockProps) {
-  const { state, number, contactName, attempt, muted, durationSec } = props;
+  const { state, number, contactName, identity, attempt, muted, durationSec } = props;
   const [showKeypadInCall, setShowKeypadInCall] = useState(false);
   const display = formatPhone(number);
   // Keep the number on ONE line — shrink the type as it gets longer instead of wrapping.
@@ -98,10 +108,28 @@ export function DialDock(props: DialDockProps) {
         </div>
       </div>
 
-      <div className="flex-1 px-5 pb-5 flex flex-col justify-end">
-        {/* ── IDLE: keypad + green Dial ──────────────────────────────────── */}
+      <div className="flex-1 px-5 pb-5 flex flex-col">
+        {/* ── IDLE: contact identity fills the gap, keypad + Call pinned below ── */}
         {state === "idle" && (
           <>
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center py-3">
+              {identity && (
+                <div className="flex flex-col items-center gap-2.5 text-center motion-safe:animate-[dialerFade_220ms_ease-out]">
+                  <span className="relative">
+                    <span className="pointer-events-none absolute -inset-2 rounded-full bg-gradient-to-br from-info/25 via-info/5 to-transparent blur-md" />
+                    <Avatar
+                      name={identity.name}
+                      size={64}
+                      variant="contact"
+                      className="relative text-[22px] ring-[3px] ring-white shadow-[0_6px_18px_-6px_rgba(28,35,51,0.35)]"
+                    />
+                  </span>
+                  {identity.company && <p className="max-w-[240px] truncate text-[13.5px] font-semibold text-foreground">{identity.company}</p>}
+                  {identity.stage && <span className="rounded-full bg-info-subtle px-2.5 py-1 text-[10.5px] font-semibold text-info">{identity.stage}</span>}
+                  {identity.email && <p className="max-w-[240px] truncate text-[11px] text-muted-foreground">{identity.email}</p>}
+                </div>
+              )}
+            </div>
             <Keypad onPress={props.onPress} />
             <button
               type="button"
@@ -123,7 +151,7 @@ export function DialDock(props: DialDockProps) {
 
         {/* ── DIALING (ringing) ──────────────────────────────────────────── */}
         {state === "dialing" && (
-          <div className="flex flex-col items-center justify-center gap-6 py-8">
+          <div className="flex flex-1 flex-col items-center justify-center gap-6 py-8">
             <span className="relative flex h-20 w-20 items-center justify-center">
               <span className="absolute inline-flex h-full w-full rounded-full bg-success/20 motion-safe:animate-ping" />
               <span className="relative inline-flex h-16 w-16 items-center justify-center rounded-full bg-success/12 text-success">
@@ -143,7 +171,7 @@ export function DialDock(props: DialDockProps) {
 
         {/* ── CONNECTED: live in-call panel ─────────────────────────────── */}
         {state === "connected" && (
-          <div className="flex flex-col gap-5">
+          <div className="flex flex-1 flex-col justify-end gap-5">
             <div className="flex flex-col items-center gap-2 pt-2">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive/8 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-destructive">
                 <Circle className="h-2 w-2 fill-current motion-safe:animate-pulse" /> Rec

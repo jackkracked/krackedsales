@@ -77,7 +77,11 @@ function AddToDialerModal({
   const [newMaxAttempts, setNewMaxAttempts] = useState<3 | 5 | 7>(3);
   const [result, setResult] = useState<{ added: number; submitted: number } | null>(null);
 
-  const count = contacts.length;
+  // Only contacts WITH a phone number can be dialed. Filter them out (and tell the
+  // user how many were skipped) instead of silently queueing un-dialable rows.
+  const dialable = contacts.filter((c) => typeof c.phone === "string" && c.phone.trim() !== "");
+  const skipped = contacts.length - dialable.length;
+  const count = dialable.length;
 
   const { data, isLoading } = useQuery<{ campaigns: DialerCampaignRow[] }>({
     queryKey: ["dialer-campaigns"],
@@ -113,7 +117,7 @@ function AddToDialerModal({
       fetch(`/api/dialer/campaigns/${campaignId}/contacts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contacts }),
+        body: JSON.stringify({ contacts: dialable }),
       }).then(async (r) => {
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to add contacts");
         return r.json();
@@ -138,7 +142,7 @@ function AddToDialerModal({
   // After a campaign is created, the chosen target is a real id (not NEW_ROW),
   // so the primary becomes "Add to campaign".
   const primaryLabel = isNew ? "Create campaign" : "Add to campaign";
-  const primaryDisabled = isNew ? !canCreate : !selectedId;
+  const primaryDisabled = isNew ? !canCreate : (!selectedId || dialable.length === 0);
   const primaryBusy = createMutation.isPending || addMutation.isPending;
   const errorMsg = createMutation.error?.message ?? addMutation.error?.message ?? null;
 
@@ -182,6 +186,12 @@ function AddToDialerModal({
             </div>
           ) : (
             <>
+              {skipped > 0 && (
+                <div className="mb-2 rounded-[9px] border border-warning/30 bg-warning-subtle px-3 py-2 text-[11.5px] font-medium leading-snug text-warning">
+                  {skipped} of {contacts.length} selected {skipped === 1 ? "contact has" : "contacts have"} no phone number
+                  {dialable.length === 0 ? " — there's nothing to add." : " and won't be added."}
+                </div>
+              )}
               {isLoading ? (
                 Array.from({ length: 3 }).map((_, i) => (
                   <div key={i} className="h-[52px] animate-pulse rounded-[10px] bg-muted/50" />

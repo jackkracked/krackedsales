@@ -54,41 +54,66 @@ export function DialerProvider({ children, userEmail }: { children: React.ReactN
     call.on("error", (e: unknown) => { console.error("[dialer] call error", e); end(); });
   }, []);
 
-  // Initialise the Twilio Device once (browser-only; dynamically imported).
-  useEffect(() => {
-    let cancelled = false;
-    let device: TDevice | null = null;
-    (async () => {
-      try {
-        const res = await fetch("/api/dialer/token");
-        const data = res.ok ? await res.json() : null;
-        if (!data?.configured || !data?.token) { if (!cancelled) setStatus("not_configured"); return; }
-        const { Device } = await import("@twilio/voice-sdk");
-        if (cancelled) return;
-        device = new Device(data.token, { logLevel: "error" });
-        deviceRef.current = device;
-        device.on("registered", () => { if (!cancelled) setStatus("ready"); });
-        device.on("error", (e: unknown) => console.error("[dialer] device error", e));
-        device.on("tokenWillExpire", async () => {
-          try { const r = await fetch("/api/dialer/token"); const d = await r.json(); if (d?.token) device?.updateToken(d.token); } catch { /* ignore */ }
-        });
-        device.on("incoming", (call: TCall) => {
-          incomingRef.current = call;
-          setIncoming({ from: (call.parameters?.From as string) ?? "Unknown" });
-          const clear = () => { setIncoming(null); incomingRef.current = null; };
-          call.on("cancel", clear);
-          call.on("disconnect", clear);
-          call.on("reject", clear);
-        });
-        await device.register();
-        if (!cancelled) setStatus("ready");
-      } catch (e) {
-        console.error("[dialer] init failed", e);
-        if (!cancelled) setStatus("error");
+  const mountedRef = useRef(true);
+  const initingRef = useRef(false);
+
+  // Build the Twilio Device from a fresh token. Safe to call again to recover from a
+  // stale "not_configured"/"error" (e.g. Twilio got connected while this tab was open).
+  const initDevice = useCallback(async () => {
+    if (deviceRef.current || initingRef.current) return;
+    initingRef.current = true;
+    try {
+      const res = await fetch("/api/dialer/token");
+      const data = res.ok ? await res.json() : null;
+      if (!data?.configured || !data?.token) {
+        if (mountedRef.current) setStatus("not_configured");
+        initingRef.current = false;
+        return;
       }
-    })();
-    return () => { cancelled = true; try { device?.destroy(); } catch { /* ignore */ } deviceRef.current = null; };
+      const { Device } = await import("@twilio/voice-sdk");
+      if (!mountedRef.current) { initingRef.current = false; return; }
+      const device = new Device(data.token, { logLevel: "error" });
+      deviceRef.current = device;
+      device.on("registered", () => { if (mountedRef.current) setStatus("ready"); });
+      device.on("error", (e: unknown) => console.error("[dialer] device error", e));
+      device.on("tokenWillExpire", async () => {
+        try { const r = await fetch("/api/dialer/token"); const d = await r.json(); if (d?.token) device.updateToken(d.token); } catch { /* ignore */ }
+      });
+      device.on("incoming", (call: TCall) => {
+        incomingRef.current = call;
+        setIncoming({ from: (call.parameters?.From as string) ?? "Unknown" });
+        const clear = () => { setIncoming(null); incomingRef.current = null; };
+        call.on("cancel", clear);
+        call.on("disconnect", clear);
+        call.on("reject", clear);
+      });
+      await device.register();
+      if (mountedRef.current) setStatus("ready");
+    } catch (e) {
+      console.error("[dialer] init failed", e);
+      if (mountedRef.current) setStatus("error");
+      initingRef.current = false; // allow a retry on next focus
+    }
   }, []);
+
+  // Initialise once on mount; clean up the device on unmount.
+  useEffect(() => {
+    mountedRef.current = true;
+    void initDevice();
+    return () => { mountedRef.current = false; try { deviceRef.current?.destroy(); } catch { /* ignore */ } deviceRef.current = null; initingRef.current = false; };
+  }, [initDevice]);
+
+  // Recover a stale "not_configured"/"error" when the tab regains focus, so connecting
+  // Twilio elsewhere and returning to the dialer picks it up without a manual reload.
+  useEffect(() => {
+    function recheck() {
+      if (document.visibilityState !== "visible") return;
+      if (!deviceRef.current && (status === "not_configured" || status === "error")) void initDevice();
+    }
+    window.addEventListener("focus", recheck);
+    document.addEventListener("visibilitychange", recheck);
+    return () => { window.removeEventListener("focus", recheck); document.removeEventListener("visibilitychange", recheck); };
+  }, [status, initDevice]);
 
   // Live duration tick while connected.
   useEffect(() => {

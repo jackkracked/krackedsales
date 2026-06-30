@@ -99,22 +99,40 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ con
   });
 }
 
-async function assembleMessages(contactId: string): Promise<{ dir: "in" | "out"; body: string; time: string }[]> {
+interface DialerMessage {
+  id?: string;
+  dir: "in" | "out";
+  body: string;
+  time: string;
+  messageType?: string;
+  subject?: string;
+  emailMessageId?: string;
+}
+
+async function assembleMessages(contactId: string): Promise<DialerMessage[]> {
   try {
     const conv = await ghl.get<{ conversations?: Array<{ id: string }> }>(
       `/conversations/search?locationId=${locationId()}&contactId=${contactId}&limit=1`,
     );
     const convId = conv.conversations?.[0]?.id;
     if (!convId) return [];
-    const res = await ghl.get<{ messages?: { messages?: Array<{ direction?: string; body?: string; message?: string; dateAdded?: string }> } }>(
+    const res = await ghl.get<{ messages?: { messages?: Array<{
+      id?: string; direction?: string; body?: string; message?: string; dateAdded?: string;
+      messageType?: string; emailMessageId?: string; meta?: { email?: { subject?: string; messageIds?: string[] } };
+    }> } }>(
       `/conversations/${convId}/messages`,
     );
     const list = res.messages?.messages ?? [];
     return list.slice(0, 8).reverse().map((m) => ({
+      id: m.id,
       dir: (m.direction === "inbound" ? "in" : "out") as "in" | "out",
       body: (m.body || m.message || "").trim(),
       time: rel(m.dateAdded),
-    })).filter((m) => m.body);
+      messageType: m.messageType,
+      subject: m.meta?.email?.subject,
+      emailMessageId: m.emailMessageId ?? m.meta?.email?.messageIds?.[0],
+    // Keep emails even when their text body is empty (they render from fetched HTML).
+    })).filter((m) => m.body || m.messageType === "TYPE_EMAIL");
   } catch {
     return [];
   }

@@ -14,7 +14,7 @@ export interface DialerContact {
   tags: string[];
   attempts: number;
   qualification: { q: string; a: string }[];
-  messages: { dir: "in" | "out"; body: string; time: string }[];
+  messages: { id?: string; dir: "in" | "out"; body: string; time: string; messageType?: string; subject?: string; emailMessageId?: string }[];
   notes: { author: string; body: string; time: string }[];
   timeline: { label: string; time: string }[];
   lastCall?: { when: string; summary: string; sentiment: Sentiment; objection: string | null };

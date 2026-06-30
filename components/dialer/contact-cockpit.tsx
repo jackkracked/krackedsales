@@ -3,7 +3,10 @@
 import { useState } from "react";
 import { Mail, Phone, Play, MessageSquare, FileText, Activity, ListChecks, Sparkles, SkipForward, Users, Presentation, ListTodo, ClipboardCheck, Eye, ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
-import { QuickActionModal, type QuickActionKind } from "./quick-action-modal";
+import { CreateTaskModal } from "@/components/shared/create-task-modal";
+import { CreateDemoModal } from "@/components/shared/create-demo-modal";
+import { CreateAuditModal } from "@/components/shared/create-audit-modal";
+import { EmailCard } from "./email-card";
 import type { CampaignDetail, DialerContact, RosterContact, Sentiment } from "./mock-data";
 
 const SENTIMENT: Record<Sentiment, { label: string; cls: string }> = {
@@ -43,7 +46,7 @@ export function ContactCockpit({
 
 /* ── Loaded contact: everything, no navigating away ───────────────────────── */
 function LoadedContact({ contact, isPreview, onSkip, onBack, onToast }: { contact: DialerContact; isPreview: boolean; onSkip: () => void; onBack: () => void; onToast: (m: string) => void }) {
-  const [quickAction, setQuickAction] = useState<QuickActionKind | null>(null);
+  const [activeModal, setActiveModal] = useState<"demo" | "task" | "audit" | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [addedNotes, setAddedNotes] = useState<{ author: string; body: string; time: string }[]>([]);
   const notes = [...addedNotes, ...contact.notes];
@@ -92,9 +95,9 @@ function LoadedContact({ contact, isPreview, onSkip, onBack, onToast }: { contac
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2">
-          <ActionBtn icon={<Presentation className="h-3.5 w-3.5" />} label="Create demo" onClick={() => setQuickAction("demo")} />
-          <ActionBtn icon={<ListTodo className="h-3.5 w-3.5" />} label="Create task" onClick={() => setQuickAction("task")} />
-          <ActionBtn icon={<ClipboardCheck className="h-3.5 w-3.5" />} label="Create audit" onClick={() => setQuickAction("audit")} />
+          <ActionBtn icon={<Presentation className="h-3.5 w-3.5" />} label="Create demo" onClick={() => setActiveModal("demo")} />
+          <ActionBtn icon={<ListTodo className="h-3.5 w-3.5" />} label="Create task" onClick={() => setActiveModal("task")} />
+          <ActionBtn icon={<ClipboardCheck className="h-3.5 w-3.5" />} label="Create audit" onClick={() => setActiveModal("audit")} />
         </div>
       </div>
 
@@ -127,33 +130,33 @@ function LoadedContact({ contact, isPreview, onSkip, onBack, onToast }: { contac
           <Section icon={<MessageSquare className="h-3.5 w-3.5" />} title="Conversation">
             {contact.messages.length ? (
               <div className="space-y-2">
-                {contact.messages.map((m, i) => (
-                  <div key={i} className={cn("flex", m.dir === "out" ? "justify-end" : "justify-start")}>
-                    <div className={cn("max-w-[88%] rounded-[12px] px-3 py-2 text-[12.5px] leading-snug", m.dir === "out" ? "bg-info/8 text-foreground rounded-br-[4px]" : "bg-muted text-foreground rounded-bl-[4px]")}>
-                      {m.body}
-                      <span className="mt-1 block text-[9.5px] text-muted-foreground/70">{m.time}</span>
+                {contact.messages.map((m, i) =>
+                  m.messageType === "TYPE_EMAIL" ? (
+                    <EmailCard key={m.id ?? i} subject={m.subject || "Email"} fetchId={m.emailMessageId || m.id} dir={m.dir} time={m.time} fallbackBody={m.body} />
+                  ) : (
+                    <div key={m.id ?? i} className={cn("flex", m.dir === "out" ? "justify-end" : "justify-start")}>
+                      <div className={cn("max-w-[88%] rounded-[12px] px-3 py-2 text-[12.5px] leading-snug", m.dir === "out" ? "bg-info/8 text-foreground rounded-br-[4px]" : "bg-muted text-foreground rounded-bl-[4px]")}>
+                        {m.body}
+                        <span className="mt-1 block text-[9.5px] text-muted-foreground/70">{m.time}</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ),
+                )}
               </div>
             ) : <Empty>No messages yet.</Empty>}
           </Section>
 
           <Section icon={<FileText className="h-3.5 w-3.5" />} title="Notes">
-            <div className="mb-2.5 rounded-[10px] border border-border bg-card p-2">
-              <textarea value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveNote(); }} rows={2} placeholder="Add a note while you talk… (⌘↵ to save)" className="w-full resize-none bg-transparent px-1 py-0.5 text-[12.5px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none" />
-              <div className="flex justify-end">
-                <button type="button" onClick={saveNote} disabled={!noteDraft.trim()} className="rounded-[7px] bg-primary px-3 py-1 text-[11.5px] font-semibold text-primary-foreground transition-all hover:brightness-110 active:scale-95 disabled:pointer-events-none disabled:opacity-35">Save note</button>
+            {notes.length ? (
+              <div className="space-y-2.5">
+                {notes.map((n, i) => (
+                  <div key={i} className="rounded-[10px] border border-border/60 bg-muted/25 px-3 py-2.5">
+                    <p className="text-[12.5px] leading-snug text-foreground">{n.body}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{n.author} · {n.time}</p>
+                  </div>
+                ))}
               </div>
-            </div>
-            <div className="space-y-2.5">
-              {notes.map((n, i) => (
-                <div key={i} className="rounded-[10px] border border-border/60 bg-muted/25 px-3 py-2.5">
-                  <p className="text-[12.5px] leading-snug text-foreground">{n.body}</p>
-                  <p className="mt-1 text-[10px] text-muted-foreground">{n.author} · {n.time}</p>
-                </div>
-              ))}
-            </div>
+            ) : <Empty>No notes yet — add one below.</Empty>}
           </Section>
 
           <Section icon={<Activity className="h-3.5 w-3.5" />} title="Timeline">
@@ -172,7 +175,30 @@ function LoadedContact({ contact, isPreview, onSkip, onBack, onToast }: { contac
         </div>
       </div>
 
-      {quickAction && <QuickActionModal kind={quickAction} contactName={contact.name} onClose={() => setQuickAction(null)} onCreated={(toast) => { setQuickAction(null); onToast(toast); }} />}
+      {/* Sticky note composer — pinned to the bottom so notes are always reachable mid-call */}
+      <div className="shrink-0 border-t border-border bg-card/80 px-6 py-3 backdrop-blur-sm">
+        <div className="flex items-end gap-2">
+          <textarea
+            value={noteDraft}
+            onChange={(e) => setNoteDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveNote(); }}
+            rows={1}
+            placeholder="Add a note while you talk… (⌘↵ to save)"
+            className="flex-1 resize-none rounded-[9px] border border-border bg-card px-3 py-2 text-[12.5px] text-foreground placeholder:text-muted-foreground/60 focus:border-ring/60 focus:outline-none focus:ring-2 focus:ring-ring/15"
+          />
+          <button type="button" onClick={saveNote} disabled={!noteDraft.trim()} className="h-[38px] shrink-0 rounded-[9px] bg-primary px-3.5 text-[12px] font-semibold text-primary-foreground transition-all hover:brightness-110 active:scale-95 disabled:pointer-events-none disabled:opacity-35">Save note</button>
+        </div>
+      </div>
+
+      {activeModal === "task" && (
+        <CreateTaskModal contactId={contact.id} contactName={contact.name} onClose={() => setActiveModal(null)} />
+      )}
+      {activeModal === "demo" && (
+        <CreateDemoModal contactId={contact.id} contactName={contact.name} contactEmail={contact.email} contactPhone={contact.phone} onClose={() => setActiveModal(null)} />
+      )}
+      {activeModal === "audit" && (
+        <CreateAuditModal contactId={contact.id} contactName={contact.name} onClose={() => setActiveModal(null)} />
+      )}
     </div>
   );
 }

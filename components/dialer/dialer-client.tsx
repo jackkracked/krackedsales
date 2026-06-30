@@ -83,6 +83,29 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
     }
   }, [dialer.callState, dialer.durationSec]);
 
+  // ── Keyboard control of the manual dial pad (digits · + # * · Backspace · Enter) ──
+  const startDialRef = useRef(startDial);
+  startDialRef.current = startDial;
+  const dockStateRef = useRef(dockState);
+  dockStateRef.current = dockState;
+  const modalOpenRef = useRef(false);
+  modalOpenRef.current = !!outcomeFor || builderOpen;
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName;
+      // Never hijack typing in a field (notes, search, modals) or during a live call / open modal.
+      if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (modalOpenRef.current || dockStateRef.current !== "idle") return;
+      if (/^[0-9*#+]$/.test(e.key)) { e.preventDefault(); setNumber((n) => n + e.key); }
+      else if (e.key === "Backspace") { e.preventDefault(); setNumber((n) => n.slice(0, -1)); }
+      else if (e.key === "Enter") { e.preventDefault(); startDialRef.current(); }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // ── Actions ────────────────────────────────────────────────────────────────
   function selectCampaign(id: string) {
     setSelectedId(id); setRunning(false); setCompleted(false); setClaimed(null); setPreviewContactId(null); setNumber("");
@@ -195,6 +218,7 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
           state={dockState}
           number={number}
           contactName={dockName}
+          identity={cockpitContact ? { name: cockpitContact.name, company: cockpitContact.company || undefined, email: cockpitContact.email || undefined, stage: cockpitContact.stage || undefined } : undefined}
           attempt={attempt}
           muted={dialer.muted}
           durationSec={dialer.durationSec}

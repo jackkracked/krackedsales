@@ -40,6 +40,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const clean: IncomingContact[] = raw
       .filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
       .filter((c) => typeof c.contactId === "string" && (c.contactId as string).trim() !== "")
+      // A contact with no phone number can never be dialed — never queue it.
+      .filter((c) => typeof c.phone === "string" && (c.phone as string).trim() !== "")
       .map((c) => ({
         contactId: (c.contactId as string).trim(),
         contactName: typeof c.contactName === "string" ? c.contactName : null,
