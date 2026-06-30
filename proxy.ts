@@ -24,6 +24,7 @@ const PUBLIC_PATHS = [
   "/api/auth/login",
   "/api/cron/",    // Vercel cron runner — routes validate CRON_SECRET themselves
   "/api/webhooks/",
+  "/api/dialer/voice/", // Twilio voice webhooks (server-to-server, no session cookie)
   "/api/stripe/webhook", // Stripe webhook — verifies its own stripe-signature, must not require a session cookie
   "/api/meta/subscribe-page",
   "/api/tiktok/auth",   // TikTok OAuth start + callback (unauthenticated redirects)

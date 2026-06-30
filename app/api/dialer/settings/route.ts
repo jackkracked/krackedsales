@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { dialerSettings } from "@/lib/db/schema";
+import { dialerSettings, twilioNumbers } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/auth/session";
 import { encryptSecret } from "@/lib/dialer/crypto";
 import { getDialerConfig, twilioClient } from "@/lib/dialer/twilio";
@@ -83,49 +83,63 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Validate the credentials by hitting the live Twilio API before we save anything.
+  // Webhook URLs Twilio will call (absolute, from the deployed origin).
+  const origin = req.nextUrl.origin;
+  const outboundUrl = `${origin}/api/dialer/voice/outbound`;
+  const inboundUrl = `${origin}/api/dialer/voice/inbound`;
+
+  const [existing] = await db().select().from(dialerSettings).limit(1);
+  let twimlAppSid = existing?.twimlAppSid ?? null;
+
+  // 1) Validate the credentials against the live Twilio API before saving anything.
+  let client: ReturnType<typeof twilioClient>;
   try {
-    const client = twilioClient({ accountSid, apiKeySid, apiKeySecret, twimlAppSid: null, callerId });
+    client = twilioClient({ accountSid, apiKeySid, apiKeySecret, twimlAppSid: null, callerId });
     await client.api.v2010.accounts(accountSid).fetch();
   } catch {
-    return NextResponse.json(
-      { error: "Could not connect to Twilio — check the credentials" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "Could not connect to Twilio — check the credentials" }, { status: 400 });
   }
 
+  // 2) Provision the TwiML app outbound browser calls route through (essential).
+  //    Reuse the existing app if we have one; otherwise create it. Points its voice
+  //    URL at our outbound webhook so a browser Device.connect() dials the number.
   try {
-    const encryptedSecret = encryptSecret(apiKeySecret);
-    const [existing] = await db().select().from(dialerSettings).limit(1);
-
-    if (existing) {
-      // Whitelist fields only — no mass assignment.
-      await db()
-        .update(dialerSettings)
-        .set({
-          twilioAccountSid: accountSid,
-          twilioApiKeySid: apiKeySid,
-          twilioApiKeySecret: encryptedSecret,
-          callerId,
-          updatedBy: user.id,
-          updatedAt: new Date(),
-        });
+    if (twimlAppSid) {
+      await client.applications(twimlAppSid).update({ voiceUrl: outboundUrl, voiceMethod: "POST" });
     } else {
-      await db().insert(dialerSettings).values({
-        twilioAccountSid: accountSid,
-        twilioApiKeySid: apiKeySid,
-        twilioApiKeySecret: encryptedSecret,
-        callerId,
-        updatedBy: user.id,
-        updatedAt: new Date(),
-      });
+      const app = await client.applications.create({ friendlyName: "Kracked Dialer", voiceUrl: outboundUrl, voiceMethod: "POST" });
+      twimlAppSid = app.sid;
     }
+  } catch (e) {
+    console.error("[Dialer Settings] TwiML app provisioning failed", e);
+    return NextResponse.json({ error: "Connected, but couldn't set up the calling app — make sure the API key is a Standard key with full access." }, { status: 400 });
+  }
 
-    return NextResponse.json({
-      connected: true,
-      accountSid: maskAccountSid(accountSid),
+  // 3) Point the caller number at our inbound webhook + record it in the pool (best-effort).
+  try {
+    const nums = await client.incomingPhoneNumbers.list({ phoneNumber: callerId, limit: 1 });
+    if (nums[0]) {
+      await client.incomingPhoneNumbers(nums[0].sid).update({ voiceUrl: inboundUrl, voiceMethod: "POST" });
+      await db().insert(twilioNumbers).values({ phoneNumber: callerId, twilioSid: nums[0].sid, label: "Shared", isShared: true }).onConflictDoNothing();
+    }
+  } catch (e) {
+    console.error("[Dialer Settings] number webhook config failed (non-fatal)", e);
+  }
+
+  // 4) Save (API key secret encrypted at rest). Single row, whitelisted fields.
+  try {
+    const values = {
+      twilioAccountSid: accountSid,
+      twilioApiKeySid: apiKeySid,
+      twilioApiKeySecret: encryptSecret(apiKeySecret),
+      twimlAppSid,
       callerId,
-    });
+      updatedBy: user.id,
+      updatedAt: new Date(),
+    };
+    if (existing) await db().update(dialerSettings).set(values);
+    else await db().insert(dialerSettings).values(values);
+    return NextResponse.json({ connected: true, accountSid: maskAccountSid(accountSid), callerId });
   } catch (err) {
     console.error("[Dialer Settings POST]", err);
     return NextResponse.json({ error: "Failed to save telephony settings" }, { status: 500 });
