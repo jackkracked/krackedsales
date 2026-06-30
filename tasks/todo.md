@@ -585,3 +585,5 @@ Mechanism (reuse, don't reinvent — the gear + configurator already exist):
 DECISIONS NEEDED:
 A. Full /kpis configurator (rewire source + combine + target) vs a target-only mini panel.
 B. MRR card identity: Total MRR vs Management MRR (also fixes the earlier value/target mismatch).
+
+_DONE 2026-06-29: shipped — gear on dashboard cash/mrr/leads/ad_spend/roas → same KpiConfigurator; reviewed SHIP; tsc clean; deployed._

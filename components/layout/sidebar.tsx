@@ -19,6 +19,7 @@ import {
   Target,
   Users,
   Phone,
+  PhoneCall,
   CalendarDays,
   ListTodo,
   FileText,
@@ -46,6 +47,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
       { href: "/proposals",  label: "Proposals", icon: FileText },
       { href: "/boards",     label: "Boards",    icon: LayoutGrid },
       { href: "/calls",      label: "Calls",     icon: Phone },
+      { href: "/dialer",     label: "Dialer",    icon: PhoneCall, adminOnly: true },
       { href: "/calendar",   label: "Calendar",  icon: CalendarDays },
       { href: "/tasks",      label: "Tasks",     icon: ListTodo },
       { href: "/inbox",      label: "Inbox",     icon: MessageSquare },
@@ -108,6 +110,7 @@ export function Sidebar({ userRole }: SidebarProps) {
 
   return (
     <aside
+      data-r10n-sidebar
       className={cn(
         "hidden lg:flex flex-col h-full shrink-0 transition-all duration-200 ease-in-out border-r border-border",
         sidebarCollapsed ? "w-12" : "w-52"
@@ -121,6 +124,7 @@ export function Sidebar({ userRole }: SidebarProps) {
           <button
             onClick={toggleSidebarCollapsed}
             aria-label="Expand sidebar"
+            data-r10n-kmark
             className="group flex items-center justify-center rounded-[7px] bg-primary text-primary-foreground select-none transition-colors hover:bg-primary/80"
             style={{ width: 26, height: 26 }}
           >
@@ -137,6 +141,7 @@ export function Sidebar({ userRole }: SidebarProps) {
             {/* Expanded: K is a dashboard link */}
             <Link href="/dashboard" className="shrink-0" aria-label="Kracked Sales">
               <span
+                data-r10n-kmark
                 className="flex items-center justify-center rounded-[7px] bg-primary text-primary-foreground font-black tracking-tighter select-none"
                 style={{ width: 26, height: 26, fontFamily: "var(--font-heading)", fontSize: 15, letterSpacing: "-0.04em" }}
               >
@@ -144,6 +149,7 @@ export function Sidebar({ userRole }: SidebarProps) {
               </span>
             </Link>
             <span
+              data-r10n-wordmark
               className="text-sm font-bold text-primary tracking-tight whitespace-nowrap overflow-hidden max-w-[140px] opacity-100 transition-all duration-200 ease-in-out"
               style={{ fontFamily: "var(--font-heading)" }}
             >
@@ -170,6 +176,7 @@ export function Sidebar({ userRole }: SidebarProps) {
             {/* Section label — hidden when collapsed */}
             {section.label && (
               <span
+                data-r10n-section
                 className={cn(
                   "block px-2 mb-1 text-[9px] font-bold uppercase tracking-[0.12em] text-muted-foreground/50 whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out",
                   sidebarCollapsed ? "max-w-0 opacity-0" : "max-w-[160px] opacity-100"
@@ -187,6 +194,8 @@ export function Sidebar({ userRole }: SidebarProps) {
                     href={href}
                     title={sidebarCollapsed ? label : undefined}
                     aria-current={isActive ? "page" : undefined}
+                    data-r10n-navitem
+                    data-active={isActive ? "true" : undefined}
                     className={cn(
                       "flex items-center px-2 py-1.5 rounded-md text-[13px] font-medium transition-colors duration-100",
                       isActive
@@ -233,6 +242,8 @@ export function Sidebar({ userRole }: SidebarProps) {
         <Link
           href="/settings"
           title={sidebarCollapsed ? "Settings" : undefined}
+          data-r10n-navitem
+          data-active={pathname === "/settings" || pathname.startsWith("/settings/") ? "true" : undefined}
           className={cn(
             "flex items-center px-2 py-1.5 rounded-md text-[13px] font-medium transition-colors duration-100 mb-px",
             pathname === "/settings" || pathname.startsWith("/settings/")
@@ -256,6 +267,7 @@ export function Sidebar({ userRole }: SidebarProps) {
         <button
           onClick={handleLogout}
           title={sidebarCollapsed ? "Log out" : undefined}
+          data-r10n-logout
           className="flex items-center px-2 py-1.5 w-full rounded-md text-[13px] text-muted-foreground hover:text-foreground hover:bg-border/50 transition-colors"
         >
           <LogOut className="w-3.5 h-3.5 shrink-0" />
