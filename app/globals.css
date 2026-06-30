@@ -1933,24 +1933,21 @@ h1, h2, h3, h4, h5, h6 {
 [data-theme="r10n"] [data-r10n-stage-pill][style*="#2563EB"] {
   color: #1D4ED8 !important;
 }
-/* Active (filtered-to) stage pill: keep the pill's OWN hue tint, but wrap it in a
-   hard obsidian frame + soft halo and prepend a filled hue dot. The selected stage
-   then reads as a different KIND of object (a framed token) against the row of pale
-   chips, so it's unmistakable on any hue without graying the others. The obsidian
-   ring is delivered via box-shadow (no 1px layout shift) and wins over the Tailwind
-   ring-2 the JSX sets. Text colour is left to the base rule + the #2563EB ink guard. */
+/* Active (filtered-to) stage pill: SOLID-fill the pill in its own stage hue with
+   white ink + a soft hue-tinted shadow, so the selected stage reads as one
+   saturated chip in a row of pale ones. No black frame (that read as "broken"),
+   just a confident filled token. The box-shadow wins over the Tailwind ring-2 the
+   JSX sets, so no stray navy ring shows underneath. */
 [data-theme="r10n"] [data-r10n-stage-pill][data-active="true"] {
-  background-color: color-mix(in srgb, var(--_stage) 18%, transparent) !important;
-  border-color: color-mix(in srgb, var(--_stage) 55%, transparent) !important;
-  box-shadow: 0 0 0 1.5px #0B0B0D, 0 0 0 5px rgba(11, 11, 13, 0.06), 0 1px 2px rgba(11, 11, 13, 0.10) !important;
+  background-color: var(--_stage) !important;
+  border-color: var(--_stage) !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--_stage) 35%, transparent), 0 1px 2px rgba(11, 11, 13, 0.12) !important;
 }
-[data-theme="r10n"] [data-r10n-stage-pill][data-active="true"]::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 9999px;
-  background-color: var(--_stage);
-  flex: 0 0 auto;
+/* Light hues (the warning amber #E08B00) fail contrast with white ink on a solid
+   fill, so flip their ink to obsidian. Matches the inline --r10n-stage var. */
+[data-theme="r10n"] [data-r10n-stage-pill][data-active="true"][style*="#E08B00"] {
+  color: #0B0B0D !important;
 }
 [data-theme="r10n"] [data-r10n-stage-count] {
   font-variant-numeric: tabular-nums;
