@@ -434,8 +434,13 @@ export const contactCustomFields = pgTable("contact_custom_fields", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-/** Leads captured from Meta comment trigger words — stored in our system only */
-export const commentLeads = pgTable("comment_leads", {
+/**
+ * Social leads captured from Meta — both trigger-word COMMENTS and DM conversations,
+ * across Facebook / Instagram / TikTok. Stored in our system only; a row is inbox-only
+ * and is NOT a GHL pipeline lead until a demo is submitted (see ghlContactId below).
+ * (Physical table renamed comment_leads -> social_leads in migration 0020.)
+ */
+export const socialLeads = pgTable("social_leads", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   platform: text("platform").notNull(), // "facebook" | "instagram" | "tiktok"
@@ -451,6 +456,12 @@ export const commentLeads = pgTable("comment_leads", {
   notes: text("notes"),
   contactedAt: timestamp("contacted_at"),
   demoStartedAt: timestamp("demo_started_at"),
+  // Set when a demo is submitted and the lead is promoted into GHL (a real pipeline
+  // lead). Until demoStartedAt/ghlContactId are set, this row is inbox-only and is NOT
+  // counted as a pipeline lead. The platform (facebook/instagram/tiktok) is carried onto
+  // the promoted GHL entry so source attribution survives.
+  ghlContactId: text("ghl_contact_id"),
+  ghlOpportunityId: text("ghl_opportunity_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -698,6 +709,54 @@ export const callDispositions = pgTable("call_dispositions", {
   dispositionedAt: timestamp("dispositioned_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+/* ── Power Dialer ────────────────────────────────────────────────────────────
+ * Twilio-backed dialer. A campaign holds a queue of contacts; assigned reps work
+ * it with an atomic claim + per-contact lock so two reps never dial the same
+ * person. Additive + idempotent. Twilio settings/numbers + the `calls`/
+ * dispositions extensions land in a later migration when the calling layer is wired.
+ */
+export const dialerCampaigns = pgTable("dialer_campaigns", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  createdBy: uuid("created_by").references(() => users.id),
+  ownerScope: text("owner_scope").notNull().default("admin"), // "admin" | "rep"
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  status: text("status").notNull().default("active"), // "active" | "paused" | "archived"
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/** Reps assigned to a campaign (1..n). A rep-created campaign has just themselves. */
+export const dialerCampaignReps = pgTable("dialer_campaign_reps", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  campaignId: uuid("campaign_id").notNull().references(() => dialerCampaigns.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  uniqRep: uniqueIndex("dialer_campaign_reps_campaign_user_key").on(t.campaignId, t.userId),
+}));
+
+/** A contact in a campaign's queue. `position` = FIFO order; `status` drives the
+ *  claim-next engine; `lockedBy`/`lockedAt` guarantee no double-dial. */
+export const dialerCampaignContacts = pgTable("dialer_campaign_contacts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  campaignId: uuid("campaign_id").notNull().references(() => dialerCampaigns.id, { onDelete: "cascade" }),
+  contactId: text("contact_id").notNull(),   // GHL contact ID
+  contactName: text("contact_name"),
+  phone: text("phone"),
+  position: integer("position").notNull().default(0),
+  attempts: integer("attempts").notNull().default(0),
+  status: text("status").notNull().default("queued"), // queued|in_progress|completed|exhausted|suppressed
+  lockedByUserId: uuid("locked_by_user_id").references(() => users.id),
+  lockedAt: timestamp("locked_at"),
+  lastOutcome: text("last_outcome"),
+  lastAttemptAt: timestamp("last_attempt_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  uniqContact: uniqueIndex("dialer_campaign_contacts_campaign_contact_key").on(t.campaignId, t.contactId),
+  queueIdx: index("dialer_campaign_contacts_queue_idx").on(t.campaignId, t.status, t.position),
+}));
 
 /**
  * AI-generated call preparation briefs — cached per calendar event.
@@ -1120,8 +1179,16 @@ export const kpiConfigs = pgTable("kpi_configs", {
 export const kpiTargets = pgTable("kpi_targets", {
   id: uuid("id").primaryKey().defaultRandom(),
   metricKey: text("metric_key").notNull().unique(),
+  // Legacy single target — kept and treated as the MONTHLY value for back-compat.
   target: doublePrecision("target").notNull(),
   direction: text("direction").notNull().default("higher"), // "higher" = above is good | "lower" = below is good
+  // Per-cadence targets. The user sets ONE (the anchor); the others auto-derive but are
+  // editable, so any may carry a bespoke override. Null = not set (engine derives a
+  // run-rate when a window needs that cadence). target_monthly is backfilled from `target`.
+  targetDaily: doublePrecision("target_daily"),
+  targetWeekly: doublePrecision("target_weekly"),
+  targetMonthly: doublePrecision("target_monthly"),
+  anchorCadence: text("anchor_cadence").notNull().default("monthly"), // "daily" | "weekly" | "monthly"
   updatedBy: uuid("updated_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
