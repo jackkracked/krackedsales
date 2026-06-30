@@ -1933,21 +1933,16 @@ h1, h2, h3, h4, h5, h6 {
 [data-theme="r10n"] [data-r10n-stage-pill][style*="#2563EB"] {
   color: #1D4ED8 !important;
 }
-/* Active (filtered-to) stage pill: SOLID-fill the pill in its own stage hue with
-   white ink + a soft hue-tinted shadow, so the selected stage reads as one
-   saturated chip in a row of pale ones. No black frame (that read as "broken"),
-   just a confident filled token. The box-shadow wins over the Tailwind ring-2 the
-   JSX sets, so no stray navy ring shows underneath. */
+/* Active (filtered-to) stage pill: SOLID blue fill in the system signal accent,
+   regardless of the stage's own hue, so "selected" reads the same way the Filters
+   button does when a filter is applied (blue = active). White ink + soft blue
+   shadow. The box-shadow wins over the Tailwind ring-2 the JSX sets. Unselected
+   pills keep their per-stage colours; only the active one goes solid blue. */
 [data-theme="r10n"] [data-r10n-stage-pill][data-active="true"] {
-  background-color: var(--_stage) !important;
-  border-color: var(--_stage) !important;
+  background-color: var(--r10n-signal) !important;
+  border-color: var(--r10n-signal) !important;
   color: #FFFFFF !important;
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--_stage) 35%, transparent), 0 1px 2px rgba(11, 11, 13, 0.12) !important;
-}
-/* Light hues (the warning amber #E08B00) fail contrast with white ink on a solid
-   fill, so flip their ink to obsidian. Matches the inline --r10n-stage var. */
-[data-theme="r10n"] [data-r10n-stage-pill][data-active="true"][style*="#E08B00"] {
-  color: #0B0B0D !important;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--r10n-signal) 35%, transparent), 0 1px 2px rgba(11, 11, 13, 0.12) !important;
 }
 [data-theme="r10n"] [data-r10n-stage-count] {
   font-variant-numeric: tabular-nums;
