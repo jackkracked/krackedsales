@@ -120,7 +120,7 @@ function LoadedContact({ contact, isPreview, onSkip, onBack, onToast }: { contac
                 {contact.qualification.map((qa, i) => (
                   <div key={i}>
                     <dt className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/80">{qa.q}</dt>
-                    <dd className="text-[13px] leading-snug text-foreground">{qa.a}</dd>
+                    <dd className="break-words [overflow-wrap:anywhere] text-[13px] leading-snug text-foreground">{qa.a}</dd>
                   </div>
                 ))}
               </dl>
@@ -135,7 +135,7 @@ function LoadedContact({ contact, isPreview, onSkip, onBack, onToast }: { contac
                     <EmailCard key={m.id ?? i} subject={m.subject || "Email"} fetchId={m.emailMessageId || m.id} dir={m.dir} time={m.time} fallbackBody={m.body} />
                   ) : (
                     <div key={m.id ?? i} className={cn("flex", m.dir === "out" ? "justify-end" : "justify-start")}>
-                      <div className={cn("max-w-[88%] rounded-[12px] px-3 py-2 text-[12.5px] leading-snug", m.dir === "out" ? "bg-info/8 text-foreground rounded-br-[4px]" : "bg-muted text-foreground rounded-bl-[4px]")}>
+                      <div className={cn("max-w-[88%] min-w-0 break-words [overflow-wrap:anywhere] rounded-[12px] px-3 py-2 text-[12.5px] leading-snug", m.dir === "out" ? "bg-info/8 text-foreground rounded-br-[4px]" : "bg-muted text-foreground rounded-bl-[4px]")}>
                         {m.body}
                         <span className="mt-1 block text-[9.5px] text-muted-foreground/70">{m.time}</span>
                       </div>
