@@ -26,6 +26,7 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
 
   const [campaigns, setCampaigns] = useState<DialerCampaign[]>(MOCK_CAMPAIGNS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [working, setWorking] = useState<DialerContact[]>([]); // remaining, current at [0]
@@ -46,7 +47,12 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
   const selectedCampaign = campaigns.find((c) => c.id === selectedId) ?? null;
-  const current = running && !completed ? working[0] ?? null : null;
+  const isPreview = !running && !!previewId;
+  const current = running && !completed
+    ? working[0] ?? null
+    : previewId
+      ? selectedCampaign?.contacts.find((c) => c.id === previewId) ?? null
+      : null;
   const attempt = current ? { n: current.attempts + 1, max: selectedCampaign?.maxAttempts ?? 3 } : undefined;
 
   // Load the current contact's number whenever the contact changes.
@@ -87,14 +93,25 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
     setSelectedId(id);
     setRunning(false);
     setCompleted(false);
+    setPreviewId(null);
     setCallState("idle");
     setNumber("");
   }
   function startCampaign() {
     if (!selectedCampaign || selectedCampaign.contacts.length === 0) return;
     setCompleted(false);
+    setPreviewId(null);
     setRunning(true);
     setWorking([...selectedCampaign.contacts]);
+  }
+  function previewContact(id: string) {
+    setPreviewId(id);
+    setCallState("idle");
+  }
+  function backToCampaign() {
+    setPreviewId(null);
+    setCallState("idle");
+    setNumber("");
   }
   function createCampaign(c: DialerCampaign) {
     setCampaigns((prev) => [c, ...prev]);
@@ -126,6 +143,7 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
       fireToast(o.requeue ? `${o.label} · requeued` : `${o.label} · saved`);
     } else {
       setNumber("");
+      setPreviewId(null);
       fireToast(`${o.label} · saved`);
     }
     setCallState("idle");
@@ -164,8 +182,11 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
             contact={current}
             campaign={selectedCampaign}
             running={running}
+            isPreview={isPreview}
             onStart={startCampaign}
             onSkip={skip}
+            onBack={backToCampaign}
+            onSelectContact={previewContact}
             onToast={fireToast}
           />
         )}
