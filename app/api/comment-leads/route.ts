@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { commentLeads } from "@/lib/db/schema";
+import { socialLeads } from "@/lib/db/schema";
 import { gte } from "drizzle-orm";
 import { subDays, startOfDay, startOfWeek, startOfMonth, startOfQuarter } from "date-fns";
 
@@ -38,8 +38,8 @@ export async function GET(req: NextRequest) {
     // All leads in the period
     const rows = await client
       .select()
-      .from(commentLeads)
-      .where(gte(commentLeads.createdAt, periodStart));
+      .from(socialLeads)
+      .where(gte(socialLeads.createdAt, periodStart));
 
     const facebook = rows.filter((r) => r.platform === "facebook");
     const instagram = rows.filter((r) => r.platform === "instagram");

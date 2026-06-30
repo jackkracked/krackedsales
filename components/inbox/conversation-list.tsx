@@ -45,7 +45,7 @@ function ContactAvatar({ name, channelType }: { name: string; channelType?: stri
     <div className="relative shrink-0">
       <Avatar name={name} size={40} />
       {Icon && (
-        <span className={cn("absolute -bottom-0.5 -right-0.5 w-[15px] h-[15px] rounded-full flex items-center justify-center ring-2 ring-card", badge)}>
+        <span data-r10n-convo-channelbadge className={cn("absolute -bottom-0.5 -right-0.5 w-[15px] h-[15px] rounded-full flex items-center justify-center ring-2 ring-card", badge)}>
           <Icon className="w-2 h-2" />
         </span>
       )}
@@ -69,7 +69,7 @@ export function ConversationList({ conversations, selectedId, onSelect }: Conver
   }
 
   return (
-    <div className="flex flex-col overflow-y-auto flex-1 px-2 py-2">
+    <div data-r10n-convo-list className="flex flex-col overflow-y-auto flex-1 px-2 py-2">
       {conversations.map((conv) => {
         const isSelected = conv.id === selectedId;
         const displayType = conv.lastMessageType && CHANNEL_ICONS[conv.lastMessageType] ? conv.lastMessageType : conv.type;
@@ -81,6 +81,9 @@ export function ConversationList({ conversations, selectedId, onSelect }: Conver
         return (
           <button
             key={conv.id}
+            data-r10n-convo-row
+            data-selected={isSelected}
+            data-unread={hasUnread}
             onClick={() => onSelect(conv.id)}
             className={cn(
               "group relative flex items-start gap-3 px-2.5 py-2.5 rounded-[10px] text-left w-full transition-colors duration-100",
@@ -92,26 +95,26 @@ export function ConversationList({ conversations, selectedId, onSelect }: Conver
             )}
           >
             {/* Selection indicator (not a border-stripe) */}
-            {isSelected && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 rounded-full bg-primary" />}
+            {isSelected && <span data-r10n-convo-marker className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 rounded-full bg-primary" />}
 
             <ContactAvatar name={name} channelType={displayType} />
 
             <div className="flex-1 min-w-0 pt-0.5">
               <div className="flex items-center justify-between gap-2 mb-0.5">
-                <span className={cn("text-sm truncate", hasUnread ? "font-bold text-foreground" : "font-medium text-foreground/90")}>
+                <span data-r10n-convo-name className={cn("text-sm truncate", hasUnread ? "font-bold text-foreground" : "font-medium text-foreground/90")}>
                   {name}
                 </span>
-                <span className={cn("text-[11px] shrink-0 tabular-nums", hasUnread ? "text-primary font-semibold" : "text-muted-foreground")}>
+                <span data-r10n-convo-time className={cn("text-[11px] shrink-0 tabular-nums", hasUnread ? "text-primary font-semibold" : "text-muted-foreground")}>
                   {conv.lastMessageDate ? formatMessageTime(conv.lastMessageDate) : ""}
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
-                {awaitingReply && <CornerUpLeft className="w-3 h-3 text-amber-500 shrink-0" />}
-                <span className={cn("text-xs truncate flex-1 leading-snug", hasUnread ? "text-foreground/80 font-medium" : "text-muted-foreground")}>
+                {awaitingReply && <CornerUpLeft data-r10n-convo-awaiticon className="w-3 h-3 text-amber-500 shrink-0" />}
+                <span data-r10n-convo-preview className={cn("text-xs truncate flex-1 leading-snug", hasUnread ? "text-foreground/80 font-medium" : "text-muted-foreground")}>
                   {cleanPreview(conv.lastMessageBody)}
                 </span>
                 {hasUnread && (
-                  <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center shrink-0 tabular-nums">
+                  <span data-r10n-convo-unread className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center shrink-0 tabular-nums">
                     {conv.unreadCount > 9 ? "9+" : conv.unreadCount}
                   </span>
                 )}

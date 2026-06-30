@@ -82,7 +82,12 @@ export function parseQualificationNote(body: string): QualificationQA[] {
   return results;
 }
 
-/** Detect if a note is a qualification note (contains the marker) */
+/**
+ * Detect if a note is a qualification note. Structure-tolerant: matches the
+ * legacy header/emoji marker, OR any note that parses into 2+ Q/A pairs (so a
+ * future form that drops the "Qualification Questions" header still resolves).
+ */
 export function isQualificationNote(body: string): boolean {
-  return /qualification questions?/i.test(body) || body.startsWith("❓");
+  if (/qualification questions?/i.test(body) || body.startsWith("❓")) return true;
+  return parseQualificationNote(body).length >= 2;
 }

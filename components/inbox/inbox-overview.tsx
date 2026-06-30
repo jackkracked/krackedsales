@@ -13,11 +13,11 @@ function cleanPreview(body: string | undefined): string {
 
 function Stat({ value, label, tone }: { value: number; label: string; tone: "navy" | "amber" }) {
   return (
-    <div className={cn("flex-1 rounded-[12px] border px-4 py-3.5", tone === "navy" ? "bg-primary/[0.05] border-primary/15" : "bg-amber-50 border-amber-200/70")}>
-      <p className={cn("text-[1.9rem] leading-none font-bold tabular-nums", tone === "navy" ? "text-primary" : "text-amber-600")} style={{ fontFamily: "var(--font-heading)" }}>
+    <div data-r10n-overview-stat data-tone={tone} className={cn("flex-1 rounded-[12px] border px-4 py-3.5", tone === "navy" ? "bg-primary/[0.05] border-primary/15" : "bg-amber-50 border-amber-200/70")}>
+      <p data-r10n-overview-statvalue className={cn("text-[1.9rem] leading-none font-bold tabular-nums", tone === "navy" ? "text-primary" : "text-amber-600")} style={{ fontFamily: "var(--font-heading)" }}>
         {value}
       </p>
-      <p className="text-[11px] font-medium text-muted-foreground mt-1.5">{label}</p>
+      <p data-r10n-overview-statlabel className="text-[11px] font-medium text-muted-foreground mt-1.5">{label}</p>
     </div>
   );
 }
@@ -36,14 +36,14 @@ export function InboxOverview({ conversations, onSelect }: { conversations: GHLC
   const allClear = unread.length === 0 && awaiting.length === 0;
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center bg-background px-6 py-10 overflow-y-auto">
+    <div data-r10n-overview className="flex-1 flex flex-col items-center justify-center bg-background px-6 py-10 overflow-y-auto">
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-7">
-          <div className="inline-flex w-12 h-12 rounded-[14px] bg-primary/[0.07] items-center justify-center mb-3">
+          <div data-r10n-overview-glyph className="inline-flex w-12 h-12 rounded-[14px] bg-primary/[0.07] items-center justify-center mb-3">
             <Inbox className="w-5 h-5 text-primary" />
           </div>
-          <h2 className="text-xl font-bold text-foreground tracking-[-0.01em]" style={{ fontFamily: "var(--font-heading)" }}>
+          <h2 data-r10n-overview-title className="text-xl font-bold text-foreground tracking-[-0.01em]" style={{ fontFamily: "var(--font-heading)" }}>
             {allClear ? "You're all caught up" : "Here's where things stand"}
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
@@ -67,26 +67,26 @@ export function InboxOverview({ conversations, onSelect }: { conversations: GHLC
           </div>
         ) : attention.length > 0 ? (
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/70 mb-2 px-1">Needs your attention</p>
-            <div className="rounded-[12px] border border-border bg-card overflow-hidden divide-y divide-border/60">
+            <p data-r10n-overview-section className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/70 mb-2 px-1">Needs your attention</p>
+            <div data-r10n-overview-list className="rounded-[12px] border border-border bg-card overflow-hidden divide-y divide-border/60">
               {attention.map((c) => {
                 const name = c.fullName || c.phone || c.email || "Unknown";
                 const hasUnread = c.unreadCount > 0;
                 return (
-                  <button key={c.id} onClick={() => onSelect(c.id)} className="group flex items-center gap-3 w-full px-3 py-2.5 text-left hover:bg-primary/[0.04] transition-colors">
+                  <button key={c.id} onClick={() => onSelect(c.id)} data-r10n-overview-row className="group flex items-center gap-3 w-full px-3 py-2.5 text-left hover:bg-primary/[0.04] transition-colors">
                     <Avatar name={name} size={36} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
-                        <span className={cn("text-sm truncate", hasUnread ? "font-semibold text-foreground" : "font-medium text-foreground/90")}>{name}</span>
-                        <span className="text-[11px] text-muted-foreground shrink-0 tabular-nums">{c.lastMessageDate ? formatMessageTime(c.lastMessageDate) : ""}</span>
+                        <span data-r10n-convo-name className={cn("text-sm truncate", hasUnread ? "font-semibold text-foreground" : "font-medium text-foreground/90")}>{name}</span>
+                        <span data-r10n-convo-time className="text-[11px] text-muted-foreground shrink-0 tabular-nums">{c.lastMessageDate ? formatMessageTime(c.lastMessageDate) : ""}</span>
                       </div>
                       <div className="flex items-center gap-1.5">
-                        {!hasUnread && <CornerUpLeft className="w-3 h-3 text-amber-500 shrink-0" />}
-                        <span className="text-xs text-muted-foreground truncate">{cleanPreview(c.lastMessageBody)}</span>
+                        {!hasUnread && <CornerUpLeft data-r10n-convo-awaiticon className="w-3 h-3 text-amber-500 shrink-0" />}
+                        <span data-r10n-convo-preview className="text-xs text-muted-foreground truncate">{cleanPreview(c.lastMessageBody)}</span>
                       </div>
                     </div>
                     {hasUnread ? (
-                      <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center shrink-0">{c.unreadCount > 9 ? "9+" : c.unreadCount}</span>
+                      <span data-r10n-convo-unread className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center shrink-0">{c.unreadCount > 9 ? "9+" : c.unreadCount}</span>
                     ) : (
                       <ChevronRight className="w-4 h-4 text-muted-foreground/40 shrink-0 group-hover:text-muted-foreground transition-colors" />
                     )}

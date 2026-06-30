@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
-import { Inter, Plus_Jakarta_Sans } from "next/font/google";
+import {
+  Inter,
+  Plus_Jakarta_Sans,
+  Space_Grotesk,
+  JetBrains_Mono,
+} from "next/font/google";
+import { cookies } from "next/headers";
 import { Toaster } from "sonner";
 import { SkewGuard } from "@/components/system/skew-guard";
 import "./globals.css";
@@ -16,20 +22,40 @@ const plusJakartaSans = Plus_Jakarta_Sans({
   display: "swap",
 });
 
+// r10n theme fonts (additive). These only render when data-theme="r10n" is set.
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-space-grotesk",
+  subsets: ["latin"],
+  display: "swap",
+});
+
+const jetBrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
+  subsets: ["latin"],
+  display: "swap",
+});
+
 export const metadata: Metadata = {
   title: "Kracked Sales",
   description: "Sales command centre for Kracked",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Admin-only r10n theme. SSR-read the cookie so there is no flash of the wrong
+  // theme. With no cookie (the default for everyone) no data-theme is set, so the
+  // app renders exactly as it does today.
+  const cookieStore = await cookies();
+  const r10nOn = cookieStore.get("r10n_theme")?.value === "on";
+
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${plusJakartaSans.variable} h-full`}
+      {...(r10nOn ? { "data-theme": "r10n" } : {})}
+      className={`${inter.variable} ${plusJakartaSans.variable} ${spaceGrotesk.variable} ${jetBrainsMono.variable} h-full`}
     >
       <body className="h-full antialiased">
         {children}

@@ -125,6 +125,8 @@ function Toggle({
     >
       <span className="text-sm text-foreground">{label}</span>
       <span
+        data-r10n-settings-toggle
+        data-state={checked ? "on" : "off"}
         className={cn(
           "relative inline-flex w-8 h-4 rounded-full transition-colors duration-150 shrink-0",
           checked ? "bg-primary" : "bg-muted"
@@ -540,8 +542,8 @@ function AddUserForm({ onSuccess }: { onSuccess: () => void }) {
   const canSubmit = name.trim() && email.trim() && password.length >= 8;
 
   return (
-    <div className="bg-card border border-border rounded-[10px] p-5">
-      <p className="text-xs font-semibold text-foreground flex items-center gap-1.5 mb-4">
+    <div className="bg-card border border-border rounded-[10px] p-5" data-r10n-settings-card>
+      <p className="text-xs font-semibold text-foreground flex items-center gap-1.5 mb-4" data-r10n-settings-cardtitle>
         <UserPlus className="w-3.5 h-3.5" />
         Add new team member
       </p>
@@ -680,13 +682,14 @@ function CommissionPayoutSettings() {
   }
 
   return (
-    <div className="bg-card border border-border rounded-[10px] overflow-hidden">
+    <div className="bg-card border border-border rounded-[10px] overflow-hidden" data-r10n-settings-card>
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div className="flex items-center gap-2">
-          <DollarSign className="w-4 h-4 text-muted-foreground" />
+          <DollarSign className="w-4 h-4 text-muted-foreground" data-r10n-settings-cardicon />
           <h2
             className="text-sm font-semibold text-foreground"
             style={{ fontFamily: "var(--font-heading)" }}
+            data-r10n-settings-cardtitle
           >
             Commission Payout Timing
           </h2>
@@ -745,13 +748,14 @@ export function TeamSettings() {
   return (
     <div className="space-y-5">
       {/* User list */}
-      <div className="bg-card border border-border rounded-[10px] overflow-hidden">
+      <div className="bg-card border border-border rounded-[10px] overflow-hidden" data-r10n-settings-card>
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">
-            <Users className="w-4 h-4 text-muted-foreground" />
+            <Users className="w-4 h-4 text-muted-foreground" data-r10n-settings-cardicon />
             <h2
               className="text-sm font-semibold text-foreground"
               style={{ fontFamily: "var(--font-heading)" }}
+              data-r10n-settings-cardtitle
             >
               Team Members
             </h2>

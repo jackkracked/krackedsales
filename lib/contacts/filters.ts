@@ -21,6 +21,8 @@ export type FilterField =
   | "hasProposal"
   | "auditDelivered"
   | "reachableChannels"
+  | "inSequence"
+  | "stageName"
   // legacy fields still understood by the API (back-compat / search):
   | "source"
   | "pipelineId"
@@ -62,6 +64,8 @@ export interface ContactFilters {
   proposal: TriState;
   audit: TriState; // "Audit delivered": yes = delivered, no = not delivered
   avail: string[]; // "email_only" | "sms_only" | "both"
+  sequence: TriState; // "yes" = in an active sequence (GHL automation or our follow-up)
+  stageName: string | null; // filter to one pipeline stage by name (the top stage pills)
 }
 
 export const EMPTY_FILTERS: ContactFilters = {
@@ -76,6 +80,8 @@ export const EMPTY_FILTERS: ContactFilters = {
   proposal: null,
   audit: null,
   avail: [],
+  sequence: null,
+  stageName: null,
 };
 
 export const UNASSIGNED = "__unassigned__";
@@ -143,7 +149,9 @@ export function countActive(f: ContactFilters): number {
     (f.demo ? 1 : 0) +
     (f.proposal ? 1 : 0) +
     (f.audit ? 1 : 0) +
-    (f.avail.length ? 1 : 0)
+    (f.avail.length ? 1 : 0) +
+    (f.sequence ? 1 : 0) +
+    (f.stageName ? 1 : 0)
   );
 }
 
@@ -170,6 +178,8 @@ export function filtersToRules(f: ContactFilters): FilterRule[] {
   if (f.proposal) push("hasProposal", "is_any_of", [f.proposal === "yes" ? "true" : "false"]);
   if (f.audit) push("auditDelivered", "is_any_of", [f.audit === "yes" ? "true" : "false"]);
   if (f.avail.length) push("reachableChannels", "is_any_of", f.avail);
+  if (f.sequence) push("inSequence", "is_any_of", [f.sequence === "yes" ? "true" : "false"]);
+  if (f.stageName) push("stageName", "is_any_of", [f.stageName]);
 
   return rules;
 }
@@ -189,6 +199,8 @@ export function filtersToParams(f: ContactFilters): Record<string, string> {
   if (f.proposal) p.prop = f.proposal;
   if (f.audit) p.audit = f.audit;
   if (f.avail.length) p.avail = f.avail.join(",");
+  if (f.sequence) p.seq = f.sequence;
+  if (f.stageName) p.stagename = f.stageName;
   return p;
 }
 
@@ -214,5 +226,7 @@ export function parseFilters(sp: URLSearchParams): ContactFilters {
     proposal: tri("prop"),
     audit: tri("audit"),
     avail: list("avail"),
+    sequence: tri("seq"),
+    stageName: sp.get("stagename") || null,
   };
 }

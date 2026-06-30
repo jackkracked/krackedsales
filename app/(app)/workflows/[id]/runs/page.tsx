@@ -42,7 +42,7 @@ export default function WorkflowRunsPage({
   }
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div data-r10n-wf-runs-page="" className="h-full overflow-y-auto">
       <div className="max-w-3xl mx-auto px-6 py-8">
         <div className="flex items-center gap-3 mb-8">
           <Link
@@ -51,7 +51,7 @@ export default function WorkflowRunsPage({
           >
             <ArrowLeft className="w-4 h-4" />
           </Link>
-          <h1 className="text-xl font-bold">Run History</h1>
+          <h1 data-r10n-wf-page-title="" className="text-xl font-bold">Run History</h1>
         </div>
 
         {isLoading ? (
@@ -75,12 +75,13 @@ export default function WorkflowRunsPage({
                 <Link
                   key={run.id}
                   href={`/workflows/${id}/runs/${run.id}`}
+                  data-r10n-wf-row=""
                   className="flex items-center gap-4 p-4 bg-card border border-border rounded-xl hover:border-primary/30 transition-colors"
                 >
                   <StatusIcon status={run.status} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className={cn(
+                      <span data-r10n-wf-statuspill="" data-status={run.status} className={cn(
                         "text-xs font-bold px-2 py-0.5 rounded-full",
                         run.status === "success" && "bg-green-500/10 text-green-600",
                         run.status === "error" && "bg-red-500/10 text-red-600",

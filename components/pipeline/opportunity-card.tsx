@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils/cn";
 import { Avatar } from "@/components/ui/avatar";
 import { Check, Clock, ExternalLink, MessageCircle } from "lucide-react";
 import { relativeTime } from "@/lib/utils/date";
-import { cleanUrl, looksLikeUrl, isQualificationNote, parseQualificationNote } from "@/lib/utils/url";
+import { cleanUrl, looksLikeUrl } from "@/lib/utils/url";
+import { deriveWebsite } from "@/lib/ghl/qualification";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 import { useBrandCategoryStore, normalizeDomain, type BrandCategory } from "@/store/brand-category-store";
 import { quickHealthTier } from "@/lib/deal-health";
@@ -73,53 +74,37 @@ function deriveStatus(hasUnread: boolean, healthTier: "healthy" | "at_risk" | "c
   return "replied";
 }
 
-/** Lazy-fetch the contact's website URL — tries contact.website first, then custom fields */
+/**
+ * Lazy-fetch the contact's website URL. Resolution is form-agnostic via
+ * deriveWebsite: standard contact.website (where NEW forms write it) → legacy
+ * website custom field → any URL-shaped custom field → qualification-note URL.
+ */
 function useContactWebsite(contactId: string | undefined, contactWebsite?: string | null) {
   return useQuery({
     queryKey: ["contact-website", contactId],
     queryFn: async () => {
-      // If the contact already has a website field, use it
+      // Fast path: the opportunity already carries the standard website field.
       if (contactWebsite && looksLikeUrl(contactWebsite)) {
         return cleanUrl(contactWebsite);
       }
 
-      // Otherwise fetch the contact and look in custom fields for a URL
+      // Fetch the full contact (standard + custom fields).
       const res = await fetch(`/api/ghl/contacts/${contactId}`);
       if (!res.ok) return null;
       const data = await res.json();
       const contact = data.contact;
       if (!contact) return null;
 
-      // Check standard website field first
-      if (contact.website && looksLikeUrl(contact.website)) {
-        return cleanUrl(contact.website);
-      }
+      // Resolve from contact fields first (covers new-form + old-CF leads).
+      const fromFields = deriveWebsite(contact);
+      if (fromFields) return fromFields;
 
-      // Search custom fields for anything with "website" or "url" in the field value that looks like a URL
-      const fields: Array<{ id: string; field_value?: string; value?: string }> =
-        contact.customFields ?? contact.customField ?? [];
-
-      for (const f of fields) {
-        const val = f.field_value ?? f.value ?? "";
-        if (val && looksLikeUrl(val)) return cleanUrl(val);
-      }
-
-      // Fall back to the qualification NOTE — older / Zapier-created leads store
-      // the website there ("What is your eCommerce website URL? ..."), not in a
-      // form field. Mirrors the form→notes fallback used in the qualification tab.
+      // Only the oldest / Zapier leads need the note path — fetch notes lazily.
       try {
         const notesRes = await fetch(`/api/ghl/contacts/${contactId}/notes`);
         if (notesRes.ok) {
           const notesData = await notesRes.json();
-          const qualNote = (notesData.notes ?? []).find(
-            (n: { body: string }) => isQualificationNote(n.body),
-          );
-          if (qualNote) {
-            const urlPair = parseQualificationNote(qualNote.body).find(
-              (qa) => qa.isUrl && qa.cleanedUrl,
-            );
-            if (urlPair?.cleanedUrl) return urlPair.cleanedUrl;
-          }
+          return deriveWebsite(contact, notesData.notes ?? []);
         }
       } catch {
         /* notes unavailable — fall through to no-website */
@@ -218,10 +203,21 @@ export function OpportunityCard({
   const status = deriveStatus(hasUnread, healthTier);
   const statusConfig = STATUS_CONFIG[status];
 
+  // Inert health hook for the r10n theme only. Won/lost read from the deal's own
+  // status; everything else mirrors the same quickHealthTier() the default uses.
+  // No effect outside [data-theme="r10n"] (the CSS rules are r10n-gated).
+  const r10nHealth =
+    opportunity.status === "won" ? "won"
+    : opportunity.status === "lost" ? "lost"
+    : healthTier; // healthy | at_risk | cold
 
   return (
     <div
       onClick={onClick}
+      data-r10n-oppcard
+      data-status={status}
+      data-r10n-health={r10nHealth}
+      data-selected={isSelected ? "true" : undefined}
       className={cn(
         "group relative bg-card border rounded-[10px] p-3 cursor-pointer transition-all duration-150",
         isDragging && "opacity-50 rotate-1 shadow-lg",
@@ -253,7 +249,7 @@ export function OpportunityCard({
 
       {/* Top row: Name + Rep avatar */}
       <div className="flex items-start justify-between gap-2 mb-1.5">
-        <p className={cn(
+        <p data-r10n-oppcard-name className={cn(
           "text-sm font-semibold text-foreground leading-tight line-clamp-1 transition-[padding] duration-150 flex-1 min-w-0",
           onToggleSelect && (isSelected ? "pl-5" : "group-hover:pl-5")
         )}>
@@ -263,7 +259,7 @@ export function OpportunityCard({
         {/* Rep avatar */}
         {repName && (
           <div className="flex flex-col items-center gap-0.5 shrink-0">
-            <span className="text-[8px] uppercase tracking-wider text-muted-foreground/50 font-medium leading-none">Rep</span>
+            <span data-r10n-oppcard-replabel className="text-[8px] uppercase tracking-wider text-muted-foreground/50 font-medium leading-none">Rep</span>
             <Avatar name={repName} size={24} variant="rep" />
           </div>
         )}
@@ -271,11 +267,12 @@ export function OpportunityCard({
 
       {/* Source badge + brand category badge */}
       <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-        <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium", sourceBadge.className)}>
+        <span data-r10n-oppcard-badge className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium", sourceBadge.className)}>
           {sourceBadge.label}
         </span>
         {categoryEntry && (
           <span
+            data-r10n-oppcard-badge
             className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium", CATEGORY_CONFIG[categoryEntry.category as BrandCategory]?.className)}
             title={categoryEntry.reason}
           >
@@ -308,14 +305,14 @@ export function OpportunityCard({
       )}
 
       {/* Created date */}
-      <div className="flex items-center gap-1 text-xs text-muted-foreground mb-2.5">
+      <div data-r10n-oppcard-meta className="flex items-center gap-1 text-xs text-muted-foreground mb-2.5">
         <Clock className="w-3 h-3" />
         {relativeTime(opportunity.createdAt)}
       </div>
 
       {/* Footer: Status pill + Chat icon */}
       <div className="flex items-center justify-between">
-        <span className={cn(
+        <span data-r10n-status-pill data-status={status} className={cn(
           "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border",
           statusConfig.pillClass
         )}>

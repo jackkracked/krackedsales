@@ -11,7 +11,8 @@ import type { GHLOpportunity } from "@/lib/ghl/types";
 import { relativeTime } from "@/lib/utils/date";
 import type { GHLConversation, GHLMessage } from "@/lib/ghl/types";
 import { useBrandCategoryStore, normalizeDomain } from "@/store/brand-category-store";
-import { cleanUrl, looksLikeUrl, parseQualificationNote, isQualificationNote } from "@/lib/utils/url";
+import { cleanUrl } from "@/lib/utils/url";
+import { deriveWebsite } from "@/lib/ghl/qualification";
 
 const NO_WEBSITE_TEMPLATE = `I saw you didn't leave a website? Do you have a website for your brand? We can't do a demo unless you have an active website we can access.`;
 
@@ -135,16 +136,19 @@ export function FollowUpQueue() {
    *  Returns: category string | "no_website" | null (unknown/in-flight) */
   async function resolveBrandCategory(contactId: string): Promise<string | null> {
     try {
-      const res = await fetch(`/api/ghl/contacts/${contactId}/notes`);
-      if (!res.ok) return null;
-      const data = await res.json();
-      const notes: Array<{ body: string }> = data.notes ?? [];
-      const qualNote = notes.find((n) => isQualificationNote(n.body));
-      if (!qualNote) return null;
-      const qaPairs = parseQualificationNote(qualNote.body);
-      const urlPair = qaPairs.find((qa) => qa.isUrl);
-      const raw = urlPair?.cleanedUrl ?? null;
-      if (!raw || !looksLikeUrl(raw)) return "no_website";
+      // Form-agnostic website resolution: standard field → custom field → note.
+      const contactRes = await fetch(`/api/ghl/contacts/${contactId}`);
+      const contactData = contactRes.ok ? await contactRes.json() : null;
+      const contact = contactData?.contact ?? null;
+      let raw = deriveWebsite(contact);
+      if (!raw) {
+        const notesRes = await fetch(`/api/ghl/contacts/${contactId}/notes`);
+        if (notesRes.ok) {
+          const notesData = await notesRes.json();
+          raw = deriveWebsite(contact, notesData.notes ?? []);
+        }
+      }
+      if (!raw) return "no_website";
 
       const website = cleanUrl(raw).toLowerCase();
       const domain = normalizeDomain(website);

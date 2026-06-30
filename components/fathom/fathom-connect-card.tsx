@@ -79,7 +79,7 @@ export function FathomConnectCard({ onClose }: FathomConnectCardProps) {
 
   if (isLoading) {
     return (
-      <div className="bg-card border border-border rounded-[10px] p-5">
+      <div data-r10n-fathom-card className="bg-card border border-border rounded-[10px] p-5">
         <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
           Loading Fathom settings...
@@ -91,13 +91,14 @@ export function FathomConnectCard({ onClose }: FathomConnectCardProps) {
   const connected = status?.connected ?? false;
 
   return (
-    <div className="bg-card border border-border rounded-[10px] p-5">
+    <div data-r10n-fathom-card className="bg-card border border-border rounded-[10px] p-5">
       {/* Header */}
       <div className="flex items-start justify-between mb-1">
         <div className="flex items-center gap-2.5">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/fathom-logo.png" alt="Fathom" className="w-5 h-5 rounded-[4px] object-cover shrink-0" />
           <h2
+            data-r10n-fathom-title
             className="text-sm font-semibold text-foreground"
             style={{ fontFamily: "var(--font-heading)" }}
           >
@@ -106,16 +107,16 @@ export function FathomConnectCard({ onClose }: FathomConnectCardProps) {
         </div>
 
         {/* Status indicator */}
-        <div className="flex items-center gap-1.5">
+        <div data-r10n-fathom-status data-state={connected ? "connected" : "idle"} className="flex items-center gap-1.5">
           {connected ? (
             <>
-              <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
-              <span className="text-xs text-green-600 font-medium">Connected</span>
+              <CheckCircle2 data-r10n-fathom-status-icon className="w-3.5 h-3.5 text-green-500" />
+              <span data-r10n-fathom-status-label className="text-xs text-green-600 font-medium">Connected</span>
             </>
           ) : (
             <>
               <Circle className="w-3.5 h-3.5 text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">Not connected</span>
+              <span data-r10n-fathom-status-label className="text-xs text-muted-foreground">Not connected</span>
             </>
           )}
         </div>
@@ -128,8 +129,8 @@ export function FathomConnectCard({ onClose }: FathomConnectCardProps) {
       {connected ? (
         /* ── Connected state ── */
         <div className="space-y-4">
-          <div className="rounded-[6px] border border-green-200 bg-green-50 px-3 py-2.5">
-            <p className="text-sm text-green-800 font-medium">
+          <div data-r10n-fathom-syncbox className="rounded-[6px] border border-green-200 bg-green-50 px-3 py-2.5">
+            <p data-r10n-fathom-synctext className="text-sm text-green-800 font-medium">
               Your calls are being synced automatically every 2 minutes.
             </p>
           </div>
@@ -193,7 +194,7 @@ export function FathomConnectCard({ onClose }: FathomConnectCardProps) {
           <form onSubmit={handleConnect} className="space-y-4">
             {/* API key input */}
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-foreground">
+              <label data-r10n-fathom-label className="text-xs font-medium text-foreground">
                 API Key
               </label>
               <div className="relative">

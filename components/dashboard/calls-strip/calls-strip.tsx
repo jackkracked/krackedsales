@@ -64,19 +64,20 @@ export function CallsStrip({ isAdmin }: CallsStripProps) {
     : repOptions.find((r) => r.email === viewMode)?.name?.split(" ")[0] ?? viewMode;
 
   return (
-    <div className="bg-card border border-border rounded-[10px] p-5">
+    <div data-r10n-card className="bg-card border border-border rounded-[10px] p-5">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <Phone className="w-4 h-4 text-muted-foreground" />
+          <Phone data-r10n-section-icon className="w-4 h-4 text-muted-foreground" />
           <h3
+            data-r10n-section-title
             className="text-sm font-semibold text-foreground"
             style={{ fontFamily: "var(--font-heading)" }}
           >
             Calls
           </h3>
           {events.length > 0 && (
-            <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+            <span data-r10n-count className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
               {events.length}
             </span>
           )}

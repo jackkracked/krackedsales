@@ -1,0 +1,302 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FAFAF7; --card:#FFFFFF; --ink:#1C2333; --primary:#0F3A5C; --gold:#D4A574;
+    --success:#047857; --border:#D9D4CD; --muted:#EDE9E4; --mfg:#6E6A64; --sidebar:#F3F0ED;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:1440px;height:900px;background:var(--paper);color:var(--ink);
+    font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden;font-size:13px}
+  .stage{position:relative;width:1440px;height:900px;display:flex;overflow:hidden}
+  .h{font-family:'Plus Jakarta Sans',Inter,sans-serif}
+  .tnum{font-variant-numeric:tabular-nums}
+
+  /* main nav */
+  .nav{width:184px;background:var(--sidebar);border-right:1px solid var(--border);padding:16px 10px;display:flex;flex-direction:column;gap:1px;flex-shrink:0}
+  .brand{display:flex;align-items:center;gap:8px;padding:4px 8px 14px}
+  .brand .logo{width:26px;height:26px;border-radius:7px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}
+  .brand b{font-weight:700;font-size:14px}
+  .navsec{font-size:9px;font-weight:700;letter-spacing:.14em;color:var(--mfg);opacity:.7;padding:12px 8px 4px;text-transform:uppercase}
+  .navit{display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:7px;color:#3a4150;font-weight:500;font-size:12.5px}
+  .navit.on{background:var(--primary);color:#fff;font-weight:600}
+  .navit .ic{width:15px;height:15px;border-radius:4px;background:currentColor;opacity:.55}
+  .navit.on .ic{opacity:.9}
+  .navit .badge{margin-left:auto;font-size:10px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:9px;font-weight:600}
+
+  /* meta rail */
+  .rail{width:62px;background:var(--card);border-right:1px solid var(--border);padding:10px 0;display:flex;flex-direction:column;align-items:center;gap:6px;flex-shrink:0}
+  .railit{display:flex;flex-direction:column;align-items:center;gap:3px;width:48px;padding:6px 0;border-radius:9px;color:var(--mfg)}
+  .railit .g{width:30px;height:30px;border-radius:9px;background:var(--muted);display:flex;align-items:center;justify-content:center}
+  .railit.on .g{background:var(--primary)}
+  .railit .lab{font-size:9px;font-weight:600}
+  .railit.on .lab{color:var(--ink)}
+
+  /* conversation list */
+  .list{width:300px;background:var(--card);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+  .listhd{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .chips{display:flex;gap:6px}
+  .chip{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--mfg);border:1px solid var(--border);border-radius:8px;padding:5px 9px}
+  .chip .d{width:13px;height:13px;border-radius:4px}
+  .seg{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:11px;font-weight:600}
+  .seg span{padding:5px 10px;color:var(--mfg)}
+  .seg span.on{background:var(--primary);color:#fff}
+  .row{display:flex;gap:10px;padding:11px 14px;border-bottom:1px solid var(--border);align-items:center}
+  .row.sel{background:rgba(15,58,92,.05);box-shadow:inset 3px 0 0 var(--primary)}
+  .av{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0;position:relative}
+  .av .pi{position:absolute;right:-2px;bottom:-2px;width:15px;height:15px;border-radius:5px;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:8px}
+  .rowtxt{min-width:0;flex:1}
+  .rowtxt .nm{font-weight:600;font-size:12.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rowtxt .pv{font-size:11px;color:var(--mfg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+  .rowt{font-size:10px;color:var(--mfg);flex-shrink:0;align-self:flex-start;margin-top:2px}
+  .unread{width:7px;height:7px;border-radius:50%;background:var(--primary);flex-shrink:0}
+
+  /* thread */
+  .thread{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--paper)}
+  .thd{padding:13px 18px;border-bottom:1px solid var(--border);background:var(--card);display:flex;align-items:center;gap:10px}
+  .thd .nm{font-weight:700;font-size:14px}
+  .igbadge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:#C13584;background:#FCE7F3;border:1px solid #FBCFE8;border-radius:99px;padding:2px 8px}
+  .msgs{flex:1;padding:20px 22px;display:flex;flex-direction:column;gap:12px;overflow:hidden}
+  .msg{max-width:62%;padding:10px 14px;border-radius:14px;font-size:13px;line-height:1.45}
+  .msg.in{align-self:flex-start;background:var(--card);border:1px solid var(--border);border-bottom-left-radius:5px}
+  .msg.out{align-self:flex-end;background:var(--primary);color:#fff;border-bottom-right-radius:5px}
+  .msg .tm{font-size:9px;opacity:.6;margin-top:4px}
+  .composer{margin:0 18px 18px;border:1px solid var(--border);border-radius:12px;background:var(--card);padding:11px 14px;color:var(--mfg);font-size:12.5px;display:flex;align-items:center;justify-content:space-between}
+  .composer .send{background:var(--primary);color:#fff;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:600}
+
+  /* lead sidebar */
+  .side{width:288px;background:var(--card);border-left:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column}
+  .sidehd{padding:16px;border-bottom:1px solid var(--border)}
+  .sidehd .k{font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--mfg);text-transform:uppercase}
+  .sidehd .nm{font-size:15px;font-weight:700;margin-top:4px}
+  .pchip{display:inline-flex;align-items:center;margin-top:8px;font-size:11px;font-weight:600;border-radius:99px;padding:3px 10px;border:1px solid #FBCFE8;background:#FDF2F8;color:#BE185D}
+  .sideblk{padding:14px 16px;border-bottom:1px solid var(--border)}
+  .hint{font-size:11.5px;line-height:1.55;color:var(--mfg)}
+  .qa h4{font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--mfg);text-transform:uppercase;margin-bottom:10px}
+  .qag{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .qab{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 0;font-size:11px;font-weight:500;border:1px solid var(--border);border-radius:9px}
+  .qab .ic{width:28px;height:28px;border-radius:7px;background:var(--muted);display:flex;align-items:center;justify-content:center;font-size:13px}
+  .qab.hot{border-color:rgba(15,58,92,.4);background:rgba(15,58,92,.04)}
+  /* the post-lead stage block (revealed at the end) */
+  .stagechip{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:#B45309;background:#FFFBEB;border:1px solid #FDE68A;border-radius:99px;padding:3px 10px}
+  .srcline{font-size:11.5px;color:var(--mfg);margin-top:8px}
+  .srcline b{color:var(--ink)}
+
+  /* demo modal overlay */
+  .scrim{position:absolute;inset:0;background:rgba(15,20,30,.42);z-index:60;display:flex;align-items:center;justify-content:center}
+  .modal{width:520px;background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:0 30px 80px rgba(28,35,51,.28);overflow:hidden}
+  .modalhd{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+  .modalhd .ic{width:30px;height:30px;border-radius:9px;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .modalhd .t{font-weight:800;font-size:16px}
+  .modalbd{padding:18px 22px;display:grid;grid-template-columns:1fr 1fr;gap:13px}
+  .fld{display:flex;flex-direction:column;gap:5px}
+  .fld.full{grid-column:1 / -1}
+  .fld label{font-size:10.5px;font-weight:600;color:var(--mfg)}
+  .fld .inp{border:1px solid var(--border);border-radius:8px;padding:9px 11px;font-size:12.5px;font-weight:500;color:var(--ink);background:#fff}
+  .fld .inp.src{display:flex;align-items:center;gap:7px}
+  .modalft{padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px}
+  .btn{border-radius:9px;padding:9px 16px;font-size:12.5px;font-weight:600}
+  .btn.ghost{border:1px solid var(--border);color:var(--mfg)}
+  .btn.primary{background:var(--primary);color:#fff}
+
+  /* toast */
+  .toast{position:absolute;left:50%;bottom:40px;transform:translate(-50%,20px);z-index:70;background:var(--ink);color:#fff;border-radius:12px;padding:13px 20px;display:flex;align-items:center;gap:11px;box-shadow:0 16px 40px rgba(28,35,51,.3);opacity:0}
+  .toast .dot{width:24px;height:24px;border-radius:50%;background:var(--success);display:flex;align-items:center;justify-content:center;font-size:13px}
+  .toast b{font-weight:700}
+  .toast .sub{font-size:11px;opacity:.75}
+
+  /* cursor + caption */
+  #cursor{position:absolute;width:30px;height:30px;border-radius:50%;border:2px solid var(--primary);background:rgba(15,58,92,.12);box-shadow:0 6px 18px rgba(15,58,92,.32);transform:translate(-50%,-50%);left:0;top:0;opacity:0;z-index:90}
+  #cursor .pt{position:absolute;top:50%;left:50%;width:6px;height:6px;border-radius:50%;background:var(--primary);transform:translate(-50%,-50%)}
+  #ring{position:absolute;width:30px;height:30px;border-radius:50%;border:2px solid var(--primary);transform:translate(-50%,-50%);left:0;top:0;opacity:0;z-index:89}
+  #caption{position:absolute;left:50%;bottom:26px;transform:translate(-50%,12px);background:#fff;color:var(--ink);font-size:14px;font-weight:600;padding:11px 22px;border-radius:9999px;border:1px solid rgba(28,35,51,.08);box-shadow:0 10px 34px rgba(28,35,51,.16);opacity:0;z-index:95;white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <!-- main nav -->
+  <nav class="nav">
+    <div class="brand"><span class="logo">K</span><b>Kracked Sales</b></div>
+    <div class="navsec">Work</div>
+    <div class="navit"><span class="ic"></span>Dashboard</div>
+    <div class="navit"><span class="ic"></span>Pipeline</div>
+    <div class="navit"><span class="ic"></span>Contacts</div>
+    <div class="navit"><span class="ic"></span>Proposals</div>
+    <div class="navit"><span class="ic"></span>Calls</div>
+    <div class="navit on"><span class="ic"></span>Inbox<span class="badge">12</span></div>
+    <div class="navsec">Measure</div>
+    <div class="navit"><span class="ic"></span>KPIs</div>
+    <div class="navit"><span class="ic"></span>Demo Tracker</div>
+    <div class="navit"><span class="ic"></span>Analytics</div>
+    <div class="navsec">Automate</div>
+    <div class="navit"><span class="ic"></span>Workflows</div>
+    <div class="navit"><span class="ic"></span>Follow-ups</div>
+  </nav>
+
+  <!-- meta rail -->
+  <div class="rail">
+    <div class="railit"><span class="g"></span><span class="lab">Queue</span></div>
+    <div class="railit"><span class="g"></span><span class="lab">GHL</span></div>
+    <div class="railit on"><span class="g" style="color:#fff">f</span><span class="lab">Meta</span></div>
+    <div class="railit"><span class="g"></span><span class="lab">SMS</span></div>
+    <div class="railit"><span class="g"></span><span class="lab">Email</span></div>
+    <div class="railit"><span class="g"></span><span class="lab">TikTok</span></div>
+  </div>
+
+  <!-- conversation list -->
+  <div class="list">
+    <div class="listhd">
+      <div class="chips">
+        <span class="chip"><span class="d" style="background:#1877F2"></span>FB</span>
+        <span class="chip"><span class="d" style="background:linear-gradient(45deg,#F58529,#DD2A7B,#8134AF)"></span>IG</span>
+      </div>
+      <div class="seg"><span>Unread</span><span class="on">All</span></div>
+    </div>
+    <div class="row sel">
+      <span class="av" style="background:#DB2777">WS<span class="pi" style="background:#fff;color:#DD2A7B">◉</span></span>
+      <div class="rowtxt"><div class="nm">Wild Soul Brand</div><div class="pv">I want the free email design ✨</div></div>
+      <span class="rowt">2m</span>
+    </div>
+    <div class="row">
+      <span class="av" style="background:#7C3AED">SS<span class="pi" style="background:#fff;color:#DD2A7B">◉</span></span>
+      <div class="rowtxt"><div class="nm">Sunnies Studio</div><div class="pv">how does the demo work?</div></div>
+      <span class="unread"></span>
+    </div>
+    <div class="row">
+      <span class="av" style="background:#1877F2">GE<span class="pi" style="background:#fff;color:#1877F2">f</span></span>
+      <div class="rowtxt"><div class="nm">Guy Eats</div><div class="pv">free design please</div></div>
+      <span class="rowt">1h</span>
+    </div>
+    <div class="row">
+      <span class="av" style="background:#0EA5E9">WT<span class="pi" style="background:#fff;color:#DD2A7B">◉</span></span>
+      <div class="rowtxt"><div class="nm">Weekend Threads</div><div class="pv">Thanks for the demo!</div></div>
+      <span class="rowt">3h</span>
+    </div>
+    <div class="row">
+      <span class="av" style="background:#16A34A">FW<span class="pi" style="background:#fff;color:#DD2A7B">◉</span></span>
+      <div class="rowtxt"><div class="nm">Faith Winston</div><div class="pv">of course, happy to hear it</div></div>
+      <span class="rowt">5h</span>
+    </div>
+  </div>
+
+  <!-- thread -->
+  <div class="thread">
+    <div class="thd">
+      <span class="av" style="background:#DB2777;width:32px;height:32px;font-size:12px">WS</span>
+      <div><div class="nm">Wild Soul Brand</div></div>
+      <span class="igbadge">Instagram · DM</span>
+    </div>
+    <div class="msgs">
+      <div class="msg in">Hey! Saw your post — I want the free email design ✨<div class="tm">2:14 PM</div></div>
+      <div class="msg out">Love it. We'll mock up a custom welcome email on your brand — want me to send a quick demo?<div class="tm">2:15 PM</div></div>
+      <div class="msg in">Yes please! wildsoul.co<div class="tm">2:16 PM</div></div>
+      <div class="msg out">On it — putting your demo together now.<div class="tm">2:16 PM</div></div>
+    </div>
+    <div class="composer">Type a reply…<span class="send">Send</span></div>
+  </div>
+
+  <!-- lead sidebar -->
+  <aside class="side" id="side">
+    <div class="sidehd">
+      <div class="k">Lead details</div>
+      <div class="nm h">Wild Soul Brand</div>
+      <span class="pchip">Instagram</span>
+    </div>
+    <div class="sideblk" id="hintblk">
+      <p class="hint">Not a lead yet. Create a demo to add it to the pipeline — it&apos;ll appear as an <b style="color:var(--ink)">Instagram</b> lead.</p>
+    </div>
+    <div class="sideblk" id="stageblk" style="display:none">
+      <span class="stagechip">● Demo In Progress</span>
+      <p class="srcline">Source <b>Instagram</b> · Email Design Demo (Ad funnel)</p>
+    </div>
+    <div class="sideblk qa">
+      <h4>Quick actions</h4>
+      <div class="qag">
+        <div class="qab"><span class="ic">▤</span>Task</div>
+        <div class="qab" id="demobtn"><span class="ic">▦</span>Demo</div>
+        <div class="qab"><span class="ic">▣</span>Audit</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- demo modal -->
+  <div class="scrim" id="scrim" style="display:none;opacity:0">
+    <div class="modal" id="modal">
+      <div class="modalhd"><span class="ic">▦</span><span class="t h">Create demo</span></div>
+      <div class="modalbd">
+        <div class="fld"><label>Brand name</label><div class="inp">Wild Soul</div></div>
+        <div class="fld"><label>Website</label><div class="inp">wildsoul.co</div></div>
+        <div class="fld"><label>Email type</label><div class="inp">Welcome email</div></div>
+        <div class="fld"><label>Lead source</label><div class="inp src"><span style="width:12px;height:12px;border-radius:3px;background:linear-gradient(45deg,#F58529,#DD2A7B,#8134AF)"></span>Instagram</div></div>
+        <div class="fld full"><label>Email design notes</label><div class="inp">Bohemian, earthy palette — match the IG grid.</div></div>
+      </div>
+      <div class="modalft"><span class="btn ghost">Cancel</span><span class="btn primary" id="sendbtn">Send demo</span></div>
+    </div>
+  </div>
+
+  <!-- success toast -->
+  <div class="toast" id="toast">
+    <span class="dot">✓</span>
+    <div><b>New Instagram lead added to the pipeline</b><div class="sub">Wild Soul Brand · Demo In Progress · Ad funnel</div></div>
+  </div>
+
+  <div id="ring"></div>
+  <div id="cursor"><div class="pt"></div></div>
+  <div id="caption"></div>
+</div>
+
+<script>
+  const $=s=>document.querySelector(s), stage=$('#stage'),cursor=$('#cursor'),ring=$('#ring'),caption=$('#caption');
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),eq=x=>1-Math.pow(1-clamp(x,0,1),5),lerp=(a,b,t)=>a+(b-a)*t;
+  const lerpP=(p,q,t)=>({x:lerp(p.x,q.x,t),y:lerp(p.y,q.y,t)});
+  function centerOf(sel){const r=$(sel).getBoundingClientRect(),s=stage.getBoundingClientRect();return {x:r.left-s.left+r.width/2,y:r.top-s.top+r.height/2};}
+  function ringAt(t,tc,p){const k=(t-tc)/0.5;if(k>=0&&k<1){ring.style.left=p.x+'px';ring.style.top=p.y+'px';ring.style.opacity=0.9*(1-k);ring.style.transform='translate(-50%,-50%) scale('+lerp(1,2.6,eq(k))+')';return true;}return false;}
+  function cap(text,o){caption.textContent=text;caption.style.opacity=clamp(o,0,1);caption.style.transform='translate(-50%,'+lerp(12,0,clamp(o,0,1))+'px)';}
+
+  function seek(t){
+    // demo modal: opens ~3.3, closes ~6.6
+    const modalOpen = t>=3.3 && t<6.7;
+    const mo = modalOpen ? eq(clamp((t-3.3)/0.35,0,1)) : (t>=6.7? clamp(1-(t-6.7)/0.3,0,1) : 0);
+    $('#scrim').style.display = (mo>0.001)?'flex':'none';
+    $('#scrim').style.opacity = mo;
+    $('#modal').style.transform = 'translateY('+lerp(16,0,mo)+'px) scale('+lerp(.97,1,mo)+')';
+
+    // demo button hot state when cursor approaches (2.4-3.3)
+    $('#demobtn').classList.toggle('hot', t>=2.4 && t<3.4);
+
+    // after submit (>6.8): sidebar flips to "lead" state + toast
+    const isLead = t>=6.9;
+    $('#hintblk').style.display = isLead ? 'none':'block';
+    $('#stageblk').style.display = isLead ? 'block':'none';
+    const to = clamp((t-7.0)/0.4,0,1) * (1 - clamp((t-9.6)/0.4,0,1));
+    $('#toast').style.opacity = to;
+    $('#toast').style.transform = 'translate(-50%,'+lerp(20,0,clamp((t-7.0)/0.4,0,1))+'px)';
+
+    // cursor path: idle → Demo button (2.4→3.3 click) → Send demo (5.8→6.5 click) → rest
+    let pos, press=1;
+    const demoC=centerOf('#demobtn');
+    if(t<2.4){ const from={x:demoC.x+120,y:demoC.y-220}; pos=lerpP(from,demoC,eq(clamp((t-1.0)/1.3,0,1))); }
+    else if(t<5.7){ pos=demoC; if(t>=3.25&&t<3.4)press=.8; if(modalOpen){ /* drift toward send */ const sb=centerOf('#sendbtn'); pos=lerpP(demoC,sb,eq(clamp((t-4.4)/1.3,0,1))); } }
+    else { const sb=centerOf('#sendbtn'); pos = t<6.7 ? sb : lerpP(sb,{x:sb.x-30,y:sb.y+40},eq(clamp((t-6.7)/0.5,0,1))); if(t>=6.35&&t<6.5)press=.8; }
+    cursor.style.left=pos.x+'px';cursor.style.top=pos.y+'px';cursor.style.transform='translate(-50%,-50%) scale('+press+')';
+    cursor.style.opacity = clamp((t-0.6)/0.3,0,1) * (1 - clamp((t-9.7)/0.3,0,1));
+    if(!ringAt(t,3.3,demoC) && !ringAt(t,6.42,centerOf('#sendbtn'))) ring.style.opacity=0;
+
+    // captions
+    let txt, o;
+    if(t<3.0){ txt="Work Instagram & Facebook leads right here"; o=clamp((t-0.7)/0.3,0,1)*(1-clamp((t-2.7)/0.3,0,1)); }
+    else if(t<6.7){ txt="Create a demo straight from the conversation"; o=clamp((t-3.2)/0.3,0,1)*(1-clamp((t-6.3)/0.3,0,1)); }
+    else { txt="Submit it and they're a lead — tagged Instagram"; o=clamp((t-7.0)/0.3,0,1); }
+    cap(txt,o);
+  }
+  window.seek=seek;
+  function boot(){ seek(0); window.__ready=true; }
+  if(document.fonts&&document.fonts.ready){document.fonts.ready.then(()=>setTimeout(boot,60));setTimeout(boot,1400);} else boot();
+</script>
+</body>
+</html>

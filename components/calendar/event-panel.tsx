@@ -11,7 +11,8 @@ import {
   Building2, DollarSign, Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
-import { isQualificationNote, parseQualificationNote } from "@/lib/utils/url";
+import { deriveWebsite } from "@/lib/ghl/qualification";
+import { QualificationPreview } from "@/components/shared/qualification-panel";
 import { OpportunityModal } from "@/components/pipeline/opportunity-modal";
 import type { CalendarEvent } from "./calendar-client";
 import type { GHLOpportunity } from "@/lib/ghl/types";
@@ -52,13 +53,6 @@ interface GHLContact {
 interface GHLNote {
   id: string;
   body: string;
-}
-
-interface QualificationQA {
-  question: string;
-  answer: string;
-  isUrl: boolean;
-  cleanedUrl?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -108,45 +102,12 @@ function DetailRow({
 
   return (
     <div className="flex items-center gap-2.5 min-w-0">
-      <Icon className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" />
+      <Icon data-r10n-cal-detail-icon className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" />
       <div className="min-w-0">
-        <p className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium leading-none mb-0.5">
+        <p data-r10n-cal-detail-label className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium leading-none mb-0.5">
           {label}
         </p>
         {content}
-      </div>
-    </div>
-  );
-}
-
-// ─── Qualification Section ────────────────────────────────────────────────────
-
-function QualificationSection({ pairs }: { pairs: QualificationQA[] }) {
-  if (pairs.length === 0) return null;
-
-  return (
-    <div>
-      <p className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium mb-2.5">
-        Qualification
-      </p>
-      <div className="space-y-2.5">
-        {pairs.map((qa, i) => (
-          <div key={i}>
-            <p className="text-[11px] text-muted-foreground leading-snug">{qa.question}</p>
-            {qa.isUrl && qa.cleanedUrl ? (
-              <a
-                href={qa.cleanedUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm font-medium text-primary hover:underline break-all"
-              >
-                {qa.answer}
-              </a>
-            ) : (
-              <p className="text-sm font-medium text-foreground leading-snug">{qa.answer}</p>
-            )}
-          </div>
-        ))}
       </div>
     </div>
   );
@@ -207,12 +168,11 @@ export function EventPanel({
   const contact = contactDetails?.contact ?? null;
   const opportunity = contactDetails?.opportunity ?? null;
 
-  const qualPairs: QualificationQA[] = (() => {
-    const notes = contactDetails?.notes ?? [];
-    const qualNote = notes.find((n) => isQualificationNote(n.body));
-    if (!qualNote) return [];
-    return parseQualificationNote(qualNote.body);
-  })();
+  // Form-agnostic website: standard field → custom field → note. Falls back to
+  // the opportunity's contact website if the contact-details fetch lacked one.
+  const resolvedWebsite =
+    deriveWebsite(contact, contactDetails?.notes) ??
+    deriveWebsite(opportunity?.contact ?? null);
 
   // ── Derived values ─────────────────────────────────────────────────────────
   const color = event
@@ -256,6 +216,7 @@ export function EventPanel({
       <div
         onClick={onClose}
         aria-hidden="true"
+        data-r10n-cal-backdrop
         className={cn(
           "fixed inset-0 z-40 bg-black/30 transition-opacity duration-200",
           isOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
@@ -267,6 +228,7 @@ export function EventPanel({
         role="dialog"
         aria-modal="true"
         aria-label="Event details"
+        data-r10n-cal-panel
         className={cn(
           "fixed right-0 top-0 z-50 h-full w-[380px] max-w-[90vw]",
           "bg-card border-l border-border shadow-xl flex flex-col",
@@ -275,26 +237,27 @@ export function EventPanel({
         )}
       >
         {/* ── Header: title + close ─────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-3 px-5 pt-4 pb-3 shrink-0">
+        <div data-r10n-cal-panel-header className="flex items-start justify-between gap-3 px-5 pt-4 pb-3 shrink-0">
           <div className="flex items-start gap-3 min-w-0">
             <div
               className="w-1 rounded-full shrink-0 mt-0.5"
               style={{ backgroundColor: color, height: 36 }}
             />
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-foreground leading-snug">
+              <p data-r10n-cal-panel-title className="text-sm font-semibold text-foreground leading-snug">
                 {event?.summary ?? ""}
               </p>
               {repCal && (
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                  <span className="text-xs text-muted-foreground">{repCal.repName}</span>
+                  <span data-r10n-cal-panel-rep className="text-xs text-muted-foreground">{repCal.repName}</span>
                 </div>
               )}
             </div>
           </div>
           <button
             onClick={onClose}
+            data-r10n-cal-panel-close
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
             aria-label="Close"
           >
@@ -305,7 +268,7 @@ export function EventPanel({
         {/* ── Date/time + status + actions (compact) ────────────────── */}
         <div className="px-5 pb-4 space-y-3 shrink-0 border-b border-border">
           {startDt && (
-            <div className="flex items-center gap-2.5 text-sm">
+            <div data-r10n-cal-dateline className="flex items-center gap-2.5 text-sm">
               <Calendar className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" />
               <span className="font-medium text-foreground">{formatEventDate(startDt, tz)}</span>
               {endDt && (
@@ -320,7 +283,10 @@ export function EventPanel({
           )}
 
           {event?.appointmentStatus && (
-            <span className={cn(
+            <span
+              data-r10n-cal-status
+              data-status={event.appointmentStatus}
+              className={cn(
               "inline-flex items-center px-2 py-0.5 rounded-[4px] text-[10px] font-semibold uppercase tracking-wide",
               event.appointmentStatus === "confirmed" && "bg-emerald-500/10 text-emerald-700",
               event.appointmentStatus === "cancelled" && "bg-destructive/10 text-destructive",
@@ -338,6 +304,7 @@ export function EventPanel({
                 href={event.hangoutLink}
                 target="_blank"
                 rel="noopener noreferrer"
+                data-r10n-cal-meet
                 className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-[8px] text-xs font-medium bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 border border-emerald-500/20 transition-colors"
               >
                 <Video className="w-3.5 h-3.5" />
@@ -348,6 +315,7 @@ export function EventPanel({
               <>
                 <button
                   onClick={onBook}
+                  data-r10n-cal-secondary
                   className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-[8px] text-xs font-medium border border-border text-foreground hover:bg-muted transition-colors"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
@@ -355,6 +323,7 @@ export function EventPanel({
                 </button>
                 <button
                   onClick={() => setConfirmingCancel(true)}
+                  data-r10n-cal-danger
                   className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-[8px] text-xs font-medium border border-destructive/30 text-destructive hover:bg-destructive/10 transition-colors"
                 >
                   <XCircle className="w-3.5 h-3.5" />
@@ -390,11 +359,11 @@ export function EventPanel({
             <div className="px-5 py-4 space-y-3">
               {/* Name + stage */}
               <div>
-                <p className="text-base font-semibold text-foreground leading-tight">
+                <p data-r10n-cal-contact-name className="text-base font-semibold text-foreground leading-tight">
                   {contactDisplayName(contact)}
                 </p>
                 {opportunity?.pipelineStageId_name && (
-                  <span className="inline-flex items-center mt-1 px-2 py-0.5 rounded-[4px] text-[10px] font-semibold uppercase tracking-wide bg-primary/10 text-primary">
+                  <span data-r10n-cal-stage className="inline-flex items-center mt-1 px-2 py-0.5 rounded-[4px] text-[10px] font-semibold uppercase tracking-wide bg-primary/10 text-primary">
                     {opportunity.pipelineStageId_name}
                   </span>
                 )}
@@ -415,12 +384,12 @@ export function EventPanel({
                     value={contact.companyName || opportunity?.contact?.companyName || ""}
                   />
                 )}
-                {(contact.website || opportunity?.contact?.website) && (
+                {resolvedWebsite && (
                   <DetailRow
                     icon={Globe}
                     label="Website"
-                    value={(contact.website || opportunity?.contact?.website || "").replace(/^https?:\/\//, "")}
-                    href={contact.website || opportunity?.contact?.website}
+                    value={resolvedWebsite.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}
+                    href={resolvedWebsite}
                     external
                   />
                 )}
@@ -444,6 +413,7 @@ export function EventPanel({
                     {contact.tags.map((tag) => (
                       <span
                         key={tag}
+                        data-r10n-cal-tag
                         className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-medium bg-muted text-muted-foreground"
                       >
                         {tag}
@@ -457,6 +427,7 @@ export function EventPanel({
               {opportunity && (
                 <button
                   onClick={() => setShowOppModal(true)}
+                  data-r10n-cal-secondary
                   className="flex items-center justify-center gap-2 w-full px-3 py-2 rounded-[8px] text-xs font-medium border border-border text-foreground hover:bg-muted transition-colors"
                 >
                   <Briefcase className="w-3.5 h-3.5" />
@@ -476,11 +447,12 @@ export function EventPanel({
             </div>
           )}
 
-          {/* Qualification Q&A */}
-          {qualPairs.length > 0 && (
+          {/* Qualification Q&A — shared resolver (lead-form fields first, note
+              fallback) so new-form leads render their answers. */}
+          {contactId && (
             <div className="px-5 pb-4">
               <div className="border-t border-border/50 pt-4">
-                <QualificationSection pairs={qualPairs} />
+                <QualificationPreview contactId={contactId} limit={20} />
               </div>
             </div>
           )}
@@ -489,7 +461,7 @@ export function EventPanel({
           {event?.description && event.description.trim() && (
             <div className="px-5 pb-4">
               <div className="border-t border-border/50 pt-4">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium mb-1.5">
+                <p data-r10n-cal-section-label className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium mb-1.5">
                   Notes
                 </p>
                 <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
@@ -504,6 +476,7 @@ export function EventPanel({
             <div className="px-5 pb-4">
               <button
                 onClick={onBook}
+                data-r10n-cal-secondary
                 className="flex items-center justify-center gap-2 w-full px-3 py-2.5 rounded-[8px] text-xs font-medium border border-border text-foreground hover:bg-muted transition-colors"
               >
                 <Phone className="w-3.5 h-3.5" />

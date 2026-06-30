@@ -3,22 +3,15 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  RefreshCw, ExternalLink, Tag, TrendingUp, FileText,
+  RefreshCw, Tag, TrendingUp,
   ListTodo, Layers, ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
-import { parseQualificationNote, isQualificationNote, cleanUrl } from "@/lib/utils/url";
+import { QualificationPreview } from "@/components/shared/qualification-panel";
 import { CreateTaskModal } from "@/components/shared/create-task-modal";
 import { CreateDemoModal } from "@/components/shared/create-demo-modal";
 import { CreateAuditModal } from "@/components/shared/create-audit-modal";
 import type { GHLOpportunity } from "@/lib/ghl/types";
-
-interface Note {
-  id: string;
-  body: string;
-  dateAdded?: string;
-  createdAt?: string;
-}
 
 export interface LeadDetailsSidebarProps {
   contactId: string;
@@ -42,6 +35,17 @@ function stageBadgeClass(name: string) {
     if (key.includes(fragment)) return cls;
   }
   return "bg-muted text-muted-foreground border-border";
+}
+
+// Maps a stage name to a calm semantic tier for the R10N status-pill treatment.
+// Inert under the default theme (only the [data-theme="r10n"] [data-status] rules read it).
+function stageStatusTier(name: string): string {
+  const key = name.toLowerCase();
+  if (key.includes("won")) return "won";
+  if (key.includes("lost")) return "lost";
+  if (key.includes("unresponsive")) return "no_response";
+  if (key.includes("qualified")) return "awaiting_reply";
+  return "open";
 }
 
 export function LeadDetailsSidebar({ contactId, contactName = "" }: LeadDetailsSidebarProps) {
@@ -71,17 +75,6 @@ export function LeadDetailsSidebar({ contactId, contactName = "" }: LeadDetailsS
     select: (data) => {
       return data;
     },
-  });
-
-  const { data: notesData, isLoading: notesLoading } = useQuery<{ notes: Note[] }>({
-    queryKey: ["notes", contactId],
-    queryFn: async () => {
-      const res = await fetch(`/api/ghl/contacts/${contactId}/notes`);
-      if (!res.ok) return { notes: [] };
-      return res.json();
-    },
-    enabled: !!contactId,
-    staleTime: 2 * 60 * 1000,
   });
 
   // Fetch pipeline stages for the stage change dropdown
@@ -115,10 +108,7 @@ export function LeadDetailsSidebar({ contactId, contactName = "" }: LeadDetailsS
     ? pipelinesData?.pipelines?.find((p) => p.id === opp.pipelineId)?.name
     : null;
 
-  const notes = notesData?.notes ?? [];
-  const qualNote = notes.find((n) => isQualificationNote(n.body));
-  const qaPairs = qualNote ? parseQualificationNote(qualNote.body) : [];
-  const isLoading = oppLoading || notesLoading;
+  const isLoading = oppLoading;
 
   async function handleStageChange(stageId: string) {
     if (!opp || stageId === displayStageId) return;
@@ -147,20 +137,20 @@ export function LeadDetailsSidebar({ contactId, contactName = "" }: LeadDetailsS
 
   return (
     <>
-    <div className="w-72 shrink-0 border-l border-border bg-card flex flex-col overflow-y-auto">
+    <div data-r10n-leadsidebar className="w-72 shrink-0 border-l border-border bg-card flex flex-col overflow-y-auto">
       {/* Header — contact + stage at a glance */}
       <div className="px-4 py-4 border-b border-border shrink-0">
-        <p className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-[0.14em] mb-1.5">Lead details</p>
+        <p data-r10n-sidebar-label className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-[0.14em] mb-1.5">Lead details</p>
         {contactName && (
-          <p className="text-[15px] font-bold text-foreground tracking-[-0.01em] truncate mb-2.5" style={{ fontFamily: "var(--font-heading)" }}>{contactName}</p>
+          <p data-r10n-sidebar-name className="text-[15px] font-bold text-foreground tracking-[-0.01em] truncate mb-2.5" style={{ fontFamily: "var(--font-heading)" }}>{contactName}</p>
         )}
         {opp && displayStageName && (
           savingStage ? (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border border-primary/30 bg-primary/5 text-primary">
+            <span data-r10n-status-pill data-status="open" className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border border-primary/30 bg-primary/5 text-primary">
               <RefreshCw className="w-3 h-3 animate-spin" /> Saving…
             </span>
           ) : (
-            <span className={cn("inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border", stageBadgeClass(displayStageName))}>
+            <span data-r10n-status-pill data-status={stageStatusTier(displayStageName)} className={cn("inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border", stageBadgeClass(displayStageName))}>
               {displayStageName}
             </span>
           )
@@ -181,21 +171,22 @@ export function LeadDetailsSidebar({ contactId, contactName = "" }: LeadDetailsS
               <>
                 {/* Deal value — prominent */}
                 {opp.monetaryValue != null && opp.monetaryValue > 0 && (
-                  <div className="flex items-center justify-between rounded-[10px] border border-border/60 bg-muted/20 px-3.5 py-3">
-                    <span className="text-xs text-muted-foreground">Deal value</span>
-                    <span className="text-lg font-bold text-foreground tabular-nums" style={{ fontFamily: "var(--font-heading)" }}>
+                  <div data-r10n-sidebar-card className="flex items-center justify-between rounded-[10px] border border-border/60 bg-muted/20 px-3.5 py-3">
+                    <span data-r10n-sidebar-cardlabel className="text-xs text-muted-foreground">Deal value</span>
+                    <span data-r10n-sidebar-dealvalue className="text-lg font-bold text-foreground tabular-nums" style={{ fontFamily: "var(--font-heading)" }}>
                       ${opp.monetaryValue.toLocaleString()}
                     </span>
                   </div>
                 )}
 
                 {/* Change stage */}
-                <div className="rounded-[10px] border border-border/60 bg-muted/20 px-3 py-2.5">
-                  <p className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1.5"><TrendingUp className="w-3 h-3" /> Change stage</p>
+                <div data-r10n-sidebar-card className="rounded-[10px] border border-border/60 bg-muted/20 px-3 py-2.5">
+                  <p data-r10n-sidebar-cardlabel className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1.5"><TrendingUp data-r10n-sidebar-cardicon className="w-3 h-3" /> Change stage</p>
                   <select
                     value={displayStageId}
                     onChange={(e) => handleStageChange(e.target.value)}
                     disabled={pipelineStages.length === 0 || savingStage}
+                    data-r10n-sidebar-select
                     className="w-full text-sm font-medium text-foreground bg-transparent border-none outline-none cursor-pointer appearance-none disabled:opacity-50"
                   >
                     {pipelineStages.length === 0 && (
@@ -207,7 +198,7 @@ export function LeadDetailsSidebar({ contactId, contactName = "" }: LeadDetailsS
                   </select>
                 </div>
 
-                {pipelineName && <p className="text-[11px] text-muted-foreground px-0.5">{pipelineName}{opp.contact?.companyName ? ` · ${opp.contact.companyName}` : ""}</p>}
+                {pipelineName && <p data-r10n-sidebar-meta className="text-[11px] text-muted-foreground px-0.5">{pipelineName}{opp.contact?.companyName ? ` · ${opp.contact.companyName}` : ""}</p>}
               </>
             ) : (
               <p className="text-xs text-muted-foreground italic">No opportunity found</p>
@@ -215,9 +206,11 @@ export function LeadDetailsSidebar({ contactId, contactName = "" }: LeadDetailsS
           </div>
 
           {/* ── Quick Actions ──────────────────────────────────── */}
-          {opp && (
+          {/* Shown whenever we have a contact (e.g. GHL-synced Instagram DMs that have
+              no opportunity yet) — not only when an opportunity exists. */}
+          {(contactId || opp) && (
             <div className="px-4 py-4 border-b border-border/60">
-              <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.12em] mb-2.5">
+              <h4 data-r10n-sidebar-section className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.12em] mb-2.5">
                 Quick actions
               </h4>
               <div className="grid grid-cols-3 gap-2">
@@ -229,9 +222,10 @@ export function LeadDetailsSidebar({ contactId, contactName = "" }: LeadDetailsS
                   <button
                     key={label}
                     onClick={onClick}
+                    data-r10n-quickaction
                     className="group flex flex-col items-center gap-1.5 py-3 text-[11px] font-medium text-foreground border border-border rounded-[9px] hover:border-primary/40 hover:bg-primary/[0.03] transition-all active:scale-[0.97]"
                   >
-                    <span className="w-7 h-7 rounded-[7px] bg-muted/70 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+                    <span data-r10n-quickaction-icon className="w-7 h-7 rounded-[7px] bg-muted/70 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
                       <Icon className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
                     </span>
                     {label}
@@ -244,13 +238,13 @@ export function LeadDetailsSidebar({ contactId, contactName = "" }: LeadDetailsS
           {/* ── Tags ───────────────────────────────────────────── */}
           {opp?.contact?.tags && opp.contact.tags.length > 0 && (
             <div className="px-4 py-4 border-b border-border/60 space-y-2.5">
-              <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+              <h4 data-r10n-sidebar-section className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
                 <Tag className="w-3 h-3" />
                 Tags
               </h4>
               <div className="flex flex-wrap gap-1.5">
                 {opp.contact.tags.map((tag) => (
-                  <span key={tag} className="px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary font-medium">
+                  <span key={tag} data-r10n-sidebar-tag className="px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary font-medium">
                     {tag}
                   </span>
                 ))}
@@ -259,67 +253,41 @@ export function LeadDetailsSidebar({ contactId, contactName = "" }: LeadDetailsS
           )}
 
           {/* ── Qualification Q&A ──────────────────────────────── */}
-          <div className="px-4 py-4 space-y-2.5">
-            <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
-              <FileText className="w-3 h-3" />
-              Qualification
-            </h4>
-            {qaPairs.length > 0 ? (
-              <div className="space-y-2">
-                {qaPairs.map((qa, i) => (
-                  <div key={i} className="bg-muted/30 rounded-[7px] p-2.5 border border-border/50">
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1 leading-tight">
-                      {qa.question}
-                    </p>
-                    {qa.isUrl && qa.cleanedUrl ? (
-                      <a
-                        href={qa.cleanedUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-primary hover:underline flex items-center gap-1 break-all"
-                      >
-                        <ExternalLink className="w-3 h-3 shrink-0" />
-                        {qa.cleanedUrl}
-                      </a>
-                    ) : (
-                      <p className="text-xs text-foreground leading-relaxed">{qa.answer}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground italic">No qualification data</p>
-            )}
+          {/* Shared resolver: lead-form custom fields first (new + old forms),
+              qualification-note fallback for the oldest leads. */}
+          <div className="px-4 py-4">
+            <QualificationPreview contactId={contactId} limit={6} />
           </div>
 
         </div>
       )}
     </div>
 
-    {/* Modals */}
-    {showCreateTask && opp && (
+    {/* Modals — fall back to the contactId prop when there's no opportunity yet
+        (GHL-synced Instagram DMs), so Quick Actions work for any contact. */}
+    {showCreateTask && (
       <CreateTaskModal
-        contactId={opp.contact?.id}
-        contactName={opp.contact?.name}
-        opportunityId={opp.id}
+        contactId={opp?.contact?.id ?? contactId}
+        contactName={opp?.contact?.name ?? contactName}
+        opportunityId={opp?.id}
         onClose={() => setShowCreateTask(false)}
       />
     )}
-    {showCreateDemo && opp && (
+    {showCreateDemo && (
       <CreateDemoModal
-        contactId={opp.contact?.id}
-        contactName={opp.contact?.name}
-        contactEmail={opp.contact?.email}
-        contactPhone={opp.contact?.phone}
-        opportunityId={opp.id}
-        opportunitySource={opp.source}
+        contactId={opp?.contact?.id ?? contactId}
+        contactName={opp?.contact?.name ?? contactName}
+        contactEmail={opp?.contact?.email}
+        contactPhone={opp?.contact?.phone}
+        opportunityId={opp?.id}
+        opportunitySource={opp?.source}
         onClose={() => setShowCreateDemo(false)}
       />
     )}
-    {showCreateAudit && opp && (
+    {showCreateAudit && (
       <CreateAuditModal
-        contactId={opp.contact?.id}
-        contactName={opp.contact?.name}
+        contactId={opp?.contact?.id ?? contactId}
+        contactName={opp?.contact?.name ?? contactName}
         onClose={() => setShowCreateAudit(false)}
       />
     )}

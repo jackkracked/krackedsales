@@ -23,8 +23,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
-import { X, Plus, Loader2, ChevronDown, ListTree, AlertTriangle, Check, Sigma, Divide, Target as TargetIcon } from "lucide-react";
+import { X, Plus, Loader2, ChevronDown, ListTree, AlertTriangle, Check, Sigma, Divide, RotateCcw, TrendingUp, TrendingDown, Target as TargetIcon } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import {
+  paceForWindow,
+  deriveCadenceTargets,
+  type Cadence,
+  type CadenceTargets,
+  type PaceResult,
+} from "@/lib/kpi/pacing";
+import { fmtValue } from "./metric-cell";
 import type {
   DatasetDescriptor,
   FieldDef,
@@ -74,8 +82,54 @@ function defaultDirectionFor(metricKey: string): TargetDirection {
   return lowerSignals.some((s) => k.includes(s)) ? "lower" : "higher";
 }
 
+/** One saved target as the API now returns it (cadence-aware). */
+interface SavedTarget {
+  target: number; // legacy single value = monthly
+  direction: TargetDirection;
+  daily: number | null;
+  weekly: number | null;
+  monthly: number | null;
+  anchor: Cadence;
+}
+
 interface TargetResponse {
-  targets: Record<string, { target: number; direction: TargetDirection }>;
+  targets: Record<string, SavedTarget>;
+}
+
+/** Cadence rows render in descending magnitude. */
+const CADENCE_ORDER: Cadence[] = ["monthly", "weekly", "daily"];
+const CADENCE_LABEL: Record<Cadence, string> = {
+  daily: "Daily",
+  weekly: "Weekly",
+  monthly: "Monthly",
+};
+
+/** The cadence-target save payload (what POST /api/kpis/targets expects). */
+interface TargetSavePayload {
+  metricKey: string;
+  direction: TargetDirection;
+  anchor: Cadence;
+  daily: number | null;
+  weekly: number | null;
+  monthly: number | null;
+}
+
+/** Round a derived/stored value for display in an input (no thousands separators). */
+function formatTargetInput(value: number, unit: MetricUnit): string {
+  if (unit === "percent" || unit === "ratio") {
+    return String(Math.round(value * 100) / 100);
+  }
+  return String(Math.round(value));
+}
+
+/** A stored cadence ≈ its derived value (within rounding) → it's still "auto". */
+function approxEqual(a: number, b: number): boolean {
+  return Math.abs(a - b) <= Math.abs(b) * 0.015 + 0.5;
+}
+
+function parseTargetInput(raw: string): number | null {
+  const n = parseFloat(raw);
+  return raw.trim() !== "" && Number.isFinite(n) ? n : null;
 }
 
 // ─── Operator labels (human wording for the operator dropdown) ──────────────────
@@ -358,10 +412,8 @@ export function KpiConfigurator({
   const [unitTouched, setUnitTouched] = useState(false);
   const [showRows, setShowRows] = useState(false);
 
-  // ── Target (independent of the engine wiring) ─────────────────────────────────
-  // Empty string = no target value typed; "" with no saved target means none set.
-  const [targetValue, setTargetValue] = useState("");
-  const [targetDirection, setTargetDirection] = useState<TargetDirection>("higher");
+  // Target editing (cadence values, anchor, direction) is self-contained in
+  // <TargetSection/> below — it only needs the saved record + the page window.
 
   // ── Registry (datasets + fields + operators + enums) ──────────────────────────
   const registryQuery = useQuery<RegistryResponse>({
@@ -521,7 +573,7 @@ export function KpiConfigurator({
     },
   });
 
-  // ── Target: load current, seed inputs, save independently ─────────────────────
+  // ── Target: load the saved record; the cadence editor + save live in TargetSection ─
   const targetsQuery = useQuery<TargetResponse>({
     queryKey: ["kpi-targets"],
     queryFn: async () => {
@@ -533,28 +585,12 @@ export function KpiConfigurator({
     staleTime: 60 * 1000,
   });
 
-  // Seed the target inputs whenever the drawer opens for a metric (or its saved
-  // target arrives). If none is saved, fall back to the smart default direction.
-  useEffect(() => {
-    if (!open || !metricKey) return;
-    const saved = targetsQuery.data?.targets[metricKey];
-    if (saved) {
-      setTargetValue(String(saved.target));
-      setTargetDirection(saved.direction);
-    } else {
-      setTargetValue("");
-      setTargetDirection(defaultDirectionFor(metricKey));
-    }
-  }, [open, metricKey, targetsQuery.data]);
-
   const saveTargetMutation = useMutation({
-    mutationFn: async () => {
-      const parsed = parseFloat(targetValue);
-      if (!Number.isFinite(parsed)) throw new Error("Enter a number for the target.");
+    mutationFn: async (payload: TargetSavePayload) => {
       const res = await fetch("/api/kpis/targets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ metricKey, target: parsed, direction: targetDirection }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const msg = await res.json().catch(() => null);
@@ -566,9 +602,6 @@ export function KpiConfigurator({
       queryClient.invalidateQueries({ queryKey: ["kpi-targets"] });
     },
   });
-
-  const targetParsed = parseFloat(targetValue);
-  const targetSaveable = targetValue.trim() !== "" && Number.isFinite(targetParsed);
 
   // ── Escape to close + focus management ────────────────────────────────────────
   useEffect(() => {
@@ -726,6 +759,7 @@ export function KpiConfigurator({
             role="dialog"
             aria-modal="true"
             aria-label={`Configure ${metricLabel}`}
+            data-r10n-kpi-drawer
             className="relative w-full max-w-md bg-card border-l border-border shadow-2xl flex flex-col h-full outline-none"
             initial={reduce ? { opacity: 0 } : { x: "100%" }}
             animate={reduce ? { opacity: 1 } : { x: 0 }}
@@ -735,10 +769,10 @@ export function KpiConfigurator({
             {/* Header */}
             <div className="flex items-start justify-between px-5 py-4 border-b border-border shrink-0">
               <div className="min-w-0">
-                <p className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground/60">
+                <p data-r10n-kpi-eyebrow className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground/60">
                   Detail View · KPI Wiring
                 </p>
-                <h2 className="text-base font-bold text-foreground mt-0.5 truncate">{metricLabel}</h2>
+                <h2 data-r10n-kpi-drawer-title className="text-base font-bold text-foreground mt-0.5 truncate">{metricLabel}</h2>
               </div>
               <button
                 onClick={onClose}
@@ -764,23 +798,18 @@ export function KpiConfigurator({
                 <>
                   {/* TARGET — always visible; independent of the wiring below */}
                   <TargetSection
-                    value={targetValue}
-                    direction={targetDirection}
+                    metricKey={metricKey}
                     unit={draft.unit}
+                    range={range}
+                    previewValue={previewQuery.data?.value ?? null}
+                    savedTarget={targetsQuery.data?.targets[metricKey]}
                     loading={targetsQuery.isLoading}
-                    saveable={targetSaveable}
                     saving={saveTargetMutation.isPending}
                     saved={saveTargetMutation.isSuccess && !saveTargetMutation.isPending}
                     error={(saveTargetMutation.error as Error)?.message ?? null}
-                    onValueChange={(v) => {
-                      saveTargetMutation.reset();
-                      setTargetValue(v);
-                    }}
-                    onDirectionChange={(d) => {
-                      saveTargetMutation.reset();
-                      setTargetDirection(d);
-                    }}
-                    onSave={() => saveTargetMutation.mutate()}
+                    reduce={reduce}
+                    onEdited={() => saveTargetMutation.reset()}
+                    onSave={(payload) => saveTargetMutation.mutate(payload)}
                   />
 
                   {/* ① INTEGRATION */}
@@ -792,6 +821,8 @@ export function KpiConfigurator({
                           <button
                             key={integ}
                             type="button"
+                            data-r10n-kpi-chip
+                            data-selected={selected}
                             onClick={() => pickIntegration(integ)}
                             className={cn(
                               "px-3 py-1.5 rounded-[7px] text-xs font-semibold transition-colors active:scale-95",
@@ -808,6 +839,9 @@ export function KpiConfigurator({
                       {/* Combine — a visually distinct mode, not a real integration. */}
                       <button
                         type="button"
+                        data-r10n-kpi-chip
+                        data-mode="true"
+                        data-selected={isCombineMode}
                         onClick={() => pickIntegration(COMBINE)}
                         className={cn(
                           "flex items-center gap-1 px-3 py-1.5 rounded-[7px] text-xs font-semibold transition-colors active:scale-95",
@@ -823,6 +857,9 @@ export function KpiConfigurator({
                       {/* Ratio — a visually distinct mode, not a real integration. */}
                       <button
                         type="button"
+                        data-r10n-kpi-chip
+                        data-mode="true"
+                        data-selected={isRatioMode}
                         onClick={() => pickIntegration(RATIO)}
                         className={cn(
                           "flex items-center gap-1 px-3 py-1.5 rounded-[7px] text-xs font-semibold transition-colors active:scale-95",
@@ -847,6 +884,7 @@ export function KpiConfigurator({
                           action={
                             <button
                               type="button"
+                              data-r10n-kpi-link
                               onClick={addTerm}
                               className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:text-primary/80 transition-colors active:scale-95"
                             >
@@ -940,7 +978,7 @@ export function KpiConfigurator({
                                     {metricLabelFor(draft.denominator)}
                                   </span>
                                   {draft.numerator === draft.denominator && (
-                                    <span className="text-amber-600"> — that always equals 1; pick two different KPIs.</span>
+                                    <span data-r10n-kpi-warn> : that always equals 1; pick two different KPIs.</span>
                                   )}
                                 </p>
                               )}
@@ -957,6 +995,8 @@ export function KpiConfigurator({
                                       <button
                                         key={opt.v}
                                         type="button"
+                                        data-r10n-kpi-seg
+                                        data-selected={on}
                                         onClick={() => {
                                           setUnitTouched(true);
                                           setDraft((p) => ({ ...p, unit: opt.v }));
@@ -997,6 +1037,8 @@ export function KpiConfigurator({
                                 <button
                                   key={ds.key}
                                   type="button"
+                                  data-r10n-kpi-radio
+                                  data-selected={selected}
                                   onClick={() => pickDataset(ds.key)}
                                   className={cn(
                                     "w-full text-left rounded-[7px] border px-3.5 py-2.5 transition-colors active:scale-[0.99]",
@@ -1007,12 +1049,14 @@ export function KpiConfigurator({
                                 >
                                   <div className="flex items-center gap-2.5">
                                     <span
+                                      data-r10n-kpi-radio-ring
+                                      data-selected={selected}
                                       className={cn(
                                         "w-3.5 h-3.5 rounded-full border-2 shrink-0 flex items-center justify-center transition-colors",
                                         selected ? "border-primary" : "border-border",
                                       )}
                                     >
-                                      {selected && <span className="w-1.5 h-1.5 rounded-full bg-primary" />}
+                                      {selected && <span data-r10n-kpi-radio-dot className="w-1.5 h-1.5 rounded-full bg-primary" />}
                                     </span>
                                     <div className="min-w-0">
                                       <p className="text-sm font-medium text-foreground truncate">{ds.label}</p>
@@ -1102,6 +1146,7 @@ export function KpiConfigurator({
                           action={
                             <button
                               type="button"
+                              data-r10n-kpi-link
                               onClick={addFilter}
                               className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:text-primary/80 transition-colors active:scale-95"
                             >
@@ -1164,6 +1209,7 @@ export function KpiConfigurator({
                   Cancel
                 </button>
                 <button
+                  data-r10n-kpi-primary-btn
                   onClick={() => configInput && saveMutation.mutate(configInput)}
                   disabled={!isValid || saveMutation.isPending}
                   className={cn(
@@ -1227,10 +1273,10 @@ function Step({
     <div>
       <div className="flex items-center justify-between mb-2.5">
         <div className="flex items-center gap-2">
-          <span className="flex items-center justify-center w-4 h-4 rounded-full bg-primary/10 text-primary text-[9px] font-bold">
+          <span data-r10n-kpi-step className="flex items-center justify-center w-4 h-4 rounded-full bg-primary/10 text-primary text-[9px] font-bold">
             {n}
           </span>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+          <p data-r10n-kpi-step-label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
         </div>
         {action}
       </div>
@@ -1239,77 +1285,237 @@ function Step({
   );
 }
 
-// ─── Target section — a target applies to ANY KPI, so it lives above the wiring ──
+// ─── Target section — three cadence targets + a live pace preview ────────────────
+// A target applies to ANY KPI, so it lives above the wiring. You set ONE cadence and
+// the others auto-derive (editable). The preview re-runs the real pacing engine
+// against the page's current window, so it reads exactly what the cell badge will.
+
+type CadenceState = "anchor" | "override" | "auto";
+
+const EMPTY_INPUTS: Record<Cadence, string> = { daily: "", weekly: "", monthly: "" };
+
+/** Which cadences are explicitly set (anchor + any bespoke override) vs auto-derived. */
+function computeExplicit(saved: SavedTarget, anchor: Cadence): Set<Cadence> {
+  const explicit = new Set<Cadence>();
+  const anchorVal = saved[anchor] ?? saved.monthly ?? saved.target;
+  if (anchorVal == null) return explicit;
+  explicit.add(anchor);
+  const derived = deriveCadenceTargets(anchor, anchorVal);
+  for (const k of CADENCE_ORDER) {
+    const sv = saved[k];
+    if (sv != null && k !== anchor && !approxEqual(sv, derived[k]!)) explicit.add(k);
+  }
+  return explicit;
+}
+
+/** "Jun 1 – Jun 26" from a [start, end) window (end exclusive → show end − 1). */
+function formatSpan(start: string, end: string): string {
+  const s = new Date(start + "T12:00:00");
+  const e = new Date(end + "T12:00:00");
+  e.setDate(e.getDate() - 1);
+  const f = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return s.toDateString() === e.toDateString() ? f(s) : `${f(s)} – ${f(e)}`;
+}
+
+/** Human descriptor for the window, derived from the engine's classification. */
+function paceWindowLabel(pace: PaceResult): string {
+  switch (pace.periodKind) {
+    case "day": return "This day";
+    case "week": return pace.prorated ? "Week to date" : "This week";
+    case "month": return pace.prorated ? "Month to date" : "This month";
+    case "upcoming": return "Upcoming";
+    default: return "This range";
+  }
+}
 
 function TargetSection({
-  value,
-  direction,
+  metricKey,
   unit,
+  range,
+  previewValue,
+  savedTarget,
   loading,
-  saveable,
   saving,
   saved,
   error,
-  onValueChange,
-  onDirectionChange,
+  reduce,
+  onEdited,
   onSave,
 }: {
-  value: string;
-  direction: TargetDirection;
+  metricKey: string;
   unit: MetricUnit;
+  range?: { start: string; end: string };
+  previewValue: number | null;
+  savedTarget?: SavedTarget;
   loading: boolean;
-  saveable: boolean;
   saving: boolean;
   saved: boolean;
   error: string | null;
-  onValueChange: (v: string) => void;
-  onDirectionChange: (d: TargetDirection) => void;
-  onSave: () => void;
+  reduce: boolean | null;
+  onEdited: () => void;
+  onSave: (payload: TargetSavePayload) => void;
 }) {
-  // The unit prefix/suffix mirrors how the card formats the number.
-  const prefix = unit === "currency" ? "$" : null;
-  const suffix = unit === "percent" ? "%" : unit === "ratio" ? "×" : null;
+  const [inputs, setInputs] = useState<Record<Cadence, string>>(EMPTY_INPUTS);
+  const [anchor, setAnchor] = useState<Cadence>("monthly");
+  const [explicit, setExplicit] = useState<Set<Cadence>>(new Set());
+  const [direction, setDirection] = useState<TargetDirection>("higher");
+
+  // Reseed when the metric changes, or when its saved record first arrives — but
+  // never clobber edits already in progress for the current metric.
+  const lastSeedKey = useRef<string | null>(null);
+  const dirty = useRef(false);
+  useEffect(() => {
+    const keyChanged = lastSeedKey.current !== metricKey;
+    if (!keyChanged && dirty.current) return;
+    lastSeedKey.current = metricKey;
+    dirty.current = false;
+    if (savedTarget) {
+      const a = savedTarget.anchor ?? "monthly";
+      setInputs({
+        daily: savedTarget.daily != null ? formatTargetInput(savedTarget.daily, unit) : "",
+        weekly: savedTarget.weekly != null ? formatTargetInput(savedTarget.weekly, unit) : "",
+        monthly: savedTarget.monthly != null ? formatTargetInput(savedTarget.monthly, unit) : "",
+      });
+      setExplicit(computeExplicit(savedTarget, a));
+      setAnchor(a);
+      setDirection(savedTarget.direction);
+    } else {
+      setInputs(EMPTY_INPUTS);
+      setExplicit(new Set());
+      setAnchor("monthly");
+      setDirection(defaultDirectionFor(metricKey));
+    }
+  }, [metricKey, savedTarget, unit]);
+
+  // Editing a cadence makes it the anchor and re-derives every still-auto cadence.
+  const handleCadence = useCallback(
+    (c: Cadence, raw: string) => {
+      onEdited();
+      dirty.current = true;
+      const num = parseTargetInput(raw);
+      const nextInputs: Record<Cadence, string> = { ...inputs, [c]: raw };
+      const nextExplicit = new Set(explicit);
+      let nextAnchor = anchor;
+      if (num != null) {
+        nextExplicit.add(c);
+        nextAnchor = c;
+        const derived = deriveCadenceTargets(c, num);
+        for (const k of CADENCE_ORDER) {
+          if (k !== c && !nextExplicit.has(k)) nextInputs[k] = formatTargetInput(derived[k]!, unit);
+        }
+      } else {
+        nextExplicit.delete(c);
+        if (anchor === c) {
+          const remaining = CADENCE_ORDER.filter((k) => nextExplicit.has(k));
+          if (remaining.length > 0) {
+            // Promote another explicitly-set cadence to anchor; re-derive the auto ones.
+            nextAnchor = remaining[0];
+            const av = parseTargetInput(nextInputs[nextAnchor]);
+            if (av != null) {
+              const derived = deriveCadenceTargets(nextAnchor, av);
+              for (const k of CADENCE_ORDER) {
+                if (!nextExplicit.has(k)) nextInputs[k] = formatTargetInput(derived[k]!, unit);
+              }
+            }
+          } else {
+            // Cleared the only target — the auto siblings were derived from it, so blank
+            // everything back to a clean "no target set" state rather than stranding them.
+            for (const k of CADENCE_ORDER) nextInputs[k] = "";
+            nextAnchor = "monthly";
+          }
+        }
+      }
+      setInputs(nextInputs);
+      setExplicit(nextExplicit);
+      setAnchor(nextAnchor);
+    },
+    [inputs, explicit, anchor, unit, onEdited],
+  );
+
+  // ↺ — revert an override back to the auto-derived value.
+  const handleReAuto = useCallback(
+    (c: Cadence) => {
+      onEdited();
+      dirty.current = true;
+      const nextExplicit = new Set(explicit);
+      nextExplicit.delete(c);
+      const nextInputs = { ...inputs };
+      const av = parseTargetInput(inputs[anchor]);
+      if (av != null) {
+        const derived = deriveCadenceTargets(anchor, av);
+        nextInputs[c] = formatTargetInput(derived[c]!, unit);
+      }
+      setExplicit(nextExplicit);
+      setInputs(nextInputs);
+    },
+    [inputs, explicit, anchor, unit, onEdited],
+  );
+
+  const handleDirection = useCallback(
+    (d: TargetDirection) => {
+      onEdited();
+      dirty.current = true;
+      setDirection(d);
+    },
+    [onEdited],
+  );
+
+  const parsed: Record<Cadence, number | null> = {
+    daily: parseTargetInput(inputs.daily),
+    weekly: parseTargetInput(inputs.weekly),
+    monthly: parseTargetInput(inputs.monthly),
+  };
+  const saveable = CADENCE_ORDER.some((k) => (parsed[k] ?? 0) > 0);
+
+  // Live pace preview — same engine the badge uses, against the page's window.
+  const pace = useMemo<PaceResult | null>(() => {
+    if (!range) return null;
+    const targets: CadenceTargets = { daily: parsed.daily, weekly: parsed.weekly, monthly: parsed.monthly };
+    return paceForWindow({ value: previewValue ?? 0, direction, targets, window: range });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range?.start, range?.end, inputs.daily, inputs.weekly, inputs.monthly, direction, previewValue]);
+
+  function stateOf(c: Cadence): CadenceState {
+    if (anchor === c && explicit.has(c)) return "anchor";
+    if (explicit.has(c)) return "override";
+    return "auto";
+  }
 
   return (
-    <div className="rounded-[7px] border border-border bg-muted/20 px-3.5 py-3">
-      <div className="flex items-center gap-2 mb-2.5">
-        <span className="flex items-center justify-center w-4 h-4 rounded-full bg-gold/15 text-gold">
-          <TargetIcon className="w-2.5 h-2.5" />
-        </span>
-        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Target</p>
+    <div data-r10n-kpi-target className="rounded-[7px] border border-border bg-muted/20 px-3.5 py-3">
+      <div className="flex items-center justify-between gap-2 mb-2.5">
+        <div className="flex items-center gap-2">
+          <span data-r10n-kpi-target-badge className="flex items-center justify-center w-4 h-4 rounded-full bg-gold/15 text-gold">
+            <TargetIcon className="w-2.5 h-2.5" />
+          </span>
+          <p data-r10n-kpi-step-label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Target</p>
+        </div>
+        <p className="text-[10px] text-muted-foreground/70">Set one · we pace the rest</p>
       </div>
 
       {loading ? (
-        <div className="h-8 w-full rounded-md bg-muted animate-pulse" />
+        <div className="space-y-2">
+          <div className="h-7 w-full rounded-md bg-muted animate-pulse" />
+          <div className="h-7 w-full rounded-md bg-muted animate-pulse" />
+          <div className="h-7 w-full rounded-md bg-muted animate-pulse" />
+        </div>
       ) : (
-        <div className="space-y-2.5">
-          {/* Target value */}
-          <Field label="Goal value">
-            <div className="relative">
-              {prefix && (
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs font-medium text-muted-foreground">
-                  {prefix}
-                </span>
-              )}
-              <input
-                type="number"
-                inputMode="decimal"
-                value={value}
-                onChange={(e) => onValueChange(e.target.value)}
-                placeholder="No target set"
-                className={cn(
-                  "w-full rounded-[7px] border border-border bg-background py-1.5 text-xs font-medium tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30",
-                  prefix ? "pl-7" : "pl-3",
-                  suffix ? "pr-7" : "pr-3",
-                )}
+        <div className="space-y-3">
+          {/* Three cadence rows, descending magnitude */}
+          <div className="space-y-1.5">
+            {CADENCE_ORDER.map((c) => (
+              <CadenceRow
+                key={c}
+                cadence={c}
+                value={inputs[c]}
+                unit={unit}
+                state={stateOf(c)}
+                reduce={reduce}
+                onChange={(v) => handleCadence(c, v)}
+                onReAuto={() => handleReAuto(c)}
               />
-              {suffix && (
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-muted-foreground">
-                  {suffix}
-                </span>
-              )}
-            </div>
-          </Field>
+            ))}
+          </div>
 
           {/* Direction — segmented toggle */}
           <Field label="Which way is good?">
@@ -1323,7 +1529,9 @@ function TargetSection({
                   <button
                     key={opt.v}
                     type="button"
-                    onClick={() => onDirectionChange(opt.v)}
+                    data-r10n-kpi-seg
+                    data-selected={on}
+                    onClick={() => handleDirection(opt.v)}
                     aria-pressed={on}
                     className={cn(
                       "flex-1 px-2 py-1.5 rounded-[6px] text-[11px] font-semibold transition-colors active:scale-95",
@@ -1344,6 +1552,11 @@ function TargetSection({
             </p>
           </Field>
 
+          {/* Live pace preview — what the badge reads for the window you're viewing */}
+          {pace && range && (
+            <PacePreview pace={pace} hasValue={previewValue != null} unit={unit} span={formatSpan(range.start, range.end)} />
+          )}
+
           {error && (
             <div className="flex items-start gap-2 rounded-[7px] bg-destructive/8 border border-destructive/20 px-2.5 py-1.5 text-[11px] text-destructive">
               <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
@@ -1354,7 +1567,9 @@ function TargetSection({
           {/* Save target — its OWN action, independent of the config save */}
           <button
             type="button"
-            onClick={onSave}
+            onClick={() =>
+              onSave({ metricKey, direction, anchor, daily: parsed.daily, weekly: parsed.weekly, monthly: parsed.monthly })
+            }
             disabled={!saveable || saving}
             className={cn(
               "w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-[7px] transition-colors active:scale-[0.98]",
@@ -1373,6 +1588,226 @@ function TargetSection({
             {saved ? "Target saved" : "Save target"}
           </button>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── One cadence row: label · $ input · state tag ────────────────────────────────
+
+function CadenceRow({
+  cadence,
+  value,
+  unit,
+  state,
+  reduce,
+  onChange,
+  onReAuto,
+}: {
+  cadence: Cadence;
+  value: string;
+  unit: MetricUnit;
+  state: CadenceState;
+  reduce: boolean | null;
+  onChange: (v: string) => void;
+  onReAuto: () => void;
+}) {
+  const prefix = unit === "currency" ? "$" : null;
+  const suffix = unit === "percent" ? "%" : unit === "ratio" ? "×" : null;
+  const isAnchor = state === "anchor";
+  const isAuto = state === "auto";
+
+  return (
+    <div className="flex items-center gap-2.5">
+      {/* Cadence label */}
+      <span
+        className={cn(
+          "w-[52px] shrink-0 text-[10px] font-bold uppercase tracking-wider transition-colors",
+          isAnchor ? "text-foreground" : "text-muted-foreground/80",
+        )}
+      >
+        {CADENCE_LABEL[cadence]}
+      </span>
+
+      {/* Value input */}
+      <div className="relative flex-1 min-w-0">
+        {prefix && (
+          <span
+            className={cn(
+              "pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-medium transition-colors",
+              isAuto ? "text-muted-foreground/60" : "text-muted-foreground",
+            )}
+          >
+            {prefix}
+          </span>
+        )}
+        <input
+          type="number"
+          inputMode="decimal"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          aria-label={`${CADENCE_LABEL[cadence]} target`}
+          placeholder="—"
+          data-r10n-kpi-input
+          data-cadence-state={state}
+          className={cn(
+            "w-full rounded-[7px] border py-1.5 text-xs font-medium tabular-nums transition-colors",
+            "focus:outline-none focus:ring-2 focus:ring-primary/30 focus:text-foreground focus:bg-background",
+            prefix ? "pl-6" : "pl-2.5",
+            suffix ? "pr-6" : "pr-2.5",
+            isAnchor
+              ? "border-primary/35 bg-background text-foreground font-semibold ring-1 ring-primary/15"
+              : isAuto
+                ? "border-border bg-muted/30 text-muted-foreground/80 placeholder:text-muted-foreground/40"
+                : "border-border bg-background text-foreground placeholder:text-muted-foreground/40",
+          )}
+        />
+        {suffix && (
+          <span
+            className={cn(
+              "pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-medium transition-colors",
+              isAuto ? "text-muted-foreground/60" : "text-muted-foreground",
+            )}
+          >
+            {suffix}
+          </span>
+        )}
+      </div>
+
+      {/* State tag — fixed width so every input edge aligns */}
+      <div className="w-[52px] shrink-0 flex justify-end">
+        {isAnchor ? (
+          <motion.span
+            layoutId="kpi-target-anchor"
+            transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 36 }}
+            data-r10n-kpi-anchor
+            className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-gold"
+          >
+            <span data-r10n-kpi-anchor-dot className="h-1.5 w-1.5 rounded-full bg-gold" aria-hidden />
+            Anchor
+          </motion.span>
+        ) : isAuto ? (
+          <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/55">
+            Auto
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={onReAuto}
+            title="Reset to the auto-paced value"
+            className="inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70 hover:text-foreground transition-colors active:scale-95"
+          >
+            <RotateCcw className="w-2.5 h-2.5" />
+            Auto
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Pace preview — the real engine, against the page's current window ───────────
+
+function PacePreview({
+  pace,
+  hasValue,
+  unit,
+  span,
+}: {
+  pace: PaceResult;
+  hasValue: boolean;
+  unit: MetricUnit;
+  span: string;
+}) {
+  const upcoming = pace.periodKind === "upcoming";
+  const wholePeriod =
+    !pace.prorated &&
+    (pace.periodKind === "day" || pace.periodKind === "week" || pace.periodKind === "month");
+  const refWord = wholePeriod ? "target" : "pace";
+  const elapsedPct = pace.periodDays > 0 ? Math.min(100, (pace.elapsedDays / pace.periodDays) * 100) : 0;
+
+  // Verdict (only when there's a live value to plot).
+  let verdict: { tone: "good" | "bad" | "neutral"; text: string } | null = null;
+  if (hasValue && !upcoming && !pace.zeroTarget) {
+    if (pace.neutral) {
+      verdict = { tone: "neutral", text: `On ${refWord}` };
+    } else {
+      const pct = Math.abs(pace.deltaPct);
+      const pctText = `${pct < 10 ? pct.toFixed(1) : Math.round(pct)}%`;
+      verdict = {
+        tone: pace.isGood ? "good" : "bad",
+        text: `${pctText} ${pace.isAbove ? "above" : "below"} ${refWord}`,
+      };
+    }
+  }
+
+  return (
+    <div data-r10n-kpi-pace className="rounded-[7px] bg-gold/[0.07] px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <div className="flex items-center gap-1.5">
+          <TargetIcon data-r10n-kpi-pace-icon className="w-2.5 h-2.5 text-gold" />
+          <p data-r10n-kpi-pace-label className="text-[9px] font-bold uppercase tracking-widest text-gold/90">Pace · right now</p>
+        </div>
+        <p className="text-[10px] font-medium text-muted-foreground tabular-nums truncate">
+          {paceWindowLabel(pace)} · {span}
+        </p>
+      </div>
+
+      {upcoming ? (
+        <p className="text-[11px] text-muted-foreground">This period hasn&apos;t started yet.</p>
+      ) : pace.zeroTarget ? (
+        <p className="text-[11px] text-muted-foreground">Set a target above 0 to see the pace.</p>
+      ) : (
+        <>
+          {/* The headline pace target */}
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-[13px] font-bold text-foreground tabular-nums" style={{ fontFamily: "var(--font-heading)" }}>
+              {fmtValue(pace.expected, unit)}
+              <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                {wholePeriod ? `${refWord}` : `pace of ${fmtValue(pace.fullPeriodTarget, unit)}`}
+              </span>
+            </p>
+            {verdict && (
+              <span
+                data-r10n-kpi-verdict
+                data-tone={verdict.tone}
+                className={cn(
+                  "inline-flex items-center gap-1 text-[10px] font-semibold shrink-0",
+                  verdict.tone === "good"
+                    ? "text-success"
+                    : verdict.tone === "bad"
+                      ? "text-destructive"
+                      : "text-muted-foreground",
+                )}
+              >
+                {verdict.tone === "neutral" ? (
+                  <span data-r10n-kpi-anchor-dot className="h-1 w-1 rounded-full bg-gold" aria-hidden />
+                ) : pace.isAbove ? (
+                  <TrendingUp className="w-2.5 h-2.5" aria-hidden />
+                ) : (
+                  <TrendingDown className="w-2.5 h-2.5" aria-hidden />
+                )}
+                {verdict.text}
+              </span>
+            )}
+          </div>
+
+          {/* Elapsed-days bar — visualises the proration (why the pace target is what it is) */}
+          {pace.prorated && (
+            <div className="mt-2">
+              <div className="relative h-1 w-full rounded-full bg-border/55 overflow-hidden">
+                <div
+                  data-r10n-kpi-pace-bar
+                  className="absolute inset-y-0 left-0 rounded-full bg-gold/70 transition-[width] duration-500 ease-out motion-reduce:transition-none"
+                  style={{ width: `${elapsedPct}%` }}
+                />
+              </div>
+              <p className="mt-1 text-[10px] text-muted-foreground tabular-nums">
+                {pace.elapsedDays} of {pace.periodDays} days elapsed
+              </p>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -1428,6 +1863,8 @@ function TermRow({
         <div className="flex shrink-0 rounded-[6px] border border-border overflow-hidden">
           <button
             type="button"
+            data-r10n-kpi-sign
+            data-selected={isAdd}
             onClick={() => onChange({ sign: 1 })}
             aria-label="Add this KPI"
             aria-pressed={isAdd}
@@ -1495,6 +1932,7 @@ function Select({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        data-r10n-kpi-input
         className={cn(
           "w-full appearance-none rounded-[7px] border border-border bg-background pl-3 pr-7 py-1.5 text-xs font-medium text-foreground",
           "focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer",
@@ -1628,6 +2066,8 @@ function FilterValue({
               <button
                 key={ev.value}
                 type="button"
+                data-r10n-kpi-seg
+                data-selected={on}
                 onClick={() =>
                   onChange(on ? selected.filter((v) => v !== ev.value) : [...selected, ev.value])
                 }
@@ -1667,6 +2107,8 @@ function FilterValue({
           <button
             key={String(opt.v)}
             type="button"
+            data-r10n-kpi-seg
+            data-selected={on === opt.v}
             onClick={() => onChange(opt.v)}
             className={cn(
               "flex-1 px-2 py-1 rounded-[5px] text-[11px] font-medium transition-colors active:scale-95",
@@ -1692,6 +2134,7 @@ function FilterValue({
     return (
       <input
         type="date"
+        data-r10n-kpi-input
         value={typeof value === "string" ? value : ""}
         onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-[7px] border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -1704,6 +2147,7 @@ function FilterValue({
   return (
     <input
       type="text"
+      data-r10n-kpi-input
       value={typeof value === "string" ? value : ""}
       onChange={(e) => onChange(e.target.value)}
       placeholder={op === "contains" ? "Contains…" : "Value…"}
@@ -1716,6 +2160,7 @@ function NumberInput({ value, onChange }: { value: number; onChange: (n: number)
   return (
     <input
       type="number"
+      data-r10n-kpi-input
       value={Number.isFinite(value) ? value : 0}
       onChange={(e) => {
         const n = parseFloat(e.target.value);
@@ -1753,8 +2198,8 @@ function LivePreview({
   // Not enough config to preview yet — calm prompt, not an error.
   if (!ready) {
     return (
-      <div className="rounded-[7px] bg-primary/5 border border-primary/20 px-3.5 py-3">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70 mb-1">
+      <div data-r10n-kpi-preview className="rounded-[7px] bg-primary/5 border border-primary/20 px-3.5 py-3">
+        <p data-r10n-kpi-preview-label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70 mb-1">
           Live Preview
         </p>
         <p className="text-xs text-muted-foreground">
@@ -1777,13 +2222,14 @@ function LivePreview({
   const rowsExpanded = combine || ratio ? true : showRows;
 
   return (
-    <div className="rounded-[7px] bg-primary/5 border border-primary/20 px-3.5 py-3 space-y-2.5">
+    <div data-r10n-kpi-preview className="rounded-[7px] bg-primary/5 border border-primary/20 px-3.5 py-3 space-y-2.5">
       <div className="flex items-center justify-between">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70">
+        <p data-r10n-kpi-preview-label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70">
           Live Preview
         </p>
         {hasRows && !combine && !ratio && (
           <button
+            data-r10n-kpi-link
             onClick={onToggleRows}
             className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:text-primary/80 transition-colors active:scale-95"
           >
@@ -1855,6 +2301,8 @@ function LivePreview({
                     <div className="flex items-center gap-1.5 min-w-0">
                       {combine && (
                         <span
+                          data-r10n-kpi-sign-glyph
+                          data-subtract={isSubtract}
                           className={cn(
                             "shrink-0 text-[11px] font-bold tabular-nums",
                             isSubtract ? "text-destructive" : "text-primary",

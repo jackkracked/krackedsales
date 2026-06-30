@@ -49,10 +49,10 @@ function CostCard({
   saved: boolean;
 }) {
   return (
-    <div className="bg-card border border-border rounded-[10px] p-5">
+    <div className="bg-card border border-border rounded-[10px] p-5" data-r10n-settings-card>
       <div className="flex items-center gap-2 mb-1">
-        <Icon className="w-4 h-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>
+        <Icon className="w-4 h-4 text-muted-foreground" data-r10n-settings-cardicon />
+        <h2 className="text-sm font-semibold text-foreground" style={{ fontFamily: "var(--font-heading)" }} data-r10n-settings-cardtitle>
           {title}
         </h2>
       </div>

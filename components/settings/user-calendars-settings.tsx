@@ -143,13 +143,14 @@ export function UserCalendarsSettings() {
   const canSubmit = repName.trim() && repEmail.trim() && ghlCalendarId.trim();
 
   return (
-    <div className="bg-card border border-border rounded-[10px] p-5">
+    <div className="bg-card border border-border rounded-[10px] p-5" data-r10n-settings-card>
       {/* Header */}
       <div className="flex items-center gap-2 mb-1">
-        <CalendarDays className="w-4 h-4 text-muted-foreground" />
+        <CalendarDays className="w-4 h-4 text-muted-foreground" data-r10n-settings-cardicon />
         <h2
           className="text-sm font-semibold text-foreground"
           style={{ fontFamily: "var(--font-heading)" }}
+          data-r10n-settings-cardtitle
         >
           Team Calendars
         </h2>
@@ -217,6 +218,8 @@ export function UserCalendarsSettings() {
                 type="button"
                 onClick={() => toggleMutation.mutate({ id: cal.id, isActive: !cal.isActive })}
                 disabled={toggleMutation.isPending}
+                data-r10n-settings-toggle
+                data-state={cal.isActive ? "on" : "off"}
                 className={cn(
                   "relative w-9 h-5 rounded-full transition-colors flex-shrink-0",
                   cal.isActive ? "bg-primary" : "bg-border",

@@ -3,7 +3,6 @@ import { db } from "@/lib/db";
 import { users, calls, proposals } from "@/lib/db/schema";
 import { and, eq, gte, lte, count, sum, isNotNull } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
-import type { GHLOpportunity } from "@/lib/ghl/types";
 import {
   startOfDay, endOfDay,
   startOfWeek, endOfWeek,
@@ -65,30 +64,22 @@ export async function GET(req: NextRequest) {
     .from(users)
     .where(eq(users.isActive, true));
 
-  // Fetch all GHL opportunities once
   const locId = locationId();
-  let allOpps: GHLOpportunity[] = [];
-  try {
-    const res = await ghl.get<{
-      opportunities: GHLOpportunity[];
-      meta?: { total?: number };
-    }>(`/opportunities/search?location_id=${locId}&limit=100&page=1`);
-    allOpps = res.opportunities ?? [];
 
-    const total = res.meta?.total ?? allOpps.length;
-    if (total > 100) {
-      const pages = Math.ceil(total / 100);
-      const rest = await Promise.all(
-        Array.from({ length: pages - 1 }, (_, i) =>
-          ghl.get<{ opportunities: GHLOpportunity[] }>(
-            `/opportunities/search?location_id=${locId}&limit=100&page=${i + 2}`
-          )
-        )
+  // Reliable open-opportunity count for a rep: ask GHL for the filtered total
+  // directly (assigned_to + status=open) and read meta.total. Fetching ALL opps
+  // and filtering client-side was unreliable — GHL's page-based pagination over
+  // 3000+ opps returned inconsistent partial sets, so the number flickered.
+  async function openCountFor(ghlUserId: string): Promise<number> {
+    try {
+      const res = await ghl.get<{ meta?: { total?: number } }>(
+        `/opportunities/search?location_id=${locId}&assigned_to=${ghlUserId}&status=open&limit=1`
       );
-      for (const page of rest) allOpps.push(...(page.opportunities ?? []));
+      return res.meta?.total ?? 0;
+    } catch (err) {
+      console.error("[rep-performance] open count failed:", err);
+      return 0;
     }
-  } catch (err) {
-    console.error("[rep-performance] GHL fetch failed:", err);
   }
 
   // Build per-rep metrics
@@ -122,10 +113,8 @@ export async function GET(req: NextRequest) {
       const totalClosed = Number(dealRow?.c ?? 0);
       const closedValue = Number(dealRow?.v ?? 0);
 
-      // Open leads (GHL opps assigned to this user, status open)
-      const openLeads = user.ghlUserId
-        ? allOpps.filter((o) => o.assignedTo === user.ghlUserId && o.status === "open").length
-        : 0;
+      // Open leads — reliable filtered count from GHL (matches the drill-down).
+      const openLeads = user.ghlUserId ? await openCountFor(user.ghlUserId) : 0;
 
       return {
         id: user.id,

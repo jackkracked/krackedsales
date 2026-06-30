@@ -139,24 +139,26 @@ export function PipelineSelector({ pipelines, selectedId, onSelect }: PipelineSe
       {/* Trigger button */}
       <button
         onClick={() => setOpen(!open)}
+        data-r10n-pipeselector-trigger
+        data-open={open ? "true" : undefined}
         className={cn(
           "flex items-center gap-2.5 pl-3 pr-2.5 py-2 rounded-[8px] border-2 transition-all",
           "hover:shadow-sm cursor-pointer bg-card",
           open ? "border-primary/40 shadow-sm" : "border-border"
         )}
       >
-        <div className={cn("w-7 h-7 rounded-[6px] flex items-center justify-center shrink-0", selectedConfig.iconBg)}>
+        <div data-r10n-pipeselector-icon className={cn("w-7 h-7 rounded-[6px] flex items-center justify-center shrink-0", selectedConfig.iconBg)}>
           <selectedConfig.icon className={cn("w-3.5 h-3.5", selectedConfig.iconColor)} />
         </div>
         <div className="flex flex-col items-start min-w-0">
-          <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60 font-medium leading-none">
+          <span data-r10n-pipeselector-label className="text-[9px] uppercase tracking-wider text-muted-foreground/60 font-medium leading-none">
             Active pipeline
           </span>
-          <span className="text-sm font-semibold text-foreground truncate max-w-[240px] leading-tight">
+          <span data-r10n-pipeselector-name className="text-sm font-semibold text-foreground truncate max-w-[240px] leading-tight">
             {selected ? cleanName(selected.name) : "Select pipeline"}
           </span>
         </div>
-        <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border shrink-0", selectedConfig.badge)}>
+        <span data-r10n-pipeselector-badge className={cn("inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border shrink-0", selectedConfig.badge)}>
           {selectedConfig.label}
         </span>
         <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform shrink-0", open && "rotate-180")} />
@@ -164,7 +166,7 @@ export function PipelineSelector({ pipelines, selectedId, onSelect }: PipelineSe
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute top-full left-0 mt-1.5 w-[420px] bg-card border border-border rounded-[10px] shadow-xl z-50 overflow-hidden">
+        <div data-r10n-pipeselector-menu className="absolute top-full left-0 mt-1.5 w-[420px] bg-card border border-border rounded-[10px] shadow-xl z-50 overflow-hidden">
           {/* Search */}
           <div className="p-2.5 border-b border-border">
             <div className="relative">
@@ -175,6 +177,7 @@ export function PipelineSelector({ pipelines, selectedId, onSelect }: PipelineSe
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search pipelines..."
+                data-r10n-search
                 className="w-full pl-8 pr-3 py-2 text-sm bg-muted/50 rounded-[6px] border-0 outline-none focus:ring-2 focus:ring-primary/20 placeholder:text-muted-foreground/50"
               />
             </div>
@@ -186,7 +189,7 @@ export function PipelineSelector({ pipelines, selectedId, onSelect }: PipelineSe
               <div key={groupName}>
                 {/* Group header with extending line */}
                 <div className="flex items-center gap-2 px-3 pt-3 pb-1.5">
-                  <span className="text-[10px] uppercase tracking-[0.1em] font-semibold text-muted-foreground/50 shrink-0">
+                  <span data-r10n-pipeselector-group className="text-[10px] uppercase tracking-[0.1em] font-semibold text-muted-foreground/50 shrink-0">
                     {groupName}
                   </span>
                   <div className="flex-1 h-px bg-border/60" />
@@ -203,6 +206,8 @@ export function PipelineSelector({ pipelines, selectedId, onSelect }: PipelineSe
                     <button
                       key={p.id}
                       onClick={() => { onSelect(p.id); setOpen(false); setSearch(""); }}
+                      data-r10n-pipeselector-row
+                      data-selected={isSelected ? "true" : undefined}
                       className={cn(
                         "w-full flex items-center gap-2.5 px-3 py-2 transition-colors text-left",
                         isSelected
@@ -212,29 +217,29 @@ export function PipelineSelector({ pipelines, selectedId, onSelect }: PipelineSe
                       )}
                     >
                       {/* Icon */}
-                      <div className={cn("w-8 h-8 rounded-[6px] flex items-center justify-center shrink-0", config.iconBg)}>
+                      <div data-r10n-pipeselector-rowicon className={cn("w-8 h-8 rounded-[6px] flex items-center justify-center shrink-0", config.iconBg)}>
                         <config.icon className={cn("w-4 h-4", config.iconColor)} />
                       </div>
 
                       {/* Name + last active */}
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground truncate leading-tight">
+                        <p data-r10n-pipeselector-rowname className="text-sm font-medium text-foreground truncate leading-tight">
                           {cleanName(p.name)}
                         </p>
-                        <p className="text-[11px] text-muted-foreground/60 leading-tight">
+                        <p data-r10n-pipeselector-rowsub className="text-[11px] text-muted-foreground/60 leading-tight">
                           {isArchive ? "Archived" : "Last active today"}
                         </p>
                       </div>
 
                       {/* Lead count pill */}
                       {count !== undefined && (
-                        <span className="text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full tabular-nums shrink-0">
+                        <span data-r10n-pipeselector-count className="text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full tabular-nums shrink-0">
                           {count} leads
                         </span>
                       )}
 
                       {/* Category badge */}
-                      <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold border shrink-0", config.badge)}>
+                      <span data-r10n-pipeselector-badge className={cn("inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold border shrink-0", config.badge)}>
                         {config.label}
                       </span>
 

@@ -98,13 +98,19 @@ export function TemplatesClient() {
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-card border border-border rounded-full text-xs text-muted-foreground">
-            <Layers className="w-3.5 h-3.5" />
+          <div
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-card border border-border rounded-full text-xs text-muted-foreground"
+            data-r10n-tmpl-chip
+          >
+            <Layers className="w-3.5 h-3.5" data-r10n-tmpl-chip-icon />
             {templates.length} template{templates.length !== 1 ? "s" : ""}
           </div>
           {abGroupCount > 0 && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-card border border-border rounded-full text-xs text-muted-foreground">
-              <FlaskConical className="w-3.5 h-3.5" />
+            <div
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-card border border-border rounded-full text-xs text-muted-foreground"
+              data-r10n-tmpl-chip
+            >
+              <FlaskConical className="w-3.5 h-3.5" data-r10n-tmpl-chip-icon />
               {abGroupCount} A/B test{abGroupCount !== 1 ? "s" : ""} running
             </div>
           )}
@@ -112,6 +118,7 @@ export function TemplatesClient() {
         <button
           onClick={() => setEditing("new")}
           className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-primary text-primary-foreground rounded-[8px] hover:bg-primary/90 transition-colors"
+          data-r10n-tmpl-newbtn
         >
           <Plus className="w-4 h-4" />
           New Template
@@ -120,19 +127,20 @@ export function TemplatesClient() {
 
       {/* Empty state */}
       {templates.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-20 gap-4 text-center">
-          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+        <div className="flex flex-col items-center justify-center py-20 gap-4 text-center" data-r10n-tmpl-empty>
+          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center" data-r10n-tmpl-empty-glyph>
             <Layers className="w-6 h-6 text-primary" />
           </div>
           <div>
-            <p className="text-sm font-semibold text-foreground">No templates yet</p>
-            <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+            <p className="text-sm font-semibold text-foreground" data-r10n-tmpl-empty-title>No templates yet</p>
+            <p className="text-xs text-muted-foreground mt-1 max-w-xs" data-r10n-tmpl-empty-sub>
               Create your first template and set conditions for when it should be used in the reply queue.
             </p>
           </div>
           <button
             onClick={() => setEditing("new")}
             className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-primary text-primary-foreground rounded-[8px] hover:bg-primary/90 transition-colors"
+            data-r10n-tmpl-newbtn
           >
             <Plus className="w-4 h-4" />
             Create first template
@@ -145,13 +153,13 @@ export function TemplatesClient() {
         <div key={gi}>
           {/* A/B group header */}
           {group.key && (
-            <div className="flex items-center gap-2 mb-2">
-              <FlaskConical className="w-3.5 h-3.5 text-primary" />
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            <div className="flex items-center gap-2 mb-2" data-r10n-tmpl-grouphead>
+              <FlaskConical className="w-3.5 h-3.5 text-primary" data-r10n-tmpl-groupicon />
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide" data-r10n-tmpl-grouplabel>
                 A/B Test: {group.key}
               </span>
               <div className="flex-1 h-px bg-border" />
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-[10px] text-muted-foreground" data-r10n-tmpl-groupmeta>
                 {group.templates.map((t) => `${t.name} (${t.weight}%)`).join(" vs ")}
               </span>
             </div>

@@ -16,10 +16,10 @@ interface MessageNodeData {
 }
 
 function responseColor(rate?: number) {
-  if (rate === undefined || rate === null) return "#94a3b8";
-  if (rate >= 0.4) return "#16a34a";
-  if (rate >= 0.2) return "#d97706";
-  return "#dc2626";
+  if (rate === undefined || rate === null) return "var(--r10n-flow-rate-none, #94a3b8)";
+  if (rate >= 0.4) return "var(--r10n-flow-rate-high, #16a34a)";
+  if (rate >= 0.2) return "var(--r10n-flow-rate-mid, #d97706)";
+  return "var(--r10n-flow-rate-low, #dc2626)";
 }
 
 export function MessageNode({
@@ -110,6 +110,8 @@ export function MessageNode({
       {/* Node card */}
       <div
         onClick={handleToggle}
+        data-r10n-flow-node="message"
+        data-selected={selected ? "true" : undefined}
         className={cn(
           "bg-card cursor-pointer transition-all duration-150 overflow-hidden rounded-xl",
           selected ? "shadow-lg ring-2 ring-primary" : "shadow-md hover:shadow-lg hover:ring-1 hover:ring-primary/30",
@@ -137,11 +139,11 @@ export function MessageNode({
             >
               <MessageSquare className="w-3 h-3 text-white" />
             </div>
-            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wide truncate flex-1">
+            <span data-r10n-flow-node-eyebrow className="text-xs font-bold text-muted-foreground uppercase tracking-wide truncate flex-1">
               {data.label}
             </span>
             {data.immediate && (
-              <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full shrink-0">
+              <span data-r10n-flow-immediate className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full shrink-0">
                 IMMEDIATE
               </span>
             )}

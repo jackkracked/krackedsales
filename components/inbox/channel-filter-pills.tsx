@@ -25,12 +25,14 @@ interface ChannelFilterPillsProps {
 
 export function ChannelFilterPills({ value, onChange }: ChannelFilterPillsProps) {
   return (
-    <div className="flex items-center gap-1.5 flex-wrap">
+    <div data-r10n-channelpills className="flex items-center gap-1.5 flex-wrap">
       {FILTERS.map(({ value: v, label, icon: Icon }) => {
         const isActive = value === v;
         return (
           <button
             key={v}
+            data-r10n-channelpill
+            data-active={isActive}
             onClick={() => onChange(v)}
             className={cn(
               "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-150 border",
@@ -49,6 +51,8 @@ export function ChannelFilterPills({ value, onChange }: ChannelFilterPillsProps)
       <button
         disabled
         title="TikTok DM API is restricted — coming soon"
+        data-r10n-channelpill
+        data-disabled="true"
         className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-border bg-card text-muted-foreground opacity-40 cursor-not-allowed"
       >
         <TikTokIcon className="w-3 h-3" />

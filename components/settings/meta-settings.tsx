@@ -312,7 +312,7 @@ export function MetaSettings() {
   const hasPages = pages.length > 0;
 
   return (
-    <div className="bg-card border border-border rounded-[10px] p-5 space-y-5">
+    <div className="bg-card border border-border rounded-[10px] p-5 space-y-5" data-r10n-settings-card>
       {/* Header row */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
@@ -320,6 +320,7 @@ export function MetaSettings() {
           <h2
             className="text-sm font-semibold text-foreground"
             style={{ fontFamily: "var(--font-heading)" }}
+            data-r10n-settings-cardtitle
           >
             Meta — Facebook &amp; Instagram
           </h2>

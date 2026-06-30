@@ -30,6 +30,7 @@ export const IfNode = memo(function IfNode({ id, data, selected }: NodeProps) {
             type="source"
             position={Position.Right}
             style={{ top: "35%" }}
+            data-r10n-wf-branch="true"
             className="!w-3 !h-3 !bg-green-500 !border-2 !border-background"
           />
           <Handle
@@ -37,14 +38,15 @@ export const IfNode = memo(function IfNode({ id, data, selected }: NodeProps) {
             type="source"
             position={Position.Right}
             style={{ top: "65%" }}
+            data-r10n-wf-branch="false"
             className="!w-3 !h-3 !bg-red-500 !border-2 !border-background"
           />
         </>
       }
     >
       <div className="mt-1 flex flex-col gap-1">
-        <span className="text-[11px] text-green-600 font-semibold">✓ True</span>
-        <span className="text-[11px] text-red-500 font-semibold">✗ False</span>
+        <span data-r10n-wf-branch-label="true" className="text-[11px] text-green-600 font-semibold">✓ True</span>
+        <span data-r10n-wf-branch-label="false" className="text-[11px] text-red-500 font-semibold">✗ False</span>
       </div>
     </BaseNode>
   );

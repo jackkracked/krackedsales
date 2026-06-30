@@ -24,12 +24,13 @@ export default async function ActivityPage() {
       {/* Page header */}
       <div className="px-6 py-5 border-b border-border shrink-0">
         <h1
+          data-r10n-activity-page-title
           className="text-2xl font-bold text-foreground"
           style={{ fontFamily: "var(--font-heading)" }}
         >
           Activity
         </h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
+        <p data-r10n-activity-page-sub className="text-sm text-muted-foreground mt-0.5">
           Every action across the team, in real time.
         </p>
       </div>

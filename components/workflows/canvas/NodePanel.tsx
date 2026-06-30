@@ -137,14 +137,14 @@ export function NodePanel({ workflowId, nodeId, onClose, onStartListening }: Nod
 
   if (!node || !def) {
     return (
-      <div className="w-[320px] h-full flex items-center justify-center border-l border-border bg-card text-muted-foreground text-sm">
+      <div data-r10n-wf-panel="" className="w-[320px] h-full flex items-center justify-center border-l border-border bg-card text-muted-foreground text-sm">
         Select a node to configure it
       </div>
     );
   }
 
   return (
-    <div className="w-[320px] h-full flex flex-col border-l border-border bg-card shrink-0">
+    <div data-r10n-wf-panel="" className="w-[320px] h-full flex flex-col border-l border-border bg-card shrink-0">
       {/* Header */}
       <div className="shrink-0 px-5 pt-5 pb-4 border-b border-border">
         <div className="flex items-center gap-2.5">
@@ -179,7 +179,7 @@ export function NodePanel({ workflowId, nodeId, onClose, onStartListening }: Nod
               {nodeData.lastRunOutput ? (
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs font-semibold text-emerald-600">Last captured payload</p>
+                    <p data-r10n-wf-ok-label="" className="text-xs font-semibold text-emerald-600">Last captured payload</p>
                     <span className="text-[10px] text-muted-foreground">Use{" "}
                       <kbd className="font-mono bg-muted border border-border px-1 py-0.5 rounded text-[10px]">/</kbd>
                       {" "}in any field to reference these
@@ -207,7 +207,7 @@ export function NodePanel({ workflowId, nodeId, onClose, onStartListening }: Nod
                     {field.label}
                   </label>
                   {field.required && (
-                    <span className="text-[10px] font-bold text-red-500">required</span>
+                    <span data-r10n-wf-required="" className="text-[10px] font-bold text-red-500">required</span>
                   )}
                 </div>
 
@@ -323,6 +323,7 @@ export function NodePanel({ workflowId, nodeId, onClose, onStartListening }: Nod
               <button
                 onClick={handleExecute}
                 disabled={executing}
+                data-r10n-wf-testbtn={isTrigger ? "trigger" : "action"}
                 className={cn(
                   "flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-xs font-semibold transition-all disabled:opacity-50",
                   isTrigger
@@ -339,20 +340,21 @@ export function NodePanel({ workflowId, nodeId, onClose, onStartListening }: Nod
               </button>
 
               {execError && (
-                <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-xl">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-red-500 mb-1.5">Error</p>
-                  <p className="text-[11px] text-red-400 font-mono break-all leading-relaxed">{execError}</p>
+                <div data-r10n-wf-error="" className="p-3 bg-red-500/5 border border-red-500/20 rounded-xl">
+                  <p data-r10n-wf-error-label="" className="text-[10px] font-bold uppercase tracking-widest text-red-500 mb-1.5">Error</p>
+                  <p data-r10n-wf-error-text="" className="text-[11px] text-red-400 font-mono break-all leading-relaxed">{execError}</p>
                 </div>
               )}
 
               {execOutput && !execError && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-500">
+                    <p data-r10n-wf-ok-label="" className="text-[10px] font-bold uppercase tracking-widest text-emerald-500">
                       Output
                     </p>
                     <button
                       onClick={handlePin}
+                      data-r10n-wf-pinbtn={isPinned ? "on" : "off"}
                       className={cn(
                         "flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold transition-colors",
                         isPinned
@@ -367,7 +369,7 @@ export function NodePanel({ workflowId, nodeId, onClose, onStartListening }: Nod
                       )}
                     </button>
                   </div>
-                  <pre className="text-[10px] bg-zinc-950 text-zinc-300 border border-zinc-800 rounded-xl p-3 overflow-x-auto font-mono max-h-48 leading-relaxed">
+                  <pre data-r10n-wf-json="" className="text-[10px] bg-zinc-950 text-zinc-300 border border-zinc-800 rounded-xl p-3 overflow-x-auto font-mono max-h-48 leading-relaxed">
                     {JSON.stringify(execOutput, null, 2)}
                   </pre>
                 </div>

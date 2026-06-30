@@ -114,6 +114,7 @@ function CallActionPanel({ call }: { call: Call }) {
     <div className="mt-3 space-y-2">
       {primary && (
         <a
+          data-r10n-call-cta
           href={primary.href}
           target="_blank"
           rel="noopener noreferrer"
@@ -122,7 +123,7 @@ function CallActionPanel({ call }: { call: Call }) {
           <primary.Icon className="w-5 h-5 shrink-0" />
           <div className="min-w-0 flex-1">
             <p className="text-[13px] font-semibold leading-tight">{primary.title}</p>
-            <p className="text-[10.5px] text-primary-foreground/70 leading-tight">{primary.sub}</p>
+            <p data-r10n-call-cta-sub className="text-[10.5px] text-primary-foreground/70 leading-tight">{primary.sub}</p>
           </div>
           <ExternalLink className="w-3.5 h-3.5 opacity-70 transition-opacity group-hover:opacity-100" />
         </a>
@@ -132,6 +133,7 @@ function CallActionPanel({ call }: { call: Call }) {
           {secondary.map((s) => (
             <a
               key={s.label}
+              data-r10n-call-link
               href={s.href}
               target="_blank"
               rel="noopener noreferrer"
@@ -196,6 +198,8 @@ function SentimentBadge({
 
   return (
     <span
+      data-r10n-call-sentiment
+      data-sentiment={label}
       className={cn(
         "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ring-1",
         c.bg,
@@ -333,12 +337,12 @@ function FathomSummaryCard({ summary }: { summary: string }) {
   }, [summary]);
 
   return (
-    <div className="mx-5 mb-0 mt-3 rounded-[10px] border border-border bg-muted/20 overflow-hidden">
+    <div data-r10n-call-summary className="mx-5 mb-0 mt-3 rounded-[10px] border border-border bg-muted/20 overflow-hidden">
       <button
         onClick={() => setExpanded((v) => !v)}
         className="w-full flex items-center gap-2 px-3.5 py-2.5 text-left hover:bg-muted/30 transition-colors"
       >
-        <span className="text-[10.5px] font-bold uppercase tracking-widest text-primary shrink-0">
+        <span data-r10n-call-summary-label className="text-[10.5px] font-bold uppercase tracking-widest text-primary shrink-0">
           AI Summary
         </span>
         <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
@@ -376,16 +380,18 @@ function InsightCards({ insights }: { insights: CallInsight }) {
   if (cards.length === 0) return null;
 
   return (
-    <div className="px-5 py-3 border-b border-border shrink-0">
+    <div data-r10n-call-insights className="px-5 py-3 border-b border-border shrink-0">
       <div className="grid grid-cols-2 gap-2">
         {cards.map(({ key, label, Icon, color }) => (
           <div
             key={key}
+            data-r10n-call-insight
+            data-insight={key}
             className="rounded-[8px] border border-border/70 bg-muted/20 px-3 py-2.5 min-w-0"
           >
             <div className="flex items-center gap-1.5 mb-1.5">
-              <Icon className={cn("w-3.5 h-3.5 shrink-0", color)} />
-              <span className="text-[10.5px] font-bold uppercase tracking-widest text-muted-foreground">
+              <Icon data-r10n-call-insight-icon className={cn("w-3.5 h-3.5 shrink-0", color)} />
+              <span data-r10n-call-insight-label className="text-[10.5px] font-bold uppercase tracking-widest text-muted-foreground">
                 {label}
               </span>
             </div>
@@ -509,6 +515,7 @@ export function TranscriptDrawer({ call, onClose }: TranscriptDrawerProps) {
     <>
       {/* Backdrop */}
       <div
+        data-r10n-call-backdrop
         onClick={onClose}
         className={cn(
           "fixed inset-0 z-40 bg-black/30 transition-opacity duration-200",
@@ -521,6 +528,7 @@ export function TranscriptDrawer({ call, onClose }: TranscriptDrawerProps) {
 
       {/* Drawer panel */}
       <div
+        data-r10n-call-drawer
         className={cn(
           "fixed right-0 top-0 z-50 h-full w-[520px] max-w-[90vw] bg-card border-l border-border shadow-xl",
           "flex flex-col transition-transform duration-250 ease-in-out",
@@ -531,11 +539,12 @@ export function TranscriptDrawer({ call, onClose }: TranscriptDrawerProps) {
         aria-modal="true"
       >
         {/* ── Header ── */}
-        <div className="flex items-start gap-3 px-5 pt-5 pb-4 border-b border-border bg-gradient-to-b from-muted/30 to-transparent shrink-0">
+        <div data-r10n-call-drawer-head className="flex items-start gap-3 px-5 pt-5 pb-4 border-b border-border bg-gradient-to-b from-muted/30 to-transparent shrink-0">
           <Avatar name={call?.contactName ?? "Unknown"} size={44} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <h2
+                data-r10n-modal-name
                 className="text-[15px] font-semibold text-foreground truncate"
                 style={{ fontFamily: "var(--font-heading)" }}
               >
@@ -550,8 +559,8 @@ export function TranscriptDrawer({ call, onClose }: TranscriptDrawerProps) {
               )}
             </div>
             {call && (
-              <div className="flex items-center gap-x-2.5 gap-y-1 flex-wrap mt-1.5">
-                <span className={cn(
+              <div data-r10n-call-metarow className="flex items-center gap-x-2.5 gap-y-1 flex-wrap mt-1.5">
+                <span data-r10n-call-typebadge data-kind={call.callType === "dialer" ? "dialer" : "meet"} className={cn(
                   "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold",
                   call.callType === "dialer" ? "bg-slate-100 text-slate-600" : "bg-blue-50 text-blue-700"
                 )}>
@@ -559,25 +568,28 @@ export function TranscriptDrawer({ call, onClose }: TranscriptDrawerProps) {
                   {call.callType === "dialer" ? "Dialer" : "Meet"}
                 </span>
                 {call.status && CALL_STATUS_META[call.status] && (
-                  <span className={cn("px-1.5 py-0.5 rounded-full text-[10px] font-semibold", CALL_STATUS_META[call.status].cls)}>
+                  <span data-r10n-status-pill data-r10n-call-statuspill data-status={call.status} className={cn("px-1.5 py-0.5 rounded-full text-[10px] font-semibold", CALL_STATUS_META[call.status].cls)}>
                     {CALL_STATUS_META[call.status].label}
                   </span>
                 )}
                 {call.direction && (
-                  <CallMetaChip icon={call.direction === "outbound" ? ArrowUp : ArrowDown}>
-                    {call.direction === "outbound" ? "Outbound" : "Inbound"}
-                  </CallMetaChip>
+                  <span data-r10n-call-direction data-dir={call.direction}>
+                    <CallMetaChip icon={call.direction === "outbound" ? ArrowUp : ArrowDown}>
+                      {call.direction === "outbound" ? "Outbound" : "Inbound"}
+                    </CallMetaChip>
+                  </span>
                 )}
-                {call.repName && <CallMetaChip>{call.repName}</CallMetaChip>}
-                <CallMetaChip icon={Clock}>{formatDuration(call.durationSeconds)}</CallMetaChip>
+                {call.repName && <span data-r10n-call-metachip><CallMetaChip>{call.repName}</CallMetaChip></span>}
+                <span data-r10n-call-metachip><CallMetaChip icon={Clock}>{formatDuration(call.durationSeconds)}</CallMetaChip></span>
               </div>
             )}
             {call && (
-              <p className="text-[11px] text-muted-foreground/80 mt-1">{formatDateTime(call.startedAt)}</p>
+              <p data-r10n-call-dateline className="text-[11px] text-muted-foreground/80 mt-1">{formatDateTime(call.startedAt)}</p>
             )}
             {call && <CallActionPanel call={call} />}
           </div>
           <button
+            data-r10n-call-close
             onClick={onClose}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
             aria-label="Close transcript"
@@ -597,6 +609,7 @@ export function TranscriptDrawer({ call, onClose }: TranscriptDrawerProps) {
         {/* ── Transcript body ── */}
         <div
           ref={scrollRef}
+          data-r10n-call-transcript-body
           className="flex-1 min-h-0 overflow-y-auto px-5 py-4"
         >
           {isLoading ? (
@@ -652,12 +665,14 @@ export function TranscriptDrawer({ call, onClose }: TranscriptDrawerProps) {
                     )}
                   >
                     <span
+                      data-r10n-call-speaker-dot
+                      data-rep={group.isRep}
                       className={cn(
                         "w-2 h-2 rounded-full shrink-0",
                         speakerColor(group.speaker)
                       )}
                     />
-                    <span className="text-[11px] font-semibold text-muted-foreground">
+                    <span data-r10n-call-speaker-name className="text-[11px] font-semibold text-muted-foreground">
                       {group.speaker}
                     </span>
                   </div>
@@ -668,6 +683,8 @@ export function TranscriptDrawer({ call, onClose }: TranscriptDrawerProps) {
                     return (
                       <div
                         key={ei}
+                        data-r10n-call-bubble
+                        data-rep={group.isRep}
                         className={cn(
                           "max-w-[85%] px-3 py-2 text-sm leading-relaxed",
                           ei === 0 ? "mt-0" : "mt-0.5",
@@ -696,6 +713,7 @@ export function TranscriptDrawer({ call, onClose }: TranscriptDrawerProps) {
                   {/* Timestamp on last message in group */}
                   {group.entries[group.entries.length - 1]?.startTime && (
                     <p
+                      data-r10n-call-bubble-ts
                       className={cn(
                         "text-[10px] text-muted-foreground/50 mt-1",
                         group.isRep ? "text-right pr-1" : "pl-1"

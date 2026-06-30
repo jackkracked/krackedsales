@@ -151,7 +151,7 @@ export async function GET(req: NextRequest) {
           .select({ calendarEventId: callDispositions.calendarEventId, outcome: callDispositions.outcome })
           .from(callDispositions)
           .where(inArray(callDispositions.calendarEventId, apptIds));
-        for (const d of dispos) dispoMap.set(d.calendarEventId, d.outcome);
+        for (const d of dispos) if (d.calendarEventId) dispoMap.set(d.calendarEventId, d.outcome);
       }
       const nowMs = Date.now();
 

@@ -30,6 +30,32 @@ export interface DialerCampaign {
   contacts: DialerContact[];
 }
 
+// ── Real-data shapes (from the dialer API) ──────────────────────────────────
+export interface CampaignCounts {
+  queued: number; inProgress: number; completed: number; exhausted: number; suppressed: number; total: number;
+}
+/** A campaign as listed in the rail (GET /api/dialer/campaigns). */
+export interface CampaignSummary {
+  id: string; name: string; maxAttempts: number; status: string;
+  reps: { userId: string; name: string }[];
+  counts: CampaignCounts;
+}
+/** A contact in a campaign's queue (roster). */
+export interface RosterContact {
+  id: string; contactId: string; contactName: string | null; phone: string | null; attempts: number; status: string;
+}
+/** Full campaign detail (GET /api/dialer/campaigns/[id]). */
+export interface CampaignDetail {
+  campaign: { id: string; name: string; maxAttempts: number; status: string; ownerScope: string };
+  reps: { userId: string; name: string }[];
+  counts: CampaignCounts;
+  contacts: RosterContact[];
+}
+/** The contact currently claimed for dialing (from /next or /disposition). */
+export interface ClaimedContact {
+  id: string; contactId: string; contactName: string | null; phone: string | null; attempts: number;
+}
+
 export const MOCK_CAMPAIGNS: DialerCampaign[] = [
   {
     id: "camp_dtc_q3",

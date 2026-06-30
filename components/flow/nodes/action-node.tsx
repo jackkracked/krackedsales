@@ -12,21 +12,21 @@ const CONFIG: Record<ActionType, {
   icon: React.ElementType;
 }> = {
   success: {
-    bg: "#dcfce7",
-    border: "#16a34a",
-    text: "#15803d",
+    bg: "var(--r10n-flow-success-bg, #dcfce7)",
+    border: "var(--r10n-flow-success-border, #16a34a)",
+    text: "var(--r10n-flow-success-text, #15803d)",
     icon: Trophy,
   },
   "dead-end": {
-    bg: "#f1f5f9",
-    border: "#94a3b8",
-    text: "#64748b",
+    bg: "var(--r10n-flow-deadend-bg, #f1f5f9)",
+    border: "var(--r10n-flow-deadend-border, #94a3b8)",
+    text: "var(--r10n-flow-deadend-text, #64748b)",
     icon: X,
   },
   wait: {
-    bg: "#fef9c3",
-    border: "#d97706",
-    text: "#92400e",
+    bg: "var(--r10n-flow-wait-bg, #fef9c3)",
+    border: "var(--r10n-flow-wait-border, #d97706)",
+    text: "var(--r10n-flow-wait-text, #92400e)",
     icon: Clock,
   },
 };
@@ -44,6 +44,8 @@ export function ActionNode({
 
   return (
     <div
+      data-r10n-flow-node="action"
+      data-r10n-flow-action={type}
       className="flex items-center gap-2.5 px-4 py-2.5 rounded-full shadow-sm select-none"
       style={{
         background: cfg.bg,
@@ -67,7 +69,7 @@ export function ActionNode({
         <Icon className="w-3 h-3 text-white" />
       </div>
       <div>
-        <p className="text-xs font-bold leading-tight" style={{ color: cfg.text }}>
+        <p data-r10n-flow-node-title className="text-xs font-bold leading-tight" style={{ color: cfg.text }}>
           {data.label}
         </p>
         {isWait && data.delay && (

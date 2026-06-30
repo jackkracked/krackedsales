@@ -116,11 +116,11 @@ export function TikTokSettings() {
   }
 
   return (
-    <div className="bg-card border border-border rounded-[10px] p-5 space-y-6">
+    <div className="bg-card border border-border rounded-[10px] p-5 space-y-6" data-r10n-settings-card>
 
       {/* OAuth success banner */}
       {showConnectedBanner && (
-        <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-[6px] bg-green-50 border border-green-200 text-green-800">
+        <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-[6px] bg-green-50 border border-green-200 text-green-800" data-r10n-settings-banner data-tone="success">
           <div className="flex items-center gap-2 text-sm font-medium">
             <CheckCircle2 className="w-4 h-4 shrink-0" />
             TikTok account connected successfully.
@@ -145,6 +145,7 @@ export function TikTokSettings() {
             <h2
               className="text-sm font-semibold text-foreground"
               style={{ fontFamily: "var(--font-heading)" }}
+              data-r10n-settings-cardtitle
             >
               TikTok
             </h2>
@@ -222,6 +223,7 @@ export function TikTokSettings() {
           <h3
             className="text-sm font-semibold text-foreground"
             style={{ fontFamily: "var(--font-heading)" }}
+            data-r10n-settings-cardtitle
           >
             Business API
           </h3>

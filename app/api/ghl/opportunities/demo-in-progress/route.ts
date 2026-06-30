@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { db } from "@/lib/db";
-import { commentLeads } from "@/lib/db/schema";
+import { socialLeads } from "@/lib/db/schema";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 
 export const dynamic = "force-dynamic";
@@ -63,14 +63,14 @@ export async function POST(req: NextRequest) {
 
     // ── Path B: commentLeadId provided — direct Postgres update, no GHL needed ─
     if (commentLeadId) {
-      const clRow = await database.select().from(commentLeads).where(eq(commentLeads.id, commentLeadId));
+      const clRow = await database.select().from(socialLeads).where(eq(socialLeads.id, commentLeadId));
       if (!clRow.length) {
         return NextResponse.json({ error: `Comment lead ${commentLeadId} not found` }, { status: 404 });
       }
       await database
-        .update(commentLeads)
+        .update(socialLeads)
         .set({ demoStartedAt: new Date() })
-        .where(eq(commentLeads.id, commentLeadId));
+        .where(eq(socialLeads.id, commentLeadId));
       return NextResponse.json({ success: true, source: "comment_lead_direct", commentLeadId, contactName: clRow[0].name });
     }
 
@@ -98,16 +98,16 @@ export async function POST(req: NextRequest) {
     const searchDomain = normaliseDomain(website);
 
     // C1. Comment leads (Postgres) — match on stored website field exactly
-    const clRows = await database.select().from(commentLeads);
+    const clRows = await database.select().from(socialLeads);
     const clMatch = clRows.find(
       (cl) => cl.website && normaliseDomain(cl.website) === searchDomain
     );
 
     if (clMatch) {
       await database
-        .update(commentLeads)
+        .update(socialLeads)
         .set({ demoStartedAt: new Date() })
-        .where(eq(commentLeads.id, clMatch.id));
+        .where(eq(socialLeads.id, clMatch.id));
 
       return NextResponse.json({
         success: true,

@@ -66,6 +66,7 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ items: [] });
 
   let items: DrillItem[] = [];
+  let total = 0;
 
   try {
     if (metric === "calls") {
@@ -100,39 +101,44 @@ export async function GET(req: NextRequest) {
         href: `/proposals/${p.id}`,
       }));
     } else if (metric === "open") {
-      // Open GHL opportunities assigned to this rep.
+      // Open GHL opportunities assigned to this rep. The COUNT comes from GHL's
+      // filtered meta.total (reliable, matches the leaderboard). The LIST is a
+      // capped sample — page-based pagination over 1000s of opps is inconsistent
+      // and loading them all would be slow, so we show the most recent SAMPLE_PAGES
+      // and report the true total separately.
       if (user.ghlUserId) {
         const locId = locationId();
-        const all: GHLOpportunity[] = [];
-        const res = await ghl.get<{ opportunities: GHLOpportunity[]; meta?: { total?: number } }>(
-          `/opportunities/search?location_id=${locId}&assigned_to=${user.ghlUserId}&status=open&limit=100&page=1`
+        const SAMPLE_PAGES = 3; // up to 300 most-recent open opps as a sample
+        const pages = await Promise.all(
+          Array.from({ length: SAMPLE_PAGES }, (_, i) =>
+            ghl.get<{ opportunities: GHLOpportunity[]; meta?: { total?: number } }>(
+              `/opportunities/search?location_id=${locId}&assigned_to=${user.ghlUserId}&status=open&limit=100&page=${i + 1}`
+            ).catch(() => ({ opportunities: [], meta: undefined }))
+          )
         );
-        all.push(...(res.opportunities ?? []));
-        const total = res.meta?.total ?? all.length;
-        if (total > 100) {
-          const pages = Math.ceil(total / 100);
-          const rest = await Promise.all(
-            Array.from({ length: pages - 1 }, (_, i) =>
-              ghl.get<{ opportunities: GHLOpportunity[] }>(
-                `/opportunities/search?location_id=${locId}&assigned_to=${user.ghlUserId}&status=open&limit=100&page=${i + 2}`
-              )
-            )
-          );
-          for (const pg of rest) all.push(...(pg.opportunities ?? []));
+        total = pages[0]?.meta?.total ?? 0;
+        const seen = new Set<string>();
+        for (const pg of pages) {
+          for (const o of pg.opportunities ?? []) {
+            if (o.status !== "open" || seen.has(o.id)) continue;
+            seen.add(o.id);
+            items.push({
+              id: o.id,
+              title: o.contact?.name ?? o.name ?? "Unknown",
+              sub: o.pipelineStageId_name ?? undefined,
+              amount: o.monetaryValue ?? undefined,
+            });
+          }
         }
-        items = all
-          .filter((o) => o.status === "open")
-          .map((o) => ({
-            id: o.id,
-            title: o.contact?.name ?? o.name ?? "Unknown",
-            sub: o.pipelineStageId_name ?? undefined,
-            amount: o.monetaryValue ?? undefined,
-          }));
       }
     }
   } catch (err) {
     console.error("[rep-performance/drilldown]", err);
   }
 
-  return NextResponse.json({ items, rep: user.name, metric });
+  // For DB-backed metrics the list IS the full set, so total = items.length.
+  // For "open" we set total above from GHL's reliable filtered count.
+  if (metric !== "open") total = items.length;
+
+  return NextResponse.json({ items, total, rep: user.name, metric });
 }

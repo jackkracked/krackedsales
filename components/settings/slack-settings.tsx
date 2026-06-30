@@ -145,7 +145,7 @@ export function SlackSettings() {
   }
 
   return (
-    <div className="bg-card border border-border rounded-[10px] p-5">
+    <div className="bg-card border border-border rounded-[10px] p-5" data-r10n-settings-card>
       {/* Header */}
       <div className="flex items-start justify-between mb-1">
         <div className="flex items-center gap-2.5">
@@ -154,6 +154,7 @@ export function SlackSettings() {
           <h2
             className="text-sm font-semibold text-foreground"
             style={{ fontFamily: "var(--font-heading)" }}
+            data-r10n-settings-cardtitle
           >
             Slack
           </h2>
@@ -343,6 +344,8 @@ export function SlackSettings() {
             title={enabled ? "Disable" : "Enable"}
             aria-label={enabled ? "Disable Slack agent" : "Enable Slack agent"}
             style={{ WebkitAppearance: "none" }}
+            data-r10n-settings-toggle
+            data-state={enabled ? "on" : "off"}
             className={cn(
               "relative inline-flex items-center w-10 h-5.5 rounded-full transition-colors shrink-0 cursor-pointer border-0 p-0",
               enabled ? "bg-primary" : "bg-muted-foreground/30"

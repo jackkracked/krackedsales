@@ -81,25 +81,26 @@ export function FollowUpsClient() {
   );
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div data-r10n-followups className="flex flex-col h-full overflow-hidden">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-1 pb-3 gap-3">
-        <p className="text-sm text-muted-foreground">
+      <div data-r10n-followup-toolbar className="flex items-center justify-between px-1 pb-3 gap-3">
+        <p data-r10n-followup-summary className="text-sm text-muted-foreground">
           {isLoading ? (
             "Loading…"
           ) : total === 0 ? (
             "All caught up"
           ) : (
             <>
-              <span className="font-semibold text-foreground">{needsAction.length}</span>
+              <span data-r10n-followup-summary-count className="font-semibold text-foreground">{needsAction.length}</span>
               {" need action · "}
-              <span className="font-semibold text-foreground">{waiting.length}</span>
+              <span data-r10n-followup-summary-count className="font-semibold text-foreground">{waiting.length}</span>
               {" waiting"}
             </>
           )}
         </p>
         <div className="flex items-center gap-2">
           <button
+            data-r10n-followup-send
             onClick={handleAnalyse}
             disabled={analysing}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary border border-primary/30 rounded-[7px] hover:bg-primary/5 transition-colors disabled:opacity-50"
@@ -108,6 +109,7 @@ export function FollowUpsClient() {
             {analysing ? "Analysing…" : "Pre-generate AI"}
           </button>
           <button
+            data-r10n-followup-btn
             onClick={handleRefresh}
             disabled={isFetching}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:bg-muted/30 transition-colors disabled:opacity-50"
@@ -119,9 +121,9 @@ export function FollowUpsClient() {
       </div>
 
       {/* Split panel */}
-      <div className="flex-1 min-h-0 flex rounded-[12px] border border-border overflow-hidden bg-background">
+      <div data-r10n-followup-panel className="flex-1 min-h-0 flex rounded-[12px] border border-border overflow-hidden bg-background">
         {/* Left: list */}
-        <div className="w-[280px] shrink-0 border-r border-border overflow-y-auto bg-muted/5">
+        <div data-r10n-followup-rail className="w-[280px] shrink-0 border-r border-border overflow-y-auto bg-muted/5">
           {isLoading ? (
             <div className="flex items-center justify-center h-40 gap-2 text-xs text-muted-foreground">
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />

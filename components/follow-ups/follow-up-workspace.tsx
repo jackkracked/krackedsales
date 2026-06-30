@@ -99,14 +99,16 @@ export function FollowUpWorkspace({ item, onSent, onSkipped, onRemoved }: Props)
   return (
     <div className="flex flex-col h-full overflow-y-auto">
       {/* Contact header */}
-      <div className="px-5 py-4 border-b border-border">
+      <div data-r10n-followup-header className="px-5 py-4 border-b border-border">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-base font-bold text-foreground leading-tight">
+              <h2 data-r10n-followup-name className="text-base font-bold text-foreground leading-tight">
                 {item.contactName}
               </h2>
               <span
+                data-r10n-followup-stage
+                data-zone={item.zone}
                 className={cn(
                   "inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium",
                   zone.className
@@ -115,18 +117,18 @@ export function FollowUpWorkspace({ item, onSent, onSkipped, onRemoved }: Props)
                 {zone.label}
               </span>
               {item.zone === 3 && (
-                <span className="text-xs text-amber-600 font-medium">⚠ Handle carefully</span>
+                <span data-r10n-followup-care className="text-xs text-amber-600 font-medium">⚠ Handle carefully</span>
               )}
             </div>
             {item.pipelineName && (
-              <p className="text-xs text-muted-foreground mt-0.5">{item.pipelineName}</p>
+              <p data-r10n-followup-meta className="text-xs text-muted-foreground mt-0.5">{item.pipelineName}</p>
             )}
           </div>
         </div>
 
         {/* Stats row */}
         <div className="grid grid-cols-3 gap-3 mt-3">
-          <StatCell label="In Stage" value={`${item.daysInStage}d`} />
+          <StatCell label="In Stage" value={`${item.daysInStage}d`} mono />
           <StatCell
             label="Last Contact"
             value={
@@ -134,6 +136,8 @@ export function FollowUpWorkspace({ item, onSent, onSkipped, onRemoved }: Props)
                 ? "Today"
                 : `${item.daysSinceLastContact}d ago`
             }
+            mono
+            urgency={item.urgency}
           />
           <StatCell label="Channel" value={channel} />
         </div>
@@ -184,7 +188,7 @@ export function FollowUpWorkspace({ item, onSent, onSkipped, onRemoved }: Props)
               onRegenerate={(newRec) => setActiveRec(newRec)}
             />
           ) : (
-            <div className="rounded-[10px] border border-border bg-muted/10 px-4 py-6 text-center">
+            <div data-r10n-followup-reccard className="rounded-[10px] border border-border bg-muted/10 px-4 py-6 text-center">
               <p className="text-xs text-muted-foreground">
                 Could not generate a recommendation. The AI may be unavailable.
               </p>
@@ -196,18 +200,35 @@ export function FollowUpWorkspace({ item, onSent, onSkipped, onRemoved }: Props)
   );
 }
 
-function StatCell({ label, value }: { label: string; value: string }) {
+function StatCell({
+  label,
+  value,
+  mono,
+  urgency,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  urgency?: FollowUpItem["urgency"];
+}) {
   return (
-    <div className="rounded-[8px] bg-muted/30 px-2.5 py-2">
-      <p className="text-xs text-muted-foreground mb-0.5">{label}</p>
-      <p className="text-sm font-semibold text-foreground truncate">{value}</p>
+    <div data-r10n-followup-stat className="rounded-[8px] bg-muted/30 px-2.5 py-2">
+      <p data-r10n-followup-stat-label className="text-xs text-muted-foreground mb-0.5">{label}</p>
+      <p
+        data-r10n-followup-stat-value
+        data-mono={mono ? "true" : undefined}
+        data-urgency={urgency}
+        className="text-sm font-semibold text-foreground truncate"
+      >
+        {value}
+      </p>
     </div>
   );
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+    <p data-r10n-th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
       {children}
     </p>
   );

@@ -136,19 +136,20 @@ export function TasksStrip() {
 
   return (
     <>
-      <div className="bg-card border border-border rounded-[10px] p-5">
+      <div data-r10n-card className="bg-card border border-border rounded-[10px] p-5">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <CheckSquare className="w-4 h-4 text-muted-foreground" />
+            <CheckSquare data-r10n-section-icon className="w-4 h-4 text-muted-foreground" />
             <h3
+              data-r10n-section-title
               className="text-sm font-semibold text-foreground"
               style={{ fontFamily: "var(--font-heading)" }}
             >
               Tasks
             </h3>
             {tasks.length > 0 && (
-              <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+              <span data-r10n-count className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
                 {tasks.length}
               </span>
             )}

@@ -28,7 +28,7 @@ export async function PATCH(
 ) {
   const { opportunityId } = await params;
   const body = await req.json();
-  const { pipelineStageId, monetaryValue } = body;
+  const { pipelineStageId, monetaryValue, reason } = body;
   const sessionUser = await getSessionUser().catch(() => null);
 
   if (!pipelineStageId && monetaryValue === undefined) {
@@ -57,6 +57,7 @@ export async function PATCH(
         to_stage: body.stageName,
         from_stage: body.fromStageName,
         to_stage_id: pipelineStageId,
+        ...(reason ? { reason: String(reason) } : {}),
       },
     });
 

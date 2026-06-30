@@ -216,8 +216,11 @@ function ConversationRow({
   return (
     <button
       onClick={onSelect}
+      data-r10n-convo-row
+      data-r10n-tiktok-row
+      data-selected={isSelected ? "true" : undefined}
       className={cn(
-        "w-full text-left px-4 py-3 border-b border-border transition-colors",
+        "relative w-full text-left px-4 py-3 border-b border-border transition-colors",
         isSelected ? "bg-primary/6" : "hover:bg-muted/60"
       )}
     >
@@ -225,12 +228,12 @@ function ConversationRow({
         <Avatar name={conversation.participantName} avatarUrl={conversation.avatarUrl} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-1">
-            <span className="text-sm font-medium text-foreground truncate">
+            <span data-r10n-convo-name className="text-sm font-medium text-foreground truncate">
               {conversation.participantName}
             </span>
-            <span className="text-xs text-muted-foreground shrink-0">{timeAgo}</span>
+            <span data-r10n-convo-time className="text-xs text-muted-foreground shrink-0">{timeAgo}</span>
           </div>
-          <p className="text-xs text-muted-foreground truncate mt-0.5">
+          <p data-r10n-convo-preview className="text-xs text-muted-foreground truncate mt-0.5">
             {conversation.lastMessage}
           </p>
         </div>
@@ -255,6 +258,8 @@ function MessageBubble({ message }: { message: TikTokMessage }) {
       )}
     >
       <div
+        data-r10n-bubble
+        data-dir={isOutbound ? "out" : "in"}
         className={cn(
           "px-3 py-2 rounded-[10px] text-sm leading-relaxed break-words",
           isOutbound
@@ -265,7 +270,7 @@ function MessageBubble({ message }: { message: TikTokMessage }) {
       >
         {message.text}
       </div>
-      <span className="text-[10px] text-muted-foreground">
+      <span data-r10n-bubble-time className="text-[10px] text-muted-foreground">
         {message.pending ? "Sending…" : timeAgo}
       </span>
     </div>
@@ -352,11 +357,11 @@ function DmThread({ conversation }: { conversation: TikTokConversation }) {
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Header */}
-      <div className="flex items-center gap-2.5 px-5 py-3 border-b border-border bg-card shrink-0">
+      <div data-r10n-thread-header className="flex items-center gap-2.5 px-5 py-3 border-b border-border bg-card shrink-0">
         <TikTokIcon className="w-4 h-4 shrink-0 text-foreground" />
         <div>
-          <h3 className="text-sm font-semibold text-foreground">{conversation.participantName}</h3>
-          <p className="text-xs text-muted-foreground">TikTok DM</p>
+          <h3 data-r10n-thread-name className="text-sm font-semibold text-foreground">{conversation.participantName}</h3>
+          <p data-r10n-thread-sub className="text-xs text-muted-foreground">TikTok DM</p>
         </div>
       </div>
 
@@ -380,7 +385,7 @@ function DmThread({ conversation }: { conversation: TikTokConversation }) {
       )}
 
       {/* Reply composer */}
-      <div className="shrink-0 border-t border-border bg-card px-4 py-3">
+      <div data-r10n-tiktok-composer className="shrink-0 border-t border-border bg-card px-4 py-3">
         <div className="flex items-end gap-2">
           <textarea
             value={replyText}
@@ -388,6 +393,7 @@ function DmThread({ conversation }: { conversation: TikTokConversation }) {
             onKeyDown={handleKeyDown}
             placeholder="Type a message… (Enter to send)"
             rows={2}
+            data-r10n-tiktok-input
             className={cn(
               "flex-1 resize-none rounded-[6px] border border-border bg-background px-3 py-2",
               "text-sm text-foreground placeholder:text-muted-foreground",
@@ -398,6 +404,7 @@ function DmThread({ conversation }: { conversation: TikTokConversation }) {
           <button
             onClick={handleSend}
             disabled={!replyText.trim() || sendMutation.isPending}
+            data-r10n-tiktok-send
             className={cn(
               "flex items-center justify-center w-9 h-9 rounded-[6px] shrink-0 transition-colors",
               "bg-primary text-white hover:bg-primary/90",
@@ -434,8 +441,11 @@ function CommentRow({
   return (
     <button
       onClick={onSelect}
+      data-r10n-convo-row
+      data-r10n-tiktok-row
+      data-selected={isSelected ? "true" : undefined}
       className={cn(
-        "w-full text-left px-4 py-3 border-b border-border transition-colors",
+        "relative w-full text-left px-4 py-3 border-b border-border transition-colors",
         isSelected ? "bg-primary/6" : "hover:bg-muted/60"
       )}
     >
@@ -443,13 +453,13 @@ function CommentRow({
         <Avatar name={comment.authorName} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-1">
-            <span className="text-sm font-medium text-foreground truncate">
+            <span data-r10n-convo-name className="text-sm font-medium text-foreground truncate">
               {comment.authorName}
             </span>
-            <span className="text-xs text-muted-foreground shrink-0">{timeAgo}</span>
+            <span data-r10n-convo-time className="text-xs text-muted-foreground shrink-0">{timeAgo}</span>
           </div>
-          <p className="text-xs text-muted-foreground truncate mt-0.5">{comment.text}</p>
-          <p className="text-[10px] text-muted-foreground truncate mt-0.5 italic">
+          <p data-r10n-convo-preview className="text-xs text-muted-foreground truncate mt-0.5">{comment.text}</p>
+          <p data-r10n-tiktok-videotitle className="text-[10px] text-muted-foreground truncate mt-0.5 italic">
             {comment.videoTitle}
           </p>
         </div>
@@ -518,11 +528,11 @@ function CommentThread({ comment }: { comment: TikTokComment }) {
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Header */}
-      <div className="flex items-center gap-2.5 px-5 py-3 border-b border-border bg-card shrink-0">
+      <div data-r10n-thread-header className="flex items-center gap-2.5 px-5 py-3 border-b border-border bg-card shrink-0">
         <TikTokIcon className="w-4 h-4 shrink-0 text-foreground" />
         <div>
-          <h3 className="text-sm font-semibold text-foreground">{comment.authorName}</h3>
-          <p className="text-xs text-muted-foreground">TikTok · Comment</p>
+          <h3 data-r10n-thread-name className="text-sm font-semibold text-foreground">{comment.authorName}</h3>
+          <p data-r10n-thread-sub className="text-xs text-muted-foreground">TikTok · Comment</p>
         </div>
       </div>
 
@@ -530,8 +540,8 @@ function CommentThread({ comment }: { comment: TikTokComment }) {
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3">
         {/* Original comment — shown as a system notification at top */}
         <div className="self-center w-full max-w-sm">
-          <div className="w-full flex items-start gap-3 px-3.5 py-2.5 rounded-[10px] bg-muted/60 border border-border">
-            <div className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0 mt-1.5" />
+          <div data-r10n-systemnote className="w-full flex items-start gap-3 px-3.5 py-2.5 rounded-[10px] bg-muted/60 border border-border">
+            <div data-r10n-systemnote-dot className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0 mt-1.5" />
             <div className="flex-1 min-w-0">
               <p className="text-xs text-muted-foreground leading-snug">
                 Commented on{" "}
@@ -542,13 +552,15 @@ function CommentThread({ comment }: { comment: TikTokComment }) {
               </p>
             </div>
           </div>
-          <p className="text-center text-[10px] text-muted-foreground mt-1">{timeAgo}</p>
+          <p data-r10n-bubble-time className="text-center text-[10px] text-muted-foreground mt-1">{timeAgo}</p>
         </div>
 
         {/* Sent replies */}
         {sentReplies.map((msg) => (
           <div key={msg.id} className="flex flex-col items-end gap-0.5">
             <div
+              data-r10n-bubble
+              data-dir="out"
               className={cn(
                 "max-w-[70%] px-3 py-2 rounded-[10px] text-sm leading-relaxed break-words",
                 "bg-primary text-white rounded-br-sm",
@@ -557,7 +569,7 @@ function CommentThread({ comment }: { comment: TikTokComment }) {
             >
               {msg.text}
             </div>
-            <span className="text-[10px] text-muted-foreground">
+            <span data-r10n-bubble-time className="text-[10px] text-muted-foreground">
               {msg.pending
                 ? "Sending…"
                 : formatDistanceToNow(new Date(msg.createdAt), { addSuffix: true })}
@@ -567,7 +579,7 @@ function CommentThread({ comment }: { comment: TikTokComment }) {
       </div>
 
       {/* Reply composer */}
-      <div className="shrink-0 border-t border-border bg-card px-4 py-3">
+      <div data-r10n-tiktok-composer className="shrink-0 border-t border-border bg-card px-4 py-3">
         <div className="flex items-end gap-2">
           <textarea
             value={replyText}
@@ -575,6 +587,7 @@ function CommentThread({ comment }: { comment: TikTokComment }) {
             onKeyDown={handleKeyDown}
             placeholder="Reply to comment… (Enter to send)"
             rows={2}
+            data-r10n-tiktok-input
             className={cn(
               "flex-1 resize-none rounded-[6px] border border-border bg-background px-3 py-2",
               "text-sm text-foreground placeholder:text-muted-foreground",
@@ -585,6 +598,7 @@ function CommentThread({ comment }: { comment: TikTokComment }) {
           <button
             onClick={handleSend}
             disabled={!replyText.trim() || isSending}
+            data-r10n-tiktok-send
             className={cn(
               "flex items-center justify-center w-9 h-9 rounded-[6px] shrink-0 transition-colors",
               "bg-primary text-white hover:bg-primary/90",
@@ -630,13 +644,15 @@ function DmsPanel() {
       {/* Left panel */}
       <div className="flex flex-col border-r border-border bg-card w-full lg:w-80 xl:w-96 shrink-0">
         {/* Sub-header with unread toggle + refresh */}
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <span className="text-xs font-medium text-muted-foreground">Direct Messages</span>
+        <div data-r10n-list-header className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <span data-r10n-list-title className="text-xs font-medium text-muted-foreground">Direct Messages</span>
           <div className="flex items-center gap-1.5">
             {isFetching && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
-            <div className="flex items-center bg-muted rounded-lg p-0.5">
+            <div data-r10n-segmented className="flex items-center bg-muted rounded-lg p-0.5">
               <button
                 onClick={() => setUnreadOnly(true)}
+                data-r10n-segmented-btn
+                data-active={unreadOnly ? "true" : undefined}
                 className={cn(
                   "px-2.5 py-1 text-xs font-medium rounded-md transition-colors",
                   unreadOnly ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
@@ -646,6 +662,8 @@ function DmsPanel() {
               </button>
               <button
                 onClick={() => setUnreadOnly(false)}
+                data-r10n-segmented-btn
+                data-active={!unreadOnly ? "true" : undefined}
                 className={cn(
                   "px-2.5 py-1 text-xs font-medium rounded-md transition-colors",
                   !unreadOnly ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
@@ -657,6 +675,7 @@ function DmsPanel() {
             <button
               onClick={handleRefresh}
               disabled={isFetching}
+              data-r10n-list-refresh
               className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-40"
               aria-label="Refresh"
             >
@@ -737,11 +756,12 @@ function CommentsPanel() {
       {/* Left panel */}
       <div className="flex flex-col border-r border-border bg-card w-full lg:w-80 xl:w-96 shrink-0">
         {/* Sub-header with refresh */}
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <span className="text-xs font-medium text-muted-foreground">Comments</span>
+        <div data-r10n-list-header className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <span data-r10n-list-title className="text-xs font-medium text-muted-foreground">Comments</span>
           <button
             onClick={handleRefresh}
             disabled={isFetching}
+            data-r10n-list-refresh
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-40"
             aria-label="Refresh"
           >
@@ -816,11 +836,13 @@ export function TikTokConversations() {
     <div className="flex flex-col h-full overflow-hidden">
       {/* Sub-tab bar */}
       <div className="px-4 py-3 border-b border-border bg-card shrink-0">
-        <div className="flex items-center gap-1 bg-muted rounded-lg p-1 w-fit">
+        <div data-r10n-segmented className="flex items-center gap-1 bg-muted rounded-lg p-1 w-fit">
           {TIKTOK_TABS.map(({ key, label }) => (
             <button
               key={key}
               onClick={() => setActiveTab(key)}
+              data-r10n-segmented-btn
+              data-active={activeTab === key ? "true" : undefined}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
                 activeTab === key

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { commentLeads } from "@/lib/db/schema";
+import { socialLeads } from "@/lib/db/schema";
 import { eq, isNull, and } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { meta } from "@/lib/meta/client";
@@ -93,7 +93,7 @@ export async function POST(
 
   // Load the lead from DB
   const client = await db();
-  const rows = await client.select().from(commentLeads).where(eq(commentLeads.id, id));
+  const rows = await client.select().from(socialLeads).where(eq(socialLeads.id, id));
   const lead = rows[0];
 
   if (!lead) {
@@ -102,9 +102,9 @@ export async function POST(
 
   /** Mark this lead as contacted if it hasn't been already */
   async function markContacted() {
-    await client.update(commentLeads)
+    await client.update(socialLeads)
       .set({ contactedAt: new Date() })
-      .where(and(eq(commentLeads.id, id), isNull(commentLeads.contactedAt)));
+      .where(and(eq(socialLeads.id, id), isNull(socialLeads.contactedAt)));
   }
 
   try {

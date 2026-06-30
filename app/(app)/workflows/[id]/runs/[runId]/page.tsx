@@ -66,7 +66,7 @@ export default function RunDetailPage({
   }
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div data-r10n-wf-rundetail-page="" className="h-full overflow-y-auto">
       <div className="max-w-3xl mx-auto px-6 py-8">
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
@@ -77,17 +77,17 @@ export default function RunDetailPage({
             <ArrowLeft className="w-4 h-4" />
           </Link>
           <div>
-            <h1 className="text-xl font-bold">Run Detail</h1>
+            <h1 data-r10n-wf-page-title="" className="text-xl font-bold">Run Detail</h1>
             <p className="text-xs text-muted-foreground font-mono mt-0.5">{run.id}</p>
           </div>
         </div>
 
         {/* Run summary */}
-        <div className="p-4 bg-card border border-border rounded-xl mb-6">
+        <div data-r10n-wf-summary="" className="p-4 bg-card border border-border rounded-xl mb-6">
           <div className="grid grid-cols-3 gap-4 text-sm">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Status</p>
-              <span className={cn(
+              <p data-r10n-wf-microlabel="" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Status</p>
+              <span data-r10n-wf-statuspill="" data-status={run.status} className={cn(
                 "inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full",
                 run.status === "success" && "bg-green-500/10 text-green-600",
                 run.status === "error" && "bg-red-500/10 text-red-600",
@@ -98,11 +98,11 @@ export default function RunDetailPage({
               </span>
             </div>
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Trigger</p>
+              <p data-r10n-wf-microlabel="" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Trigger</p>
               <p className="font-mono text-xs">{run.triggerEvent}</p>
             </div>
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Started</p>
+              <p data-r10n-wf-microlabel="" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Started</p>
               <p className="text-xs">{format(new Date(run.startedAt), "MMM d · h:mm:ss a")}</p>
             </div>
           </div>
@@ -110,14 +110,14 @@ export default function RunDetailPage({
 
         {/* Node logs */}
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3">
+          <p data-r10n-wf-microlabel="" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3">
             Node Execution Log
           </p>
           <div className="space-y-2">
             {run.logs.map((log) => {
               const isExpanded = expandedLogs.has(log.id);
               return (
-                <div key={log.id} className="bg-card border border-border rounded-xl overflow-hidden">
+                <div key={log.id} data-r10n-wf-logcard="" className="bg-card border border-border rounded-xl overflow-hidden">
                   <button
                     onClick={() => toggleLog(log.id)}
                     className="flex items-center gap-3 w-full px-4 py-3 text-left hover:bg-border/30 transition-colors"
@@ -147,27 +147,27 @@ export default function RunDetailPage({
                   {isExpanded && (
                     <div className="border-t border-border px-4 py-3 space-y-3">
                       {log.error && (
-                        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-                          <p className="text-xs font-bold text-red-600 mb-1">Error</p>
-                          <p className="text-xs font-mono text-red-600">{log.error}</p>
+                        <div data-r10n-wf-error="" className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                          <p data-r10n-wf-error-label="" className="text-xs font-bold text-red-600 mb-1">Error</p>
+                          <p data-r10n-wf-error-text="" className="text-xs font-mono text-red-600">{log.error}</p>
                         </div>
                       )}
                       {log.inputData != null && (
                         <div>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">
+                          <p data-r10n-wf-microlabel="" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">
                             Input
                           </p>
-                          <pre className="text-[11px] bg-muted/50 rounded-lg p-3 overflow-x-auto font-mono text-foreground/80">
+                          <pre data-r10n-wf-json="" className="text-[11px] bg-muted/50 rounded-lg p-3 overflow-x-auto font-mono text-foreground/80">
                             {JSON.stringify(log.inputData, null, 2)}
                           </pre>
                         </div>
                       )}
                       {log.outputData != null && (
                         <div>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">
+                          <p data-r10n-wf-microlabel="" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">
                             Output
                           </p>
-                          <pre className="text-[11px] bg-muted/50 rounded-lg p-3 overflow-x-auto font-mono text-foreground/80">
+                          <pre data-r10n-wf-json="" className="text-[11px] bg-muted/50 rounded-lg p-3 overflow-x-auto font-mono text-foreground/80">
                             {JSON.stringify(log.outputData, null, 2)}
                           </pre>
                         </div>

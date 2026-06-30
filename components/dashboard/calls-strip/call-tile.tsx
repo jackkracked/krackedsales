@@ -580,6 +580,8 @@ export function CallTile({ event, isNext, isAdmin, onDispositioned }: CallTilePr
   return (
     <>
       <div
+        data-r10n-call-tile
+        data-state={isNext ? "next" : isOverdue ? "overdue" : "default"}
         className={cn(
           "flex flex-col rounded-[10px] border bg-card p-4 h-full transition-all duration-300",
           leaving && "opacity-0 scale-95",
@@ -591,11 +593,11 @@ export function CallTile({ event, isNext, isAdmin, onDispositioned }: CallTilePr
         {/* Badge row */}
         <div className="flex items-center justify-between mb-3">
           {isNext ? (
-            <span className="text-[10px] font-bold uppercase tracking-widest bg-primary text-primary-foreground px-2 py-0.5 rounded-full">
+            <span data-r10n-call-badge data-state="next" className="text-[10px] font-bold uppercase tracking-widest bg-primary text-primary-foreground px-2 py-0.5 rounded-full">
               Next
             </span>
           ) : isOverdue ? (
-            <span className="text-[10px] font-bold uppercase tracking-widest bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+            <span data-r10n-call-badge data-state="overdue" className="text-[10px] font-bold uppercase tracking-widest bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
               Overdue
             </span>
           ) : (
@@ -644,6 +646,7 @@ export function CallTile({ event, isNext, isAdmin, onDispositioned }: CallTilePr
         {/* Call type — which GHL calendar was booked, so reps know what to prep */}
         {event.calendarName && (
           <span
+            data-r10n-call-calendar
             className="inline-flex items-center gap-1 self-start max-w-full mb-1.5 px-2 py-0.5 rounded-full bg-primary/[0.06] ring-1 ring-inset ring-primary/15 text-[11px] font-medium text-primary"
             title={event.calendarName}
           >

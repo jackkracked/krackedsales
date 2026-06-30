@@ -29,6 +29,8 @@ export function FollowUpHistory({ messages }: Props) {
       {messages.map((msg, i) => (
         <div
           key={i}
+          data-r10n-followup-msg
+          data-direction={msg.direction}
           className={cn(
             "rounded-[8px] px-3 py-2.5 border text-xs",
             msg.direction === "inbound"
@@ -37,7 +39,7 @@ export function FollowUpHistory({ messages }: Props) {
           )}
         >
           <div className="flex items-center justify-between mb-1 gap-2">
-            <span className="font-medium text-muted-foreground">
+            <span data-r10n-followup-msg-who className="font-medium text-muted-foreground">
               {msg.direction === "inbound" ? "Them" : "You"}
               {msg.angle && (
                 <span className="ml-1.5 text-muted-foreground/50 font-normal">
@@ -45,7 +47,7 @@ export function FollowUpHistory({ messages }: Props) {
                 </span>
               )}
             </span>
-            <span className="text-muted-foreground/50 shrink-0">
+            <span data-r10n-followup-msg-time className="text-muted-foreground/50 shrink-0">
               {msg.daysAgo === 0 ? "today" : `${msg.daysAgo}d ago`}
             </span>
           </div>

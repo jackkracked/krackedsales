@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { meta, metaForPage } from "@/lib/meta/client";
 import { db } from "@/lib/db";
-import { metaPages } from "@/lib/db/schema";
+import { metaPages, socialLeads } from "@/lib/db/schema";
+import { inArray } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,11 @@ interface NormalisedConversation {
   participantId: string;
   lastMessage: string;
   updatedAt: string;
+  // Contact data already attached to this DM (social_leads), if any — for the inbox
+  // "only show data we don't have" rule. Undefined until something has been attached.
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
 }
 
 function normalise(
@@ -146,6 +152,43 @@ export async function GET(_req: NextRequest) {
   const conversations = allConversations.sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
   );
+
+  // Enrich with any contact data already attached to these DMs (social_leads, matched by
+  // platform + commenterId) so the thread can hide values we already have on file.
+  const participantIds = [...new Set(conversations.map((c) => c.participantId).filter(Boolean))];
+  if (participantIds.length) {
+    const rows = await db()
+      .select({
+        platform: socialLeads.platform,
+        commenterId: socialLeads.commenterId,
+        email: socialLeads.email,
+        phone: socialLeads.phone,
+        website: socialLeads.website,
+      })
+      .from(socialLeads)
+      .where(inArray(socialLeads.commenterId, participantIds))
+      .catch(
+        () =>
+          [] as Array<{
+            platform: string;
+            commenterId: string | null;
+            email: string | null;
+            phone: string | null;
+            website: string | null;
+          }>
+      );
+    const byKey = new Map(
+      rows.filter((r) => r.commenterId).map((r) => [`${r.platform}:${r.commenterId}`, r])
+    );
+    for (const c of conversations) {
+      const m = byKey.get(`${c.platform}:${c.participantId}`);
+      if (m) {
+        c.email = m.email;
+        c.phone = m.phone;
+        c.website = m.website;
+      }
+    }
+  }
 
   return NextResponse.json({ conversations, errors: errors.length ? errors : undefined });
 }

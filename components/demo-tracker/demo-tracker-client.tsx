@@ -68,6 +68,8 @@ function FilterSelect({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      data-r10n-demo-select
+      data-r10n-demo-active={value ? "true" : "false"}
       className={cn(
         "text-xs rounded-lg border border-border bg-card px-2.5 py-1.5 pr-6",
         "text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30",
@@ -191,7 +193,7 @@ export function DemoTrackerClient() {
   const buckets = groupByBucket(filtered, rangeStartDate);
 
   return (
-    <div className="flex flex-col gap-4 h-full">
+    <div className="flex flex-col gap-4 h-full" data-r10n-demo-root>
 
       {/* ── Header ── */}
       <div className="flex items-start justify-between shrink-0">
@@ -199,22 +201,24 @@ export function DemoTrackerClient() {
           <h1
             className="text-2xl font-bold text-foreground leading-tight"
             style={{ fontFamily: "var(--font-heading)" }}
+            data-r10n-demo-title
           >
             Demo Tracker
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <p className="text-sm text-muted-foreground mt-0.5" data-r10n-demo-subtitle>
             Live production pipeline
           </p>
         </div>
         <div className="flex items-center gap-3">
           {dataUpdatedAt > 0 && (
-            <span className="text-xs text-muted-foreground hidden sm:block">
+            <span className="text-xs text-muted-foreground hidden sm:block" data-r10n-demo-synced>
               Synced {formatDistanceToNow(dataUpdatedAt, { addSuffix: true })}
             </span>
           )}
           <button
             onClick={() => refetch()}
             disabled={isFetching}
+            data-r10n-demo-refresh
             className={cn(
               "flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg",
               "border border-border bg-card hover:bg-muted transition-colors",
@@ -241,6 +245,8 @@ export function DemoTrackerClient() {
             placeholder="Search clients…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            data-r10n-demo-search
+            data-r10n-demo-active={search ? "true" : "false"}
             className={cn(
               "text-xs rounded-lg border border-border bg-card pl-7 pr-3 py-1.5 w-44",
               "placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30",
@@ -276,6 +282,7 @@ export function DemoTrackerClient() {
         {hasActiveFilters && (
           <button
             onClick={clearFilters}
+            data-r10n-demo-clear
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
             <X className="w-3 h-3" />
@@ -286,14 +293,14 @@ export function DemoTrackerClient() {
 
       {/* ── Backfill progress banner ── */}
       {!backfillComplete && backfill && (
-        <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/60 border border-border shrink-0">
+        <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/60 border border-border shrink-0" data-r10n-demo-backfill>
           <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2 mb-1">
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-muted-foreground" data-r10n-demo-backfill-label>
                 Syncing stage data — metrics update as tasks are processed
               </span>
-              <span className="text-xs font-medium text-foreground tabular-nums shrink-0">
+              <span className="text-xs font-medium text-foreground tabular-nums shrink-0" data-r10n-demo-backfill-count>
                 {backfill.synced} / {backfill.total}
               </span>
             </div>
@@ -301,6 +308,7 @@ export function DemoTrackerClient() {
               <div
                 className="h-full rounded-full bg-primary transition-all duration-500"
                 style={{ width: `${backfillPct}%` }}
+                data-r10n-demo-backfill-bar
               />
             </div>
           </div>

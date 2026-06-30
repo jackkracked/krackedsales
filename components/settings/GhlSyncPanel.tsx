@@ -236,11 +236,11 @@ export function GhlSyncPanel() {
   const recentLogs = status?.recentLogs.slice(0, 5) ?? [];
 
   return (
-    <div className="bg-card border border-border rounded-xl p-5 space-y-5">
+    <div className="bg-card border border-border rounded-xl p-5 space-y-5" data-r10n-settings-card>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>
+          <h2 className="text-sm font-semibold text-foreground" style={{ fontFamily: "var(--font-heading)" }} data-r10n-settings-cardtitle>
             GoHighLevel Data Sync
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -304,6 +304,8 @@ export function GhlSyncPanel() {
                 </span>
                 <span className="text-muted-foreground shrink-0">{relativeTime(log.completedAt)}</span>
                 <span
+                  data-r10n-status-pill
+                  data-status={log.status === "success" ? "won" : "failed"}
                   className={cn(
                     "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium shrink-0",
                     log.status === "success"
@@ -311,7 +313,7 @@ export function GhlSyncPanel() {
                       : "bg-red-50 text-red-700 border border-red-200"
                   )}
                 >
-                  <span className={cn("w-1.5 h-1.5 rounded-full", log.status === "success" ? "bg-emerald-500" : "bg-red-500")} />
+                  <span data-r10n-settings-statusdot className={cn("w-1.5 h-1.5 rounded-full", log.status === "success" ? "bg-emerald-500" : "bg-red-500")} />
                   {log.status === "success" ? "Success" : "Error"}
                 </span>
               </div>

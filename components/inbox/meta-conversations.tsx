@@ -3,11 +3,22 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { RefreshCw, Send } from "lucide-react";
+import { RefreshCw, Send, ListTodo, Layers, ClipboardCheck } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { useMessages, useConversations } from "@/lib/hooks/use-conversations";
 import { MessageThread as GHLMessageThread } from "./message-thread";
 import { ReplyComposer } from "./reply-composer";
+import { LeadDetailsSidebar } from "./lead-details-sidebar";
+import { CreateTaskModal } from "@/components/shared/create-task-modal";
+import { CreateDemoModal } from "@/components/shared/create-demo-modal";
+import { CreateAuditModal } from "@/components/shared/create-audit-modal";
+import { SmartBanner, EnrichChip, type AttachTarget } from "@/components/shared/chat-bubble";
+import {
+  extractContactData,
+  scanThread,
+  filterAlreadyOnFile,
+  type ExistingContactData,
+} from "@/lib/utils/extract-contact-data";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -21,6 +32,10 @@ type DmConversation = {
   participantId: string;
   lastMessage: string;
   updatedAt: string;
+  // Contact data already attached to this DM (social_leads), for the "only show new" filter.
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
 };
 
 type CommentConversation = {
@@ -35,6 +50,10 @@ type CommentConversation = {
   commentText: string;
   commentId: string | null;
   postId: string | null;
+  // Contact data already on this lead's social_leads row, for the "only show new" filter.
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
 };
 
 type GHLInstagramConversation = {
@@ -145,6 +164,9 @@ interface RawDmConversation {
   participantId: string;
   lastMessage: string;
   updatedAt: string;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
 }
 
 async function fetchDmConversations(): Promise<{ conversations: DmConversation[] }> {
@@ -178,6 +200,9 @@ interface CommentLeadRow {
   commentId: string | null;
   postId: string | null;
   commenterId: string | null;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
   createdAt: string;
 }
 
@@ -232,6 +257,9 @@ function ConversationRow({
   return (
     <button
       onClick={onSelect}
+      data-r10n-convo-row
+      data-selected={isSelected}
+      data-unread={unread}
       className={cn(
         "w-full text-left px-4 py-3 border-b border-border transition-colors border-l-2",
         isSelected
@@ -251,17 +279,17 @@ function ConversationRow({
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-1">
-            <span className={cn("text-sm truncate", unread ? "font-bold text-foreground" : "font-medium text-foreground/80")}>
+            <span data-r10n-convo-name className={cn("text-sm truncate", unread ? "font-bold text-foreground" : "font-medium text-foreground/80")}>
               {conversation.participantName}
             </span>
             <div className="flex items-center gap-1.5 shrink-0">
-              <span className={cn("text-xs", unread ? "text-foreground/70 font-medium" : "text-muted-foreground")}>{timeAgo}</span>
+              <span data-r10n-convo-time className={cn("text-xs", unread ? "text-foreground/70 font-medium" : "text-muted-foreground")}>{timeAgo}</span>
               {unread && (
-                <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
+                <span data-r10n-convo-unreaddot className="w-2 h-2 rounded-full bg-primary shrink-0" />
               )}
             </div>
           </div>
-          <p className={cn("text-xs truncate mt-0.5", unread ? "text-foreground/75" : "text-muted-foreground")}>
+          <p data-r10n-convo-preview className={cn("text-xs truncate mt-0.5", unread ? "text-foreground/75" : "text-muted-foreground")}>
             {conversation.lastMessage}
           </p>
         </div>
@@ -280,8 +308,8 @@ function ViewCommentNotification({ url, createdAt }: { url: string; createdAt: s
   const timeAgo = formatDistanceToNow(new Date(createdAt), { addSuffix: true });
   return (
     <div className="self-center flex flex-col items-center gap-1.5 w-full max-w-sm px-2">
-      <div className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-[10px] bg-muted/60 border border-border">
-        <div className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
+      <div data-r10n-systemnote className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-[10px] bg-muted/60 border border-border">
+        <div data-r10n-systemnote-dot className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
         <p className="flex-1 text-xs text-muted-foreground leading-snug">
           This conversation started from a post comment
         </p>
@@ -289,6 +317,7 @@ function ViewCommentNotification({ url, createdAt }: { url: string; createdAt: s
           href={url}
           target="_blank"
           rel="noopener noreferrer"
+          data-r10n-systemnote-link
           className="shrink-0 text-xs font-medium text-primary hover:underline"
         >
           View →
@@ -303,7 +332,17 @@ function ViewCommentNotification({ url, createdAt }: { url: string; createdAt: s
 // MessageBubble
 // ---------------------------------------------------------------------------
 
-function MessageBubble({ message }: { message: MetaMessage }) {
+function MessageBubble({
+  message,
+  target,
+  existing,
+  onSaved,
+}: {
+  message: MetaMessage;
+  target?: AttachTarget | null;
+  existing?: ExistingContactData | null;
+  onSaved?: (field: string, value: string) => void;
+}) {
   const isOutbound = message.direction === "outbound";
   // text can be absent for non-text messages (stickers, images, reactions, likes)
   const text = message.text ?? "";
@@ -315,6 +354,12 @@ function MessageBubble({ message }: { message: MetaMessage }) {
     return <ViewCommentNotification url={viewCommentMatch[2]} createdAt={message.createdAt} />;
   }
 
+  // Inbound only: detect contact data we don't already have on file.
+  const detected =
+    !isOutbound && target ? filterAlreadyOnFile(extractContactData(text), existing) : null;
+  const hasChips =
+    !!detected && detected.urls.length + detected.emails.length + detected.phones.length > 0;
+
   return (
     <div
       className={cn(
@@ -323,6 +368,8 @@ function MessageBubble({ message }: { message: MetaMessage }) {
       )}
     >
       <div
+        data-r10n-bubble
+        data-dir={isOutbound ? "out" : "in"}
         className={cn(
           "px-3 py-2 rounded-[10px] text-sm leading-relaxed break-words",
           isOutbound
@@ -333,9 +380,22 @@ function MessageBubble({ message }: { message: MetaMessage }) {
       >
         {message.text}
       </div>
-      <span className="text-[10px] text-muted-foreground">
+      <span data-r10n-bubble-time className="text-[10px] text-muted-foreground">
         {message.pending ? "Sending…" : timeAgo}
       </span>
+      {hasChips && target && (
+        <div className="flex flex-wrap gap-1.5 mt-0.5">
+          {detected!.urls.map((v) => (
+            <EnrichChip key={v} type="url" value={v} target={target} onSaved={onSaved} />
+          ))}
+          {detected!.emails.map((v) => (
+            <EnrichChip key={v} type="email" value={v} target={target} onSaved={onSaved} />
+          ))}
+          {detected!.phones.map((v) => (
+            <EnrichChip key={v} type="phone" value={v} target={target} onSaved={onSaved} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -362,6 +422,28 @@ function MessageThread({
   });
 
   const messages = data?.messages ?? [];
+
+  // Smart detection — attach data found in the DM to this lead's social_leads row (no GHL
+  // promotion). `existing` comes from the conversation (API joins social_leads by participant).
+  const attachTarget: AttachTarget = {
+    kind: "social",
+    platform: conversation.platform,
+    participantId: conversation.participantId,
+    name: conversation.participantName,
+  };
+  const existing: ExistingContactData = {
+    email: conversation.email,
+    phone: conversation.phone,
+    website: conversation.website,
+  };
+  function handleFieldSaved() {
+    queryClient.invalidateQueries({ queryKey: ["meta-conversations"] });
+  }
+  const dmScan = filterAlreadyOnFile(
+    scanThread(messages.map((m: MetaMessage) => ({ body: m.text, direction: m.direction }))),
+    existing
+  );
+  const hasNewData = dmScan.urls.length + dmScan.emails.length + dmScan.phones.length > 0;
 
   const sendMutation = useMutation({
     mutationFn: (text: string) =>
@@ -434,17 +516,28 @@ function MessageThread({
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Header */}
-      <div className="flex items-center gap-2.5 px-5 py-3 border-b border-border bg-card shrink-0">
+      <div data-r10n-thread-header className="flex items-center gap-2.5 px-5 py-3 border-b border-border bg-card shrink-0">
         {conversation.platform === "facebook" ? (
           <FacebookIcon className="w-4 h-4 shrink-0" />
         ) : (
           <InstagramIcon className="w-4 h-4 shrink-0" />
         )}
         <div>
-          <h3 className="text-sm font-semibold text-foreground">{conversation.participantName}</h3>
-          <p className="text-xs text-muted-foreground capitalize">{conversation.platform}</p>
+          <h3 data-r10n-thread-name className="text-sm font-semibold text-foreground">{conversation.participantName}</h3>
+          <p data-r10n-thread-sub className="text-xs text-muted-foreground capitalize">{conversation.platform}</p>
         </div>
       </div>
+
+      {hasNewData && (
+        <div className="px-5 pt-3 shrink-0">
+          <SmartBanner
+            messages={messages.map((m: MetaMessage) => ({ body: m.text, direction: m.direction }))}
+            target={attachTarget}
+            existing={existing}
+            onFieldSaved={handleFieldSaved}
+          />
+        </div>
+      )}
 
       {/* Messages */}
       {isLoading ? (
@@ -460,13 +553,21 @@ function MessageThread({
           {messages.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center mt-8">No messages yet.</p>
           ) : (
-            messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)
+            messages.map((msg: MetaMessage) => (
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                target={attachTarget}
+                existing={existing}
+                onSaved={handleFieldSaved}
+              />
+            ))
           )}
         </div>
       )}
 
       {/* Reply composer */}
-      <div className="shrink-0 border-t border-border bg-card px-4 py-3">
+      <div data-r10n-composer className="shrink-0 border-t border-border bg-card px-4 py-3">
         <div className="flex items-end gap-2">
           <textarea
             value={replyText}
@@ -474,6 +575,7 @@ function MessageThread({
             onKeyDown={handleKeyDown}
             placeholder="Type a message… (Enter to send)"
             rows={2}
+            data-r10n-composer-input
             className={cn(
               "flex-1 resize-none rounded-[6px] border border-border bg-background px-3 py-2",
               "text-sm text-foreground placeholder:text-muted-foreground",
@@ -484,6 +586,7 @@ function MessageThread({
           <button
             onClick={handleSend}
             disabled={!replyText.trim() || sendMutation.isPending}
+            data-r10n-composer-send
             className={cn(
               "flex items-center justify-center w-9 h-9 rounded-[6px] shrink-0 transition-colors",
               "bg-primary text-white hover:bg-primary/90",
@@ -532,6 +635,24 @@ function CommentLeadThread({ conversation }: { conversation: CommentConversation
   const postUrl = conversation.postId
     ? `https://www.facebook.com/${conversation.postId}`
     : null;
+
+  const queryClient = useQueryClient();
+  // Attach data detected in the comment to this lead's social_leads row (by id; no promotion).
+  const attachTarget: AttachTarget = { kind: "social", commentLeadId: conversation.id };
+  const existing: ExistingContactData = {
+    email: conversation.email,
+    phone: conversation.phone,
+    website: conversation.website,
+  };
+  function handleCommentFieldSaved() {
+    queryClient.invalidateQueries({ queryKey: ["comment-leads-inbox"] });
+  }
+  const commentScan = filterAlreadyOnFile(
+    extractContactData(conversation.commentText ?? ""),
+    existing
+  );
+  const hasCommentData =
+    commentScan.urls.length + commentScan.emails.length + commentScan.phones.length > 0;
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -590,26 +711,37 @@ function CommentLeadThread({ conversation }: { conversation: CommentConversation
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Header */}
-      <div className="flex items-center gap-2.5 px-5 py-3 border-b border-border bg-card shrink-0">
+      <div data-r10n-thread-header className="flex items-center gap-2.5 px-5 py-3 border-b border-border bg-card shrink-0">
         {conversation.platform === "facebook" ? (
           <FacebookIcon className="w-4 h-4 shrink-0" />
         ) : (
           <InstagramIcon className="w-4 h-4 shrink-0" />
         )}
         <div>
-          <h3 className="text-sm font-semibold text-foreground">{conversation.participantName}</h3>
-          <p className="text-xs text-muted-foreground capitalize">
+          <h3 data-r10n-thread-name className="text-sm font-semibold text-foreground">{conversation.participantName}</h3>
+          <p data-r10n-thread-sub className="text-xs text-muted-foreground capitalize">
             {conversation.platform} · Comment lead
           </p>
         </div>
       </div>
 
+      {hasCommentData && (
+        <div className="px-5 pt-3 shrink-0">
+          <SmartBanner
+            messages={[{ body: conversation.commentText ?? "", direction: "inbound" }]}
+            target={attachTarget}
+            existing={existing}
+            onFieldSaved={handleCommentFieldSaved}
+          />
+        </div>
+      )}
+
       {/* Thread */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3">
         {/* Comment notification — always at top */}
         <div className="self-center w-full max-w-sm">
-          <div className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-[10px] bg-muted/60 border border-border">
-            <div className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
+          <div data-r10n-systemnote className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-[10px] bg-muted/60 border border-border">
+            <div data-r10n-systemnote-dot className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
             <p className="flex-1 text-xs text-muted-foreground leading-snug">
               Commented{" "}
               <span className="font-semibold text-foreground">
@@ -622,6 +754,7 @@ function CommentLeadThread({ conversation }: { conversation: CommentConversation
                 href={postUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                data-r10n-systemnote-link
                 className="shrink-0 text-xs font-medium text-primary hover:underline"
               >
                 View →
@@ -631,10 +764,35 @@ function CommentLeadThread({ conversation }: { conversation: CommentConversation
           <p className="text-center text-[10px] text-muted-foreground mt-1">{timeAgo}</p>
         </div>
 
+        {/* The actual comment — shown as an inbound message, with inline attach chips so you
+            can detect + save contact data right on the message (Add all up top does it in bulk). */}
+        {conversation.commentText && (
+          <div className="flex flex-col items-start gap-1 max-w-[70%]">
+            <div data-r10n-bubble data-dir="in" className="px-3 py-2 rounded-[10px] rounded-bl-sm text-sm leading-relaxed break-words bg-muted text-foreground">
+              {conversation.commentText}
+            </div>
+            {hasCommentData && (
+              <div className="flex flex-wrap gap-1.5 mt-0.5">
+                {commentScan.urls.map((v) => (
+                  <EnrichChip key={v} type="url" value={v} target={attachTarget} onSaved={handleCommentFieldSaved} />
+                ))}
+                {commentScan.emails.map((v) => (
+                  <EnrichChip key={v} type="email" value={v} target={attachTarget} onSaved={handleCommentFieldSaved} />
+                ))}
+                {commentScan.phones.map((v) => (
+                  <EnrichChip key={v} type="phone" value={v} target={attachTarget} onSaved={handleCommentFieldSaved} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Sent replies */}
         {sentMessages.map((msg) => (
           <div key={msg.id} className="flex flex-col items-end gap-0.5">
             <div
+              data-r10n-bubble
+              data-dir="out"
               className={cn(
                 "max-w-[70%] px-3 py-2 rounded-[10px] text-sm leading-relaxed break-words",
                 "bg-primary text-white rounded-br-sm",
@@ -643,7 +801,7 @@ function CommentLeadThread({ conversation }: { conversation: CommentConversation
             >
               {msg.text}
             </div>
-            <span className="text-[10px] text-muted-foreground">
+            <span data-r10n-bubble-time className="text-[10px] text-muted-foreground">
               {msg.pending ? "Sending…" : formatDistanceToNow(new Date(msg.createdAt), { addSuffix: true })}
             </span>
           </div>
@@ -651,7 +809,7 @@ function CommentLeadThread({ conversation }: { conversation: CommentConversation
       </div>
 
       {/* Reply composer */}
-      <div className="shrink-0 border-t border-border bg-card px-4 py-3">
+      <div data-r10n-composer className="shrink-0 border-t border-border bg-card px-4 py-3">
         <div className="flex items-end gap-2">
           <textarea
             value={replyText}
@@ -659,6 +817,7 @@ function CommentLeadThread({ conversation }: { conversation: CommentConversation
             onKeyDown={handleKeyDown}
             placeholder="Type a message… (Enter to send)"
             rows={2}
+            data-r10n-composer-input
             className={cn(
               "flex-1 resize-none rounded-[6px] border border-border bg-background px-3 py-2",
               "text-sm text-foreground placeholder:text-muted-foreground",
@@ -669,6 +828,7 @@ function CommentLeadThread({ conversation }: { conversation: CommentConversation
           <button
             onClick={handleSend}
             disabled={!replyText.trim() || isSending}
+            data-r10n-composer-send
             className={cn(
               "flex items-center justify-center w-9 h-9 rounded-[6px] shrink-0 transition-colors",
               "bg-primary text-white hover:bg-primary/90",
@@ -697,11 +857,11 @@ function GHLInstagramThread({ conversation }: { conversation: GHLInstagramConver
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex items-center gap-2.5 px-5 py-3 border-b border-border bg-card shrink-0">
+      <div data-r10n-thread-header className="flex items-center gap-2.5 px-5 py-3 border-b border-border bg-card shrink-0">
         <InstagramIcon className="w-4 h-4 shrink-0" />
         <div>
-          <h3 className="text-sm font-semibold text-foreground">{conversation.participantName}</h3>
-          <p className="text-xs text-muted-foreground">Instagram · via GHL</p>
+          <h3 data-r10n-thread-name className="text-sm font-semibold text-foreground">{conversation.participantName}</h3>
+          <p data-r10n-thread-sub className="text-xs text-muted-foreground">Instagram · via GHL</p>
         </div>
       </div>
 
@@ -783,6 +943,9 @@ export function MetaConversations() {
         commentText: lead.commentText,
         commentId: lead.commentId,
         postId: lead.postId,
+        email: lead.email,
+        phone: lead.phone,
+        website: lead.website,
       })
     );
     const ghlIg: GHLInstagramConversation[] = (ghlIgData?.conversations ?? []).map(
@@ -881,12 +1044,14 @@ export function MetaConversations() {
       {/* Left panel */}
       <div className="flex flex-col border-r border-border bg-card w-full lg:w-80 xl:w-96 shrink-0">
         {/* Platform tabs + unread toggle + refresh */}
-        <div className="px-4 py-3 border-b border-border space-y-2">
+        <div data-r10n-list-header className="px-4 py-3 border-b border-border space-y-2">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1 bg-muted rounded-lg p-1 w-fit">
+            <div data-r10n-segmented className="flex items-center gap-1 bg-muted rounded-lg p-1 w-fit">
               {PLATFORM_TABS.map(({ key, label, icon: Icon }) => (
                 <button
                   key={key}
+                  data-r10n-segmented-btn
+                  data-active={platformTab === key}
                   onClick={() => handleTabChange(key)}
                   className={cn(
                     "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
@@ -902,8 +1067,10 @@ export function MetaConversations() {
             </div>
             <div className="flex items-center gap-1.5">
               {isFetching && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
-              <div className="flex items-center bg-muted rounded-lg p-0.5">
+              <div data-r10n-segmented className="flex items-center bg-muted rounded-lg p-0.5">
                 <button
+                  data-r10n-segmented-btn
+                  data-active={unreadOnly}
                   onClick={() => setUnreadOnly(true)}
                   className={cn(
                     "px-2.5 py-1 text-xs font-medium rounded-md transition-colors",
@@ -913,6 +1080,8 @@ export function MetaConversations() {
                   Unread
                 </button>
                 <button
+                  data-r10n-segmented-btn
+                  data-active={!unreadOnly}
                   onClick={() => setUnreadOnly(false)}
                   className={cn(
                     "px-2.5 py-1 text-xs font-medium rounded-md transition-colors",
@@ -925,6 +1094,7 @@ export function MetaConversations() {
               <button
                 onClick={handleRefresh}
                 disabled={isFetching}
+                data-r10n-list-refresh
                 className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-40"
                 aria-label="Refresh conversations"
               >
@@ -970,28 +1140,158 @@ export function MetaConversations() {
         )}
       </div>
 
-      {/* Right panel */}
-      <div className="flex-1 flex flex-col min-w-0 bg-background">
-        {selectedConversation ? (
-          selectedConversation.source === "comment" ? (
-            <CommentLeadThread conversation={selectedConversation} />
-          ) : selectedConversation.source === "ghl_instagram" ? (
-            <GHLInstagramThread conversation={selectedConversation} />
+      {/* Right panel — message thread + lead sidebar */}
+      <div className="flex-1 flex min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 bg-background">
+          {selectedConversation ? (
+            selectedConversation.source === "comment" ? (
+              <CommentLeadThread conversation={selectedConversation} />
+            ) : selectedConversation.source === "ghl_instagram" ? (
+              <GHLInstagramThread conversation={selectedConversation} />
+            ) : (
+              <MessageThread
+                conversationId={selectedConversation.id}
+                conversation={selectedConversation}
+              />
+            )
           ) : (
-            <MessageThread
-              conversationId={selectedConversation.id}
-              conversation={selectedConversation}
-            />
-          )
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-2">
-            <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
-              <FacebookIcon className="w-5 h-5" />
+            <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-2">
+              <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+                <FacebookIcon className="w-5 h-5" />
+              </div>
+              <p className="text-sm">Select a conversation</p>
             </div>
-            <p className="text-sm">Select a conversation</p>
-          </div>
+          )}
+        </div>
+
+        {/* Lead sidebar — Quick Actions on every Meta conversation. A GHL-Instagram
+            conversation already has a real GHL contact, so it gets the full GHL sidebar;
+            DMs + comment leads get the lightweight Meta sidebar (Demo creates the lead). */}
+        {selectedConversation?.source === "ghl_instagram" && (
+          <LeadDetailsSidebar
+            contactId={selectedConversation.contactId}
+            contactName={selectedConversation.participantName}
+          />
+        )}
+        {selectedConversation && selectedConversation.source !== "ghl_instagram" && (
+          <MetaLeadSidebar conversation={selectedConversation} />
         )}
       </div>
     </div>
+  );
+}
+
+// ─── Meta lead sidebar — Quick Actions for a DM / comment-lead conversation ──────
+// These have no GHL contact yet, so it's a lightweight panel: identity + platform chip
+// + Task/Demo/Audit. Submitting a Demo creates the real GHL lead (source-tagged) and the
+// conversation starts counting as a pipeline lead.
+
+const PLATFORM_CHIP: Record<string, { label: string; cls: string }> = {
+  instagram: { label: "Instagram", cls: "bg-pink-50 text-pink-700 border-pink-200" },
+  facebook: { label: "Facebook", cls: "bg-blue-50 text-blue-700 border-blue-200" },
+  tiktok: { label: "TikTok", cls: "bg-neutral-100 text-neutral-800 border-neutral-300" },
+};
+
+function MetaLeadSidebar({
+  conversation,
+}: {
+  conversation: DmConversation | CommentConversation;
+}) {
+  const [showTask, setShowTask] = useState(false);
+  const [showDemo, setShowDemo] = useState(false);
+  const [showAudit, setShowAudit] = useState(false);
+
+  const platform = conversation.platform;
+  const chip = PLATFORM_CHIP[platform] ?? PLATFORM_CHIP.instagram;
+  const name = conversation.participantName || "Unknown";
+  const commentLeadId = conversation.source === "comment" ? conversation.id : undefined;
+
+  // Task B — prefill the forms from data we already have. IG "name" IS the @handle; FB/TikTok
+  // "name" is a person name, not a handle → leave the handle blank there.
+  const socialHandle =
+    platform === "instagram" ? conversation.participantName || undefined : undefined;
+  const leadEmail = conversation.email || undefined;
+  const leadPhone = conversation.phone || undefined;
+  const leadWebsite = conversation.website || undefined;
+
+  return (
+    <>
+      <aside data-r10n-leadsidebar className="w-72 shrink-0 border-l border-border bg-card flex flex-col overflow-y-auto">
+        {/* Header */}
+        <div className="px-4 py-4 border-b border-border/60">
+          <p data-r10n-sidebar-label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.12em]">
+            Lead details
+          </p>
+          <h3 data-r10n-sidebar-name className="text-sm font-bold text-foreground mt-1 truncate" style={{ fontFamily: "var(--font-heading)" }}>
+            {name}
+          </h3>
+          <span
+            data-r10n-platform-chip
+            className={cn(
+              "inline-flex items-center mt-2 px-2 py-0.5 text-[11px] font-medium rounded-full border",
+              chip.cls,
+            )}
+          >
+            {chip.label}
+          </span>
+        </div>
+
+        {/* Not-a-lead-yet hint */}
+        <div data-r10n-sidebar-hint className="px-4 py-3 border-b border-border/60">
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Not a lead yet. Create a demo to add it to the pipeline — it&apos;ll appear as a{" "}
+            <span className="font-medium text-foreground">{chip.label}</span> lead.
+          </p>
+        </div>
+
+        {/* Quick Actions */}
+        <div className="px-4 py-4">
+          <h4 data-r10n-sidebar-section className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.12em] mb-2.5">
+            Quick actions
+          </h4>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { icon: ListTodo, label: "Task", onClick: () => setShowTask(true) },
+              { icon: Layers, label: "Demo", onClick: () => setShowDemo(true) },
+              { icon: ClipboardCheck, label: "Audit", onClick: () => setShowAudit(true) },
+            ].map(({ icon: Icon, label, onClick }) => (
+              <button
+                key={label}
+                onClick={onClick}
+                data-r10n-quickaction
+                className="group flex flex-col items-center gap-1.5 py-3 text-[11px] font-medium text-foreground border border-border rounded-[9px] hover:border-primary/40 hover:bg-primary/[0.03] transition-all active:scale-[0.97]"
+              >
+                <span data-r10n-quickaction-icon className="w-7 h-7 rounded-[7px] bg-muted/70 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+                  <Icon className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
+                </span>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </aside>
+
+      {/* Modals — Demo carries the platform so it creates a real, source-tagged GHL lead */}
+      {showDemo && (
+        <CreateDemoModal
+          contactName={name}
+          commentLeadId={commentLeadId}
+          platform={platform}
+          participantId={conversation.participantId}
+          opportunitySource={platform}
+          contactEmail={leadEmail}
+          contactPhone={leadPhone}
+          defaultWebsite={leadWebsite}
+          defaultSocialHandle={socialHandle}
+          onClose={() => setShowDemo(false)}
+        />
+      )}
+      {showTask && (
+        <CreateTaskModal contactName={name} onClose={() => setShowTask(false)} />
+      )}
+      {showAudit && (
+        <CreateAuditModal contactName={name} defaultWebsite={leadWebsite} onClose={() => setShowAudit(false)} />
+      )}
+    </>
   );
 }

@@ -103,6 +103,21 @@ export const BaseNode = memo(function BaseNode({
     <>
       <div
         onContextMenu={handleContextMenu}
+        data-r10n-wf-node=""
+        data-category={data.category ?? "action"}
+        data-selected={selected ? "true" : undefined}
+        data-run={
+          data.isRunSuccess
+            ? "success"
+            : data.isRunError
+            ? "error"
+            : data.isRunning
+            ? "running"
+            : data.isListening
+            ? "listening"
+            : undefined
+        }
+        data-exec={data.execViewStatus ?? undefined}
         className={cn(
           "relative bg-card rounded-xl border border-border border-t-4 shadow-sm w-56 transition-all duration-150",
           colorClass,
@@ -118,6 +133,7 @@ export const BaseNode = memo(function BaseNode({
           <Handle
             type="target"
             position={Position.Left}
+            data-r10n-wf-handle=""
             className="!w-3 !h-3 !bg-muted-foreground/40 !border-2 !border-background hover:!bg-primary transition-colors"
           />
         )}
@@ -150,7 +166,11 @@ export const BaseNode = memo(function BaseNode({
         <div className="px-3 py-2.5">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-base leading-none">{data.icon ?? "📦"}</span>
-            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest truncate">
+            <span
+              data-r10n-wf-node-type=""
+              data-category={data.category ?? "action"}
+              className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest truncate"
+            >
               {data.nodeType?.split(".").slice(1).join(" ") ?? data.nodeType}
             </span>
             {/* Pinned indicator */}
@@ -187,6 +207,7 @@ export const BaseNode = memo(function BaseNode({
           <Handle
             type="source"
             position={Position.Right}
+            data-r10n-wf-handle=""
             className="!w-3 !h-3 !bg-muted-foreground/40 !border-2 !border-background hover:!bg-primary transition-colors"
           />
         )}
@@ -195,11 +216,11 @@ export const BaseNode = memo(function BaseNode({
       {/* Pinned output badge — rendered outside main div so it doesn't clip */}
       {data.pinnedOutput && (
         <div className="absolute left-0 right-0 translate-y-1 pt-1 pointer-events-none" style={{ top: "100%" }}>
-          <div className="bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
-            <p className="text-[9px] font-bold text-amber-600 uppercase tracking-widest mb-1 flex items-center gap-1">
+          <div data-r10n-wf-pinned="" className="bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+            <p data-r10n-wf-pinned-label="" className="text-[9px] font-bold text-amber-600 uppercase tracking-widest mb-1 flex items-center gap-1">
               <span>📌</span> Pinned Output
             </p>
-            <pre className="text-[9px] font-mono text-amber-700 max-h-16 overflow-hidden">
+            <pre data-r10n-wf-pinned-pre="" className="text-[9px] font-mono text-amber-700 max-h-16 overflow-hidden">
               {JSON.stringify(data.pinnedOutput, null, 1).slice(0, 200)}
             </pre>
           </div>
@@ -211,6 +232,7 @@ export const BaseNode = memo(function BaseNode({
         <>
           <div className="fixed inset-0 z-[999]" onClick={() => setShowMenu(false)} />
           <div
+            data-r10n-wf-menu=""
             className="fixed z-[1000] bg-card border border-border rounded-lg shadow-xl py-1 min-w-[160px]"
             style={{ left: menuPos.x, top: menuPos.y }}
           >
@@ -234,6 +256,7 @@ export const BaseNode = memo(function BaseNode({
               Duplicate
             </button>
             <button
+              data-r10n-wf-menu-delete=""
               className="flex items-center gap-2 w-full px-3 py-2 text-xs font-medium text-left hover:bg-border/50 text-red-500 transition-colors"
               onClick={handleDelete}
             >

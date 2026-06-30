@@ -56,10 +56,10 @@ export function DemoTargets() {
   }
 
   return (
-    <div className="bg-card border border-border rounded-xl p-5">
+    <div className="bg-card border border-border rounded-xl p-5" data-r10n-settings-card>
       <div className="flex items-start justify-between gap-4 mb-5">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">Demo Turnaround Targets</h3>
+          <h3 className="text-sm font-semibold text-foreground" data-r10n-settings-cardtitle>Demo Turnaround Targets</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             Stage pills in the Demo Tracker turn green, amber, or red based on these targets.
           </p>
@@ -138,6 +138,8 @@ export function DemoTargets() {
         <button
           onClick={handleSave}
           disabled={isPending}
+          data-r10n-settings-savebtn
+          data-state={saved ? "saved" : "idle"}
           className={cn(
             "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
             saved

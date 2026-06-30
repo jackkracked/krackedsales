@@ -234,6 +234,7 @@ export function VariableInput({
         popoverRect &&
         createPortal(
           <div
+            data-r10n-wf-varpicker=""
             className="fixed z-[2000] bg-card border border-border rounded-xl shadow-2xl overflow-hidden"
             style={{
               left: popoverRect.left,
@@ -260,13 +261,14 @@ export function VariableInput({
                 filteredGroups.map((group) => (
                   <div key={group.nodeId}>
                     <div className="px-3 py-1.5 bg-muted/40 sticky top-0">
-                      <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">
+                      <span data-r10n-wf-varpicker-group="" className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">
                         {group.nodeName}
                       </span>
                     </div>
                     {group.items.map((item) => (
                       <button
                         key={item.path}
+                        data-r10n-wf-varpicker-item=""
                         className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-primary/10 transition-colors text-left group"
                         onMouseDown={(e) => {
                           e.preventDefault();

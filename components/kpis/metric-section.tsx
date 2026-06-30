@@ -1,7 +1,7 @@
 "use client";
 
 import { BalancedMetricGrid, type MetricValue } from "./balanced-metric-grid";
-import { type MetricDef } from "./metric-cell";
+import { type MetricDef, type DateWindow } from "./metric-cell";
 
 interface MetricSectionProps {
   title: string;
@@ -13,6 +13,8 @@ interface MetricSectionProps {
   onManualSave?: (key: string, value: number) => void;
   /** Accent color for the section header bar */
   accent?: string;
+  /** Reporting window — paces each cell's target badge. */
+  window?: DateWindow;
 }
 
 /**
@@ -28,6 +30,7 @@ export function MetricSection({
   onMetricClick,
   onManualSave,
   accent,
+  window,
 }: MetricSectionProps) {
   if (metrics.length === 0 && !loading) return null;
 
@@ -36,10 +39,12 @@ export function MetricSection({
       {/* Section header — left label with extending rule */}
       <div className="flex items-center gap-3 mb-2 px-1">
         <div
+          data-r10n-section-accent
           className="w-0.5 h-3.5 rounded-full shrink-0"
-          style={{ backgroundColor: accent ?? "oklch(0.45 0.03 250)" }}
+          style={{ backgroundColor: `var(--r10n-section-accent, ${accent ?? "oklch(0.45 0.03 250)"})` }}
         />
         <h3
+          data-r10n-section-title
           className="text-[11px] font-bold uppercase tracking-widest text-foreground/70 shrink-0"
           style={{ fontFamily: "var(--font-heading)" }}
         >
@@ -52,7 +57,7 @@ export function MetricSection({
       </div>
 
       {/* Balanced metric grid */}
-      <div className="bg-card border border-border rounded-[10px] overflow-hidden">
+      <div data-r10n-card className="bg-card border border-border rounded-[10px] overflow-hidden">
         <BalancedMetricGrid
           metrics={metrics}
           values={values}
@@ -60,6 +65,7 @@ export function MetricSection({
           loadingCount={metrics.length || 5}
           onMetricClick={onMetricClick}
           onManualSave={onManualSave}
+          window={window}
         />
       </div>
     </section>

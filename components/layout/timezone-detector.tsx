@@ -47,8 +47,12 @@ export function TimezoneDetector() {
       return;
     }
 
-    // If timezone differs from stored, show the modal
+    // If timezone differs from stored, show the modal once. If the user already dismissed
+    // this exact mismatch, stay quiet so it does not nag on every refresh or login.
     if (me.timezone !== browserTz) {
+      let dismissed: string | null = null;
+      try { dismissed = localStorage.getItem("tz_mismatch_dismissed"); } catch {}
+      if (dismissed === `${browserTz}>${me.timezone}`) return;
       setDetectedTz(browserTz);
       setShowModal(true);
     }
@@ -71,6 +75,13 @@ export function TimezoneDetector() {
   }
 
   function handleDismiss() {
+    // Remember this exact mismatch so it does not reappear on refresh or re-login. It only
+    // resurfaces if the mismatch genuinely changes; the timezone is still editable in Settings.
+    try {
+      if (detectedTz && me?.timezone) {
+        localStorage.setItem("tz_mismatch_dismissed", `${detectedTz}>${me.timezone}`);
+      }
+    } catch {}
     setShowModal(false);
   }
 

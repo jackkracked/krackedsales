@@ -19,6 +19,11 @@ import { parseQualificationNote, isQualificationNote, looksLikeUrl, cleanUrl } f
 import type { UnifiedContact, TimelineEvent } from "@/lib/contacts/types";
 import { outcomeMeta, OUTCOME_TONES } from "@/lib/activity/outcomes";
 import { EntityTypeChip, ENTITY_IDENTITY } from "@/components/shared/entity-identity";
+import { QualificationPanel, QualificationPreview } from "@/components/shared/qualification-panel";
+import { ChangeStageModal } from "./change-stage-modal";
+import { CallsTab } from "./calls-tab";
+import { stageClass, stageStatus, r10nStageColor } from "@/lib/contacts/stage-colors";
+import { PLATFORM_BADGE, RESPONSE_CONFIG } from "@/lib/contacts/configs";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -26,10 +31,11 @@ interface CustomField { id: string; contactUid: string; fieldName: string; field
 interface GHLNote { id: string; body: string; dateAdded?: string; createdAt?: string; }
 interface GHLMessage { id: string; emailMessageId?: string; body?: string; direction?: "inbound" | "outbound"; messageType?: string; dateAdded: string; meta?: { email?: { subject?: string; messageIds?: string[] } }; }
 
-type RightTab = "timeline" | "notes" | "qualification" | "proposals";
+type RightTab = "timeline" | "calls" | "notes" | "qualification" | "proposals";
 
 const RIGHT_TABS: Array<{ id: RightTab; label: string; icon: React.ElementType; ghlOnly?: boolean }> = [
   { id: "timeline",      label: "Timeline",      icon: Clock },
+  { id: "calls",         label: "Calls",         icon: Phone,         ghlOnly: true },
   { id: "proposals",     label: "Proposals",     icon: Receipt,       ghlOnly: true },
   { id: "notes",         label: "Notes",         icon: StickyNote,    ghlOnly: true },
   { id: "qualification", label: "Qualification", icon: ClipboardList, ghlOnly: true },
@@ -48,13 +54,25 @@ const CAT_CONFIG: Record<string, { label: string; className: string }> = {
 
 interface ContactProposalSummary { ltv: number; paidCount: number; }
 
-function LeftPanel({ contact }: { contact: UnifiedContact }) {
+function LeftPanel({ contact, onViewQualification }: { contact: UnifiedContact; onViewQualification?: () => void }) {
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [addingField, setAddingField] = useState(false);
   const [newName, setNewName] = useState("");
   const [newValue, setNewValue] = useState("");
+  const [stageOpen, setStageOpen] = useState(false);
+  // Local stage so the pill updates instantly after a move (the contact prop is static).
+  const [localStage, setLocalStage] = useState<{ name: string | null; id: string | null }>({ name: contact.stage, id: contact.stageId });
   const queryClient = useQueryClient();
+
+  // Pipelines (for the move-stage modal). Cached; shared with the contacts table.
+  const { data: pipelinesData } = useQuery<{ pipelines: Array<{ id: string; name: string; stages: Array<{ id: string; name: string }> }> }>({
+    queryKey: ["pipelines"],
+    queryFn: () => fetch("/api/ghl/pipelines").then((r) => r.json()),
+    staleTime: 5 * 60_000,
+    enabled: !!contact.opportunityId,
+  });
+  const pipelines = pipelinesData?.pipelines ?? [];
 
   const { data: proposalSummary } = useQuery<ContactProposalSummary>({
     queryKey: ["contact-proposals-summary", contact.uid],
@@ -112,12 +130,12 @@ function LeftPanel({ contact }: { contact: UnifiedContact }) {
   });
 
   return (
-    <div className="w-[248px] shrink-0 border-r border-border overflow-y-auto bg-muted/20">
+    <div data-r10n-modal-leftpanel className="w-[248px] shrink-0 border-r border-border overflow-y-auto bg-muted/20">
       <div className="p-4 space-y-5">
 
         {/* Contact Info */}
         <section>
-          <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em] mb-2.5">Contact</p>
+          <p data-r10n-modal-section className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em] mb-2.5">Contact</p>
           <div className="space-y-2">
             {contact.email && (
               <a href={`mailto:${contact.email}`} className="flex items-center gap-2 text-xs text-foreground/80 hover:text-primary transition-colors group">
@@ -150,7 +168,7 @@ function LeftPanel({ contact }: { contact: UnifiedContact }) {
             {contact.brandCategory && (
               <div className="flex items-start gap-2">
                 <Tag className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
-                <span className={cn("inline-flex items-center px-1.5 py-px rounded-full text-[11px] font-medium", CAT_CONFIG[contact.brandCategory]?.className)}>
+                <span data-r10n-cat-badge className={cn("inline-flex items-center px-1.5 py-px rounded-full text-[11px] font-medium", CAT_CONFIG[contact.brandCategory]?.className)}>
                   {CAT_CONFIG[contact.brandCategory]?.label ?? contact.brandCategory}
                 </span>
               </div>
@@ -161,16 +179,35 @@ function LeftPanel({ contact }: { contact: UnifiedContact }) {
         {/* Pipeline */}
         {contact.stage && (
           <section>
-            <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em] mb-2.5">Pipeline</p>
+            <p data-r10n-modal-section className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em] mb-2.5">Pipeline</p>
             <div className="space-y-2">
-              <div className="flex items-start gap-2">
-                <GitMerge className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
-                <span className="text-xs text-foreground/80 leading-snug">{contact.stage}</span>
-              </div>
+              {/* Stage — click to move (when there's an opportunity) */}
+              {contact.opportunityId ? (
+                <button
+                  onClick={() => setStageOpen(true)}
+                  title="Click to move stage"
+                  data-r10n-stage-pill
+                  data-status={stageStatus(localStage.name)}
+                  style={{ "--r10n-stage": r10nStageColor(localStage.name) } as Record<string, string>}
+                  className={cn(
+                    "group/st inline-flex items-center gap-1 max-w-full rounded-full border px-2.5 py-1 text-[11px] font-medium cursor-pointer transition-all hover:brightness-[0.97] hover:ring-2 hover:ring-primary/20",
+                    stageClass(localStage.name)
+                  )}
+                >
+                  <GitMerge className="w-3 h-3 shrink-0 opacity-70" />
+                  <span className="truncate">{localStage.name}</span>
+                  <ChevronDown className="w-3 h-3 shrink-0 opacity-40 group-hover/st:opacity-80 transition-opacity" />
+                </button>
+              ) : (
+                <div className="flex items-start gap-2">
+                  <GitMerge className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                  <span className="text-xs text-foreground/80 leading-snug">{localStage.name}</span>
+                </div>
+              )}
               {contact.opportunityStatus && (
                 <div className="flex items-center gap-2">
                   <TrendingUp className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                  <span className={cn("text-xs font-medium", {
+                  <span data-r10n-opp-status data-status={contact.opportunityStatus} className={cn("text-xs font-medium", {
                     open: "text-primary", won: "text-emerald-600", lost: "text-rose-500", abandoned: "text-muted-foreground",
                   }[contact.opportunityStatus])}>
                     {contact.opportunityStatus.charAt(0).toUpperCase() + contact.opportunityStatus.slice(1)}
@@ -188,15 +225,20 @@ function LeftPanel({ contact }: { contact: UnifiedContact }) {
           </section>
         )}
 
+        {/* Qualification preview — lead-form answers (renders nothing if none) */}
+        {contact.ghlContactId && (
+          <QualificationPreview contactId={contact.ghlContactId} onViewAll={onViewQualification} />
+        )}
+
         {/* LTV */}
         {proposalSummary && proposalSummary.ltv > 0 && (
           <section>
-            <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em] mb-2.5">Lifetime Value</p>
-            <div className="bg-emerald-50 border border-emerald-200/60 rounded-[8px] px-3 py-2.5">
-              <p className="text-lg font-bold text-emerald-700 tabular-nums leading-none">
+            <p data-r10n-modal-section className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em] mb-2.5">Lifetime Value</p>
+            <div data-r10n-ltv-card className="bg-emerald-50 border border-emerald-200/60 rounded-[8px] px-3 py-2.5">
+              <p data-r10n-ltv-value className="text-lg font-bold text-emerald-700 tabular-nums leading-none">
                 {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(proposalSummary.ltv)}
               </p>
-              <p className="text-[11px] text-emerald-600/70 mt-0.5">
+              <p data-r10n-ltv-sub className="text-[11px] text-emerald-600/70 mt-0.5">
                 {proposalSummary.paidCount} paid proposal{proposalSummary.paidCount !== 1 ? "s" : ""}
               </p>
             </div>
@@ -206,18 +248,18 @@ function LeftPanel({ contact }: { contact: UnifiedContact }) {
         {/* Comment context */}
         {contact.commentText && (
           <section>
-            <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em] mb-2">Comment</p>
-            <p className="text-xs text-foreground/70 italic bg-muted/40 rounded-[6px] px-2.5 py-2 border border-border/50">"{contact.commentText}"</p>
+            <p data-r10n-modal-section className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em] mb-2">Comment</p>
+            <p data-r10n-comment className="text-xs text-foreground/70 italic bg-muted/40 rounded-[6px] px-2.5 py-2 border border-border/50">"{contact.commentText}"</p>
           </section>
         )}
 
         {/* Tags */}
         {contact.tags.length > 0 && (
           <section>
-            <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em] mb-2">Tags</p>
+            <p data-r10n-modal-section className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em] mb-2">Tags</p>
             <div className="flex flex-wrap gap-1">
               {contact.tags.map((t) => (
-                <span key={t} className="text-[11px] px-2 py-px rounded-full bg-muted border border-border/60 text-foreground/70">{t}</span>
+                <span key={t} data-r10n-tag className="text-[11px] px-2 py-px rounded-full bg-muted border border-border/60 text-foreground/70">{t}</span>
               ))}
             </div>
           </section>
@@ -226,7 +268,7 @@ function LeftPanel({ contact }: { contact: UnifiedContact }) {
         {/* Custom fields */}
         <section>
           <div className="flex items-center justify-between mb-2">
-            <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em]">Custom Fields</p>
+            <p data-r10n-modal-section className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em]">Custom Fields</p>
             <button onClick={() => setAddingField(true)} className="text-[11px] text-primary hover:underline flex items-center gap-0.5">
               <Plus className="w-3 h-3" />Add
             </button>
@@ -272,6 +314,19 @@ function LeftPanel({ contact }: { contact: UnifiedContact }) {
           )}
         </section>
       </div>
+
+      {stageOpen && (
+        <ChangeStageModal
+          contact={{ ...contact, stage: localStage.name, stageId: localStage.id }}
+          pipelines={pipelines}
+          onClose={() => setStageOpen(false)}
+          onMoved={(stageId, stageName) => {
+            setLocalStage({ name: stageName, id: stageId });
+            queryClient.invalidateQueries({ queryKey: ["contacts"] });
+            queryClient.invalidateQueries({ queryKey: ["contact-timeline", contact.uid] });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -304,9 +359,10 @@ function TimelineTab({ contact }: { contact: UnifiedContact }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Pass the contact's known createdAt as fallback for lead_captured timestamp
   const createdAt = encodeURIComponent(contact.createdAt);
+  const oppParam = contact.opportunityId ? `&opportunityId=${encodeURIComponent(contact.opportunityId)}` : "";
   const { data, isLoading } = useQuery<{ events: TimelineEvent[] }>({
-    queryKey: ["contact-timeline", contact.uid],
-    queryFn: () => fetch(`/api/contacts/${contact.uid}/timeline?createdAt=${createdAt}`).then((r) => r.json()),
+    queryKey: ["contact-timeline", contact.uid, contact.opportunityId],
+    queryFn: () => fetch(`/api/contacts/${contact.uid}/timeline?createdAt=${createdAt}${oppParam}`).then((r) => r.json()),
     staleTime: 2 * 60 * 1000,
   });
 
@@ -341,15 +397,15 @@ function TimelineTab({ contact }: { contact: UnifiedContact }) {
   }
 
   return (
-    <div ref={scrollRef} className="p-4 overflow-y-auto flex-1">
+    <div ref={scrollRef} data-r10n-timeline className="p-4 overflow-y-auto flex-1">
       <div className="relative pl-8">
-        <div className="absolute left-3 top-3 bottom-3 w-px bg-border/50" />
+        <div data-r10n-timeline-rail className="absolute left-3 top-3 bottom-3 w-px bg-border/50" />
         <div className="space-y-5">
           {events.map((ev) => {
             const callTone = ev.type === "call_outcome" ? OUTCOME_TONES[outcomeMeta(ev.outcome ?? "").tone] : null;
             return (
             <div key={ev.id} className="relative">
-              <div className={cn(
+              <div data-r10n-timeline-node className={cn(
                 "absolute -left-8 top-0 w-6 h-6 rounded-full border flex items-center justify-center",
                 callTone ? callTone.iconBg : "bg-card border-border"
               )}>
@@ -359,8 +415,8 @@ function TimelineTab({ contact }: { contact: UnifiedContact }) {
               </div>
               <div>
                 <div className="flex items-baseline gap-2 flex-wrap">
-                  <p className="text-sm font-medium text-foreground">{ev.title}</p>
-                  <span className="text-[11px] text-muted-foreground shrink-0">{relativeTime(ev.occurredAt)}</span>
+                  <p data-r10n-timeline-title className="text-sm font-medium text-foreground">{ev.title}</p>
+                  <span data-r10n-timeline-time className="text-[11px] text-muted-foreground shrink-0">{relativeTime(ev.occurredAt)}</span>
                 </div>
                 {ev.body && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-3 leading-relaxed">{ev.body}</p>}
               </div>
@@ -657,9 +713,9 @@ function NotesTab({ contact }: { contact: UnifiedContact }) {
           const callMatch = n.body.match(/^\[Call outcome:\s*([^\]]+)\]\s*\n*([\s\S]*)$/i);
           const bodyText = callMatch ? (callMatch[2]?.trim() ?? "") : n.body;
           return (
-            <div key={n.id} className="bg-muted/30 border border-border/50 rounded-[8px] px-3 py-2.5">
+            <div key={n.id} data-r10n-note-card className="bg-muted/30 border border-border/50 rounded-[8px] px-3 py-2.5">
               {callMatch && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-primary/10 text-primary mb-1.5">
+                <span data-r10n-note-callpill className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-primary/10 text-primary mb-1.5">
                   <Phone className="w-2.5 h-2.5" /> Call · {callMatch[1].trim()}
                 </span>
               )}
@@ -695,34 +751,11 @@ function NotesTab({ contact }: { contact: UnifiedContact }) {
 }
 
 function QualificationTab({ contact }: { contact: UnifiedContact }) {
-  const { data, isLoading } = useQuery<{ notes: GHLNote[] }>({
-    queryKey: ["contact-notes-qual", contact.ghlContactId],
-    queryFn: () => fetch(`/api/ghl/contacts/${contact.ghlContactId}/notes`).then((r) => r.json()),
-    enabled: !!contact.ghlContactId,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const qualNote = data?.notes?.find((n) => isQualificationNote(n.body));
-
-  if (isLoading) {
-    return <div className="p-4 space-y-4">{Array.from({ length: 4 }, (_, i) => <div key={i} className="space-y-1"><div className="h-2 bg-muted rounded-full animate-pulse w-20" /><div className="h-3.5 bg-muted/70 rounded-full animate-pulse w-40" /></div>)}</div>;
-  }
-
-  if (!qualNote) return <EmptyState icon={ClipboardList} message="No qualification note found" />;
-
-  const pairs = parseQualificationNote(qualNote.body);
-
+  // Shared with the opportunity flow: reads the contact's GHL lead-form custom
+  // fields (with a qualification-note fallback), grouped by form section.
   return (
-    <div className="p-4 overflow-y-auto flex-1 space-y-4">
-      {pairs.map((qa, i) => (
-        <div key={i}>
-          <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.08em] mb-0.5">{qa.question}</p>
-          {qa.cleanedUrl
-            ? <a href={qa.cleanedUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline flex items-center gap-1 break-all"><ExternalLink className="w-3 h-3 shrink-0" />{qa.answer}</a>
-            : <p className="text-sm text-foreground leading-snug">{qa.answer || <span className="text-muted-foreground/40 italic">—</span>}</p>
-          }
-        </div>
-      ))}
+    <div className="p-4 overflow-y-auto flex-1">
+      <QualificationPanel contactId={contact.ghlContactId} />
     </div>
   );
 }
@@ -801,13 +834,13 @@ function ProposalsTab({ contact }: { contact: UnifiedContact }) {
     <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
       {/* LTV summary bar */}
       {(data?.ltv ?? 0) > 0 && (
-        <div className="flex items-center gap-3 px-4 py-3 bg-emerald-50/60 border-b border-emerald-100 shrink-0">
-          <DollarSign className="w-4 h-4 text-emerald-600 shrink-0" />
+        <div data-r10n-ltv-bar className="flex items-center gap-3 px-4 py-3 bg-emerald-50/60 border-b border-emerald-100 shrink-0">
+          <DollarSign data-r10n-ltv-icon className="w-4 h-4 text-emerald-600 shrink-0" />
           <div>
-            <p className="text-xs font-bold text-emerald-700 tabular-nums">
+            <p data-r10n-ltv-value className="text-xs font-bold text-emerald-700 tabular-nums">
               {fmtMoney(data!.ltv)} lifetime value
             </p>
-            <p className="text-[11px] text-emerald-600/70">{data!.paidCount} paid proposal{data!.paidCount !== 1 ? "s" : ""}</p>
+            <p data-r10n-ltv-sub className="text-[11px] text-emerald-600/70">{data!.paidCount} paid proposal{data!.paidCount !== 1 ? "s" : ""}</p>
           </div>
         </div>
       )}
@@ -818,11 +851,11 @@ function ProposalsTab({ contact }: { contact: UnifiedContact }) {
           const statusStyle = STATUS_STYLES[p.status] ?? STATUS_STYLES.draft;
 
           return (
-            <div key={p.id} className="border border-border rounded-[10px] overflow-hidden bg-card">
+            <div key={p.id} data-r10n-proposal-card className="border border-border rounded-[10px] overflow-hidden bg-card">
               <div className="px-3.5 py-3 flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide shrink-0", statusStyle)}>
+                    <span data-r10n-status-pill data-status={p.status} className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide shrink-0", statusStyle)}>
                       {p.status}
                     </span>
                     <span className="text-[10px] text-muted-foreground capitalize">
@@ -940,36 +973,56 @@ export function ContactModal({
   }, [onClose, inQueue, onNavigate, queueIndex, queue]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.35)" }} onClick={handleClose}>
+    <div data-r10n-modal-overlay className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "var(--r10n-modal-overlay, rgba(0,0,0,0.35))" }} onClick={handleClose}>
       <div
+        data-r10n-modal
         className="bg-card border border-border rounded-[14px] shadow-2xl flex flex-col overflow-hidden"
         style={{ width: "min(1080px, calc(100vw - 32px))", height: "min(680px, calc(100vh - 32px))" }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className={cn("flex items-center justify-between px-5 py-4 border-b border-border shrink-0", ENTITY_IDENTITY.contact.headerWash)}>
+        <div data-r10n-modal-header className={cn("flex items-center justify-between px-5 py-4 border-b border-border shrink-0", ENTITY_IDENTITY.contact.headerWash)}>
           <div className="flex items-center gap-3 min-w-0">
-            <span className={cn("inline-flex shrink-0 rounded-full", ENTITY_IDENTITY.contact.avatarRing)}>
+            <span data-r10n-modal-avatar className={cn("inline-flex shrink-0 rounded-full", ENTITY_IDENTITY.contact.avatarRing)}>
               <Avatar name={contact.name} size={40} />
             </span>
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
-                <EntityTypeChip kind="contact" />
-                <p className="text-sm font-semibold text-foreground truncate">{contact.name}</p>
+                <span data-r10n-entity-chip><EntityTypeChip kind="contact" /></span>
+                <p data-r10n-modal-name className="text-sm font-semibold text-foreground truncate">{contact.name}</p>
               </div>
-              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                {contact.email && <span className="text-xs text-muted-foreground truncate">{contact.email}</span>}
+              {contact.email && (
+                <p data-r10n-modal-email className="text-xs text-muted-foreground truncate mt-0.5">{contact.email}</p>
+              )}
+              {/* Info chip strip — funnel/source · stage · status · last msg · in stage */}
+              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                 {contact.platform && (
-                  <>
-                    {contact.email && <span className="text-border">·</span>}
-                    <span className="text-xs text-muted-foreground">
-                      {{ lead_form: "Meta Lead Form", facebook: "Facebook", instagram: "Instagram", tiktok: "TikTok" }[contact.platform] ?? contact.platform}
-                    </span>
-                  </>
+                  <span data-r10n-source-badge className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium", PLATFORM_BADGE[contact.platform]?.className ?? "bg-muted text-muted-foreground")}>
+                    {PLATFORM_BADGE[contact.platform]?.label ?? contact.platform}
+                  </span>
                 )}
-                {contact.awaitingReply && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-rose-500 bg-rose-50 px-1.5 py-px rounded-full">
-                    <span className="w-1 h-1 rounded-full bg-rose-500 animate-pulse" />Awaiting reply
+                {contact.stage && (
+                  <span data-r10n-stage-pill data-status={stageStatus(contact.stage)} style={{ "--r10n-stage": r10nStageColor(contact.stage) } as Record<string, string>} className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border max-w-[160px] truncate", stageClass(contact.stage))}>
+                    {contact.stage}
+                  </span>
+                )}
+                {contact.responseStatus && RESPONSE_CONFIG[contact.responseStatus] && (
+                  <span data-r10n-status-pill data-status={contact.responseStatus} className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium border", RESPONSE_CONFIG[contact.responseStatus].className)}>
+                    {RESPONSE_CONFIG[contact.responseStatus].label}
+                  </span>
+                )}
+                <span data-r10n-meta-chip className="inline-flex items-center gap-1 text-[10px] bg-muted/70 px-1.5 py-0.5 rounded-full">
+                  <span className="text-muted-foreground/60">Last msg</span>
+                  <span data-r10n-touch data-tier={contact.daysSinceLastTouch > 14 ? "stale" : contact.daysSinceLastTouch > 6 ? "medium" : "fresh"} className={cn("font-semibold tabular-nums", contact.daysSinceLastTouch > 14 ? "text-rose-500" : contact.daysSinceLastTouch > 6 ? "text-amber-600" : "text-emerald-600")}>
+                    {contact.daysSinceLastTouch === 0 ? "Today" : `${contact.daysSinceLastTouch}d`}
+                  </span>
+                </span>
+                {contact.daysInCurrentStage != null && (
+                  <span data-r10n-meta-chip className="inline-flex items-center gap-1 text-[10px] bg-muted/70 px-1.5 py-0.5 rounded-full">
+                    <span className="text-muted-foreground/60">In stage</span>
+                    <span data-r10n-instage data-tier={contact.daysInCurrentStage > 30 ? "high" : contact.daysInCurrentStage > 14 ? "medium" : "low"} className={cn("font-semibold tabular-nums", contact.daysInCurrentStage > 30 ? "text-rose-500" : contact.daysInCurrentStage > 14 ? "text-amber-600" : "text-foreground/70")}>
+                      {contact.daysInCurrentStage}d
+                    </span>
                   </span>
                 )}
               </div>
@@ -1006,17 +1059,19 @@ export function ContactModal({
         {/* Three-pane body: contact info | detail tabs | messages */}
         <div className="flex flex-1 min-h-0">
           {/* Left: static contact info */}
-          <LeftPanel contact={enrichedContact} />
+          <LeftPanel contact={enrichedContact} onViewQualification={() => setActiveTab("qualification")} />
 
           {/* Middle: tabbed detail content */}
           <div className="flex flex-col flex-[2_2_0] min-w-0 min-h-0 border-r border-border">
             {/* Tab bar */}
-            <div className="flex items-center justify-evenly border-b border-border shrink-0">
+            <div data-r10n-modal-tabbar className="flex items-center justify-evenly border-b border-border shrink-0">
               {tabs.map((t) => {
                 const Icon = t.icon;
                 const active = activeTab === t.id;
                 return (
                   <button key={t.id} onClick={() => setActiveTab(t.id)}
+                    data-r10n-modal-tab
+                    data-active={active ? "true" : "false"}
                     className={cn("flex items-center justify-center flex-1 py-3 border-b-2 transition-colors",
                       active ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
                     )}>
@@ -1029,6 +1084,7 @@ export function ContactModal({
             {/* Tab content */}
             <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
               {activeTab === "timeline"      && <TimelineTab      contact={contact} />}
+              {activeTab === "calls"         && <CallsTab         contactUid={contact.uid} />}
               {activeTab === "proposals"     && <ProposalsTab     contact={contact} />}
               {activeTab === "notes"         && <NotesTab         contact={contact} />}
               {activeTab === "qualification" && <QualificationTab contact={contact} />}

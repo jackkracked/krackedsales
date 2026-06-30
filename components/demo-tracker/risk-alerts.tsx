@@ -36,23 +36,34 @@ export function RiskAlerts({ tasks }: RiskAlertsProps) {
   const urgentCount = atRisk.filter((r) => r.daysOver >= 3).length;
 
   return (
-    <div className={cn(
-      "shrink-0 rounded-xl border overflow-hidden",
-      urgentCount > 0 ? "border-destructive/30 bg-destructive/5" : "border-amber-200 bg-amber-50/60"
-    )}>
+    <div
+      data-r10n-demo-risk
+      data-r10n-demo-urgent={urgentCount > 0 ? "true" : "false"}
+      className={cn(
+        "shrink-0 rounded-xl border overflow-hidden",
+        urgentCount > 0 ? "border-destructive/30 bg-destructive/5" : "border-amber-200 bg-amber-50/60"
+      )}
+    >
       {/* Summary row — always visible */}
       <button
         onClick={() => setExpanded((v) => !v)}
         className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-foreground/5 transition-colors"
+        data-r10n-demo-risk-summary
       >
-        <AlertTriangle className={cn(
-          "w-4 h-4 shrink-0",
-          urgentCount > 0 ? "text-destructive" : "text-amber-600"
-        )} />
-        <span className={cn(
-          "text-sm font-semibold flex-1",
-          urgentCount > 0 ? "text-destructive" : "text-amber-800"
-        )}>
+        <AlertTriangle
+          className={cn(
+            "w-4 h-4 shrink-0",
+            urgentCount > 0 ? "text-destructive" : "text-amber-600"
+          )}
+          data-r10n-demo-risk-icon
+        />
+        <span
+          className={cn(
+            "text-sm font-semibold flex-1",
+            urgentCount > 0 ? "text-destructive" : "text-amber-800"
+          )}
+          data-r10n-demo-risk-title
+        >
           {atRisk.length} demo{atRisk.length !== 1 ? "s" : ""} overdue
           {urgentCount > 0 && ` — ${urgentCount} urgent`}
         </span>
@@ -67,7 +78,7 @@ export function RiskAlerts({ tasks }: RiskAlertsProps) {
 
       {/* Expanded list */}
       {expanded && (
-        <div className="border-t border-border/50 px-4 py-3 flex flex-col gap-2">
+        <div className="border-t border-border/50 px-4 py-3 flex flex-col gap-2" data-r10n-demo-risk-list>
           {atRisk.map(({ task, daysOver, threshold }) => {
             const badge = getStageBadge(task.status);
             const isUrgent = daysOver >= 3;
@@ -80,22 +91,33 @@ export function RiskAlerts({ tasks }: RiskAlertsProps) {
               <div
                 key={task.id}
                 className="flex items-center gap-3 text-sm"
+                data-r10n-demo-risk-row
+                data-r10n-demo-urgent={isUrgent ? "true" : "false"}
               >
-                <span className={cn(
-                  "w-1.5 h-1.5 rounded-full shrink-0",
-                  isUrgent ? "bg-destructive" : "bg-amber-500"
-                )} />
-                <span className="font-medium text-foreground truncate flex-1">{brand}</span>
-                <span className={cn(
-                  "text-xs px-2 py-0.5 rounded-full font-medium shrink-0",
-                  badge.className
-                )}>
+                <span
+                  className={cn(
+                    "w-1.5 h-1.5 rounded-full shrink-0",
+                    isUrgent ? "bg-destructive" : "bg-amber-500"
+                  )}
+                  data-r10n-demo-risk-dot
+                />
+                <span className="font-medium text-foreground truncate flex-1" data-r10n-demo-risk-brand>{brand}</span>
+                <span
+                  className={cn(
+                    "text-xs px-2 py-0.5 rounded-full font-medium shrink-0",
+                    badge.className
+                  )}
+                  data-r10n-demo-stagebadge
+                >
                   {badge.label}
                 </span>
-                <span className={cn(
-                  "text-xs font-semibold shrink-0",
-                  isUrgent ? "text-destructive" : "text-amber-700"
-                )}>
+                <span
+                  className={cn(
+                    "text-xs font-semibold shrink-0",
+                    isUrgent ? "text-destructive" : "text-amber-700"
+                  )}
+                  data-r10n-demo-risk-days
+                >
                   Day {task.daysInStage}
                   <span className="font-normal text-muted-foreground ml-1">
                     ({daysOver}d over)

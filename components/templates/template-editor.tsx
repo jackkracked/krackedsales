@@ -87,13 +87,16 @@ export function TemplateEditor({ template, onClose, onSaved }: TemplateEditorPro
       />
 
       {/* Slide-over panel */}
-      <div className="fixed right-0 top-0 h-full w-full max-w-xl z-50 flex flex-col bg-card border-l border-border shadow-2xl">
+      <div
+        className="fixed right-0 top-0 h-full w-full max-w-xl z-50 flex flex-col bg-card border-l border-border shadow-2xl"
+        data-r10n-tmpl-editor
+      >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-          <h2 className="text-sm font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0" data-r10n-tmpl-editor-head>
+          <h2 className="text-sm font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }} data-r10n-tmpl-editor-title>
             {isNew ? "New Template" : "Edit Template"}
           </h2>
-          <button onClick={onClose} className="p-1.5 rounded-[7px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+          <button onClick={onClose} className="p-1.5 rounded-[7px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" data-r10n-tmpl-editor-close>
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -103,7 +106,7 @@ export function TemplateEditor({ template, onClose, onSaved }: TemplateEditorPro
 
           {/* Name */}
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide" data-r10n-tmpl-field-label>
               Template Name <span className="text-destructive">*</span>
             </label>
             <input
@@ -112,19 +115,24 @@ export function TemplateEditor({ template, onClose, onSaved }: TemplateEditorPro
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. No Website Response"
               className="w-full text-sm px-3 py-2.5 border border-border rounded-[8px] bg-background text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-colors"
+              data-r10n-tmpl-input
             />
           </div>
 
           {/* Body */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide" data-r10n-tmpl-field-label>
                 Message Body <span className="text-destructive">*</span>
               </label>
-              <span className={cn(
-                "text-[10px] font-medium",
-                charCount > SMS_LIMIT * 2 ? "text-destructive" : "text-muted-foreground"
-              )}>
+              <span
+                className={cn(
+                  "text-[10px] font-medium",
+                  charCount > SMS_LIMIT * 2 ? "text-destructive" : "text-muted-foreground"
+                )}
+                data-r10n-tmpl-charcount
+                data-over={charCount > SMS_LIMIT * 2 ? "true" : "false"}
+              >
                 {charCount} chars · {smsSegments} SMS segment{smsSegments !== 1 ? "s" : ""}
               </span>
             </div>
@@ -134,16 +142,17 @@ export function TemplateEditor({ template, onClose, onSaved }: TemplateEditorPro
               rows={8}
               placeholder="Type your message…"
               className="w-full text-sm px-3 py-2.5 border border-border rounded-[8px] bg-background text-foreground placeholder:text-muted-foreground/60 resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-colors leading-relaxed"
+              data-r10n-tmpl-input
             />
           </div>
 
           {/* Conditions */}
           <div className="space-y-3">
             <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide" data-r10n-tmpl-field-label>
                 Conditions
               </label>
-              <p className="text-xs text-muted-foreground mt-0.5">All conditions must match for this template to be used.</p>
+              <p className="text-xs text-muted-foreground mt-0.5" data-r10n-tmpl-help>All conditions must match for this template to be used.</p>
             </div>
             <ConditionsBuilder conditions={conditions} onChange={setConditions} />
           </div>
@@ -151,24 +160,25 @@ export function TemplateEditor({ template, onClose, onSaved }: TemplateEditorPro
           {/* A/B Testing */}
           <div className="space-y-3 pt-2 border-t border-border">
             <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide" data-r10n-tmpl-field-label>
                 A/B Testing
               </label>
-              <p className="text-xs text-muted-foreground mt-0.5">Give two templates the same group name to split-test them.</p>
+              <p className="text-xs text-muted-foreground mt-0.5" data-r10n-tmpl-help>Give two templates the same group name to split-test them.</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-xs text-muted-foreground font-medium">Group Name</label>
+                <label className="text-xs text-muted-foreground font-medium" data-r10n-tmpl-sublabel>Group Name</label>
                 <input
                   type="text"
                   value={abGroup}
                   onChange={(e) => setAbGroup(e.target.value)}
                   placeholder="e.g. no-website-test"
                   className="w-full text-sm px-3 py-2 border border-border rounded-[8px] bg-background text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-colors"
+                  data-r10n-tmpl-input
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs text-muted-foreground font-medium">Traffic Weight</label>
+                <label className="text-xs text-muted-foreground font-medium" data-r10n-tmpl-sublabel>Traffic Weight</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="number"
@@ -177,6 +187,7 @@ export function TemplateEditor({ template, onClose, onSaved }: TemplateEditorPro
                     min={1}
                     max={100}
                     className="w-20 text-sm px-3 py-2 border border-border rounded-[8px] bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 transition-colors"
+                    data-r10n-tmpl-input
                   />
                   <span className="text-xs text-muted-foreground">/ 100</span>
                 </div>
@@ -186,29 +197,32 @@ export function TemplateEditor({ template, onClose, onSaved }: TemplateEditorPro
 
           {/* Priority */}
           <div className="space-y-1.5 pb-2">
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide" data-r10n-tmpl-field-label>
               Priority
             </label>
-            <p className="text-xs text-muted-foreground">Lower number = evaluated first. 0 is highest priority.</p>
+            <p className="text-xs text-muted-foreground" data-r10n-tmpl-help>Lower number = evaluated first. 0 is highest priority.</p>
             <input
               type="number"
               value={priority}
               onChange={(e) => setPriority(Number(e.target.value))}
               min={0}
               className="w-24 text-sm px-3 py-2 border border-border rounded-[8px] bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 transition-colors"
+              data-r10n-tmpl-input
             />
           </div>
 
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && <p className="text-xs text-destructive" data-r10n-tmpl-error>{error}</p>}
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-border flex items-center gap-2 shrink-0">
+        <div className="px-6 py-4 border-t border-border flex items-center gap-2 shrink-0" data-r10n-tmpl-editor-foot>
           {!isNew && (
             <button
               onClick={handleDelete}
               disabled={deleting}
               className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-destructive border border-destructive/20 rounded-[8px] hover:bg-destructive/5 transition-colors"
+              data-r10n-tmpl-btn
+              data-variant="danger"
             >
               <Trash2 className="w-3.5 h-3.5" />
               Delete
@@ -217,6 +231,8 @@ export function TemplateEditor({ template, onClose, onSaved }: TemplateEditorPro
           <button
             onClick={onClose}
             className="flex-none px-4 py-2 text-sm font-medium text-foreground border border-border rounded-[8px] hover:bg-muted transition-colors ml-auto"
+            data-r10n-tmpl-btn
+            data-variant="ghost"
           >
             Cancel
           </button>
@@ -224,6 +240,8 @@ export function TemplateEditor({ template, onClose, onSaved }: TemplateEditorPro
             onClick={handleSave}
             disabled={saving}
             className="flex items-center gap-2 px-5 py-2 text-sm font-semibold bg-primary text-primary-foreground rounded-[8px] hover:bg-primary/90 transition-colors disabled:opacity-50"
+            data-r10n-tmpl-btn
+            data-variant="primary"
           >
             {saving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
             {saving ? "Saving…" : isNew ? "Create Template" : "Save Changes"}

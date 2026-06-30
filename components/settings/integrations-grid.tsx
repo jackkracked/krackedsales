@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { X } from "lucide-react";
+import { X, Phone } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { MetaSettings } from "@/components/settings/meta-settings";
 import { TikTokSettings } from "@/components/settings/tiktok-settings";
@@ -68,6 +69,18 @@ function useFathomStatus() {
   const { data } = useQuery<FathomData>({
     queryKey: ["fathom-status"],
     queryFn: () => fetch("/api/fathom/status").then(r => r.json()),
+    staleTime: 30_000,
+  });
+  const connected = data?.connected ?? false;
+  return connected ? "connected" : "not-connected" as StatusVariant;
+}
+
+interface TelephonyData { connected: boolean }
+
+function useTelephonyStatus() {
+  const { data } = useQuery<TelephonyData>({
+    queryKey: ["dialer-settings"],
+    queryFn: () => fetch("/api/dialer/settings").then(r => (r.ok ? r.json() : { connected: false })),
     staleTime: 30_000,
   });
   const connected = data?.connected ?? false;
@@ -144,6 +157,18 @@ function FathomLogo() {
   );
 }
 
+function TwilioLogo() {
+  return (
+    <div
+      className="w-10 h-10 rounded-[10px] flex items-center justify-center shrink-0"
+      style={{ background: "#F22F46" }}
+      aria-hidden="true"
+    >
+      <Phone className="w-5 h-5 text-white" />
+    </div>
+  );
+}
+
 // ─── Status badge ───────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<
@@ -174,16 +199,30 @@ const STATUS_CONFIG: Record<
   },
 };
 
+// Map the integration status variant onto the shared r10n status-pill vocabulary
+// (data-status) so the established pill CSS recolours it under r10n only.
+const STATUS_TO_R10N: Record<StatusVariant, string> = {
+  connected: "won",
+  configured: "won",
+  "not-connected": "neutral",
+  "always-on": "open",
+};
+
 function StatusBadge({ status }: { status: StatusVariant }) {
   const cfg = STATUS_CONFIG[status];
   return (
     <span
+      data-r10n-status-pill
+      data-status={STATUS_TO_R10N[status]}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium",
         cfg.badgeClass
       )}
     >
-      <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", cfg.dotClass)} />
+      <span
+        data-r10n-settings-statusdot
+        className={cn("w-1.5 h-1.5 rounded-full shrink-0", cfg.dotClass)}
+      />
       {cfg.label}
     </span>
   );
@@ -202,6 +241,7 @@ interface CardProps {
 function IntegrationCard({ logo, name, description, status, action }: CardProps) {
   return (
     <div
+      data-r10n-settings-integration
       className={cn(
         "bg-card border border-border rounded-xl p-5 flex flex-col gap-4",
         "hover:shadow-md hover:border-border/80 transition-all cursor-default",
@@ -212,7 +252,7 @@ function IntegrationCard({ logo, name, description, status, action }: CardProps)
       <div className="flex items-start gap-3">
         {logo}
         <div className="min-w-0 flex-1 pt-0.5">
-          <p className="text-[15px] font-semibold text-foreground leading-tight">{name}</p>
+          <p className="text-[15px] font-semibold text-foreground leading-tight" data-r10n-settings-integration-name>{name}</p>
           <p className="text-xs text-muted-foreground mt-1 leading-relaxed line-clamp-2">
             {description}
           </p>
@@ -257,6 +297,7 @@ export function IntegrationsGrid({ initialPanel }: { initialPanel?: string }) {
   const slackStatus = useSlackStatus();
   const n8nStatus = useN8nStatus();
   const fathomStatus = useFathomStatus();
+  const telephonyStatus = useTelephonyStatus();
 
   // Meta OAuth — open popup directly from card
   function openMetaOAuth() {
@@ -386,6 +427,22 @@ export function IntegrationsGrid({ initialPanel }: { initialPanel?: string }) {
             >
               Configure
             </button>
+          }
+        />
+
+        {/* 8. Telephony — Twilio dialer (admin manages on a dedicated page) */}
+        <IntegrationCard
+          logo={<TwilioLogo />}
+          name="Telephony — Twilio"
+          description="Power the in-app dialer — paste your Twilio credentials to make and take calls"
+          status={telephonyStatus}
+          action={
+            <Link
+              href="/settings/telephony"
+              className="border border-border rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
+            >
+              Configure
+            </Link>
           }
         />
       </div>

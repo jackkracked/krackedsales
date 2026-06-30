@@ -357,7 +357,7 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<unk
         const p = periodArg === "last_month" ? lastMonth() : periodArg === "week" ? currentMonth() : (periodArg ?? currentMonth());
         const overrides = await get(`/api/kpi/overrides?period=${encodeURIComponent(p)}`) as { overrides?: Array<{ metricKey: string; value: number }> };
         const { since, until } = sinceArg ? { since: sinceArg, until: untilArg ?? new Date().toISOString().slice(0, 10) } : periodArg === "week" ? currentWeekRange() : monthRange(p);
-        const [adData, booked, noShows, commentLeads] = await Promise.all([
+        const [adData, booked, noShows, socialLeads] = await Promise.all([
           get(`/api/meta/ads?since=${since}&until=${until}`),
           get(`/api/ghl/opportunities/booked-calls?since=${since}&until=${until}`) as Promise<{ count?: number }>,
           get(`/api/ghl/opportunities/no-show-calls?since=${since}&until=${until}`) as Promise<{ count?: number }>,
@@ -366,7 +366,7 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<unk
         const ov = Object.fromEntries(((overrides as { overrides?: Array<{ metricKey: string; value: number }> }).overrides ?? []).map(o => [o.metricKey, o.value]));
         const adSpend = (adData as { spend?: number }).spend ?? ov["ad-spend"] ?? 0;
         const metaFormLeads = (adData as { leads?: number }).leads ?? 0;
-        const commentLeadCount = (commentLeads as { count?: number }).count ?? 0;
+        const commentLeadCount = (socialLeads as { count?: number }).count ?? 0;
         const totalLeads = metaFormLeads + commentLeadCount;
         const cash = ov["cash-collected"] ?? 0;
         const roas = adSpend > 0 ? (cash / adSpend).toFixed(2) : "—";

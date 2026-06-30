@@ -3,6 +3,8 @@
  * Used to surface "Add to contact" chips inside chat threads.
  */
 
+import { cleanUrl } from "@/lib/utils/url";
+
 // Emails first — extracted before URL matching so email domains aren't captured as URLs
 const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
 
@@ -81,4 +83,43 @@ export function scanThread(
   }
 
   return { urls: [...urls], emails: [...emails], phones: [...phones] };
+}
+
+// ── Normalization + already-on-file filtering (for the inbox "only show new data" UX) ──
+
+/** Normalize a detected/stored value so equal-but-differently-formatted values compare equal. */
+export function normalizeForCompare(type: "url" | "email" | "phone", value: string): string {
+  if (type === "email") return value.trim().toLowerCase();
+  if (type === "phone") {
+    // Strip a leading US country code so a typed "555-123-4567" matches GHL's E.164 "+15551234567".
+    const d = value.replace(/\D/g, "");
+    return d.length === 11 && d.startsWith("1") ? d.slice(1) : d;
+  }
+  return cleanUrl(value).toLowerCase().replace(/\/+$/, "");
+}
+
+export interface ExistingContactData {
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+}
+
+/**
+ * Drop any detected value the contact/lead already has on file, comparing on normalized
+ * form (so "Acme.com" vs "https://acme.com/" match). Powers the inbox rule: only ever
+ * surface data we don't already have.
+ */
+export function filterAlreadyOnFile(
+  data: ExtractedData,
+  existing: ExistingContactData | undefined | null
+): ExtractedData {
+  if (!existing) return data;
+  const haveEmail = existing.email ? normalizeForCompare("email", existing.email) : null;
+  const havePhone = existing.phone ? normalizeForCompare("phone", existing.phone) : null;
+  const haveWebsite = existing.website ? normalizeForCompare("url", existing.website) : null;
+  return {
+    urls: haveWebsite ? data.urls.filter((v) => normalizeForCompare("url", v) !== haveWebsite) : data.urls,
+    emails: haveEmail ? data.emails.filter((v) => normalizeForCompare("email", v) !== haveEmail) : data.emails,
+    phones: havePhone ? data.phones.filter((v) => normalizeForCompare("phone", v) !== havePhone) : data.phones,
+  };
 }

@@ -45,19 +45,20 @@ export function AdminDashboard({ userId, userName }: AdminDashboardProps) {
   });
 
   return (
-    <div className="flex flex-col h-full p-6 gap-5 overflow-y-auto">
+    <div data-r10n-dashboard className="flex flex-col h-full p-6 gap-5 overflow-y-auto">
       <ScrollToTop />
       <FathomNudgeBanner />
 
       {/* Header + Weekly Summary */}
-      <div>
+      <div data-r10n-greeting-block>
         <h1
+          data-r10n-greeting
           className="text-2xl font-bold text-foreground"
           style={{ fontFamily: "var(--font-heading)" }}
         >
           {getGreeting(tz)}{firstName ? `, ${firstName}` : ""}
         </h1>
-        <p className="text-sm text-muted-foreground mt-0.5">{today}</p>
+        <p data-r10n-greeting-date className="text-sm text-muted-foreground mt-0.5">{today}</p>
         {summaryData?.summary?.content && (
           <p className="text-sm text-foreground/75 leading-relaxed mt-3">
             {summaryData.summary.content}

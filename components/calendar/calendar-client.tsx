@@ -143,6 +143,9 @@ function EventBlock({
     <button
       onClick={onClick}
       title={event.summary}
+      data-r10n-cal-event
+      data-status={event.appointmentStatus ?? undefined}
+      data-source={event.source ?? undefined}
       className={cn(
         "absolute left-1 right-1 overflow-hidden rounded-[6px] border px-1.5 py-0.5 text-left cursor-pointer hover:brightness-95 transition-all z-10",
         isGoogle && "opacity-40 border-dashed"
@@ -154,11 +157,11 @@ function EventBlock({
         backgroundColor: `${color}18`,
       }}
     >
-      <p className="text-[11px] font-semibold text-foreground leading-tight truncate">
+      <p data-r10n-cal-event-title className="text-[11px] font-semibold text-foreground leading-tight truncate">
         {event.summary}
       </p>
       {height >= 44 && (
-        <p className="text-[10px] text-muted-foreground leading-tight">{timeLabel}</p>
+        <p data-r10n-cal-event-time className="text-[10px] text-muted-foreground leading-tight">{timeLabel}</p>
       )}
     </button>
   );
@@ -210,7 +213,7 @@ function TimeGrid({
   const showNowLine = isTodayInTz(days[0], tz) || days.some((d) => isTodayInTz(d, tz));
 
   return (
-    <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
+    <div ref={scrollRef} data-r10n-cal-grid className="flex-1 min-h-0 overflow-y-auto">
       <div className="flex">
         {/* Time labels column */}
         <div className="w-14 shrink-0 relative" style={{ height: GRID_HEIGHT }}>
@@ -220,7 +223,7 @@ function TimeGrid({
               className="absolute left-0 right-0 flex items-start justify-end pr-2"
               style={{ top: i * HOUR_PX - 8, height: HOUR_PX }}
             >
-              <span className="text-[10px] text-muted-foreground/60 select-none">
+              <span data-r10n-cal-hour className="text-[10px] text-muted-foreground/60 select-none">
                 {i === 0 ? "" : formatHour(HOUR_START + i)}
               </span>
             </div>
@@ -255,6 +258,8 @@ function TimeGrid({
           return (
             <div
               key={colIdx}
+              data-r10n-cal-col
+              data-today={isTodayInTz(day, tz) ? "true" : undefined}
               className={cn(
                 "flex-1 relative border-l border-border/40 cursor-pointer",
                 isTodayInTz(day, tz) && "bg-primary/[0.025]"
@@ -266,6 +271,7 @@ function TimeGrid({
               {Array.from({ length: HOUR_COUNT }, (_, i) => (
                 <div
                   key={i}
+                  data-r10n-cal-hourline
                   className="absolute left-0 right-0 border-t border-border/25"
                   style={{ top: i * HOUR_PX }}
                 />
@@ -308,8 +314,8 @@ function TimeGrid({
                   style={{ top: nowTop }}
                 >
                   <div className="relative flex items-center">
-                    <div className="w-1.5 h-1.5 rounded-full bg-rose-500 -ml-0.5 shrink-0" />
-                    <div className="flex-1 h-px bg-rose-500" />
+                    <div data-r10n-cal-nowdot className="w-1.5 h-1.5 rounded-full bg-rose-500 -ml-0.5 shrink-0" />
+                    <div data-r10n-cal-nowline className="flex-1 h-px bg-rose-500" />
                   </div>
                 </div>
               )}
@@ -347,11 +353,11 @@ function MonthGrid({
   );
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+    <div data-r10n-cal-month className="flex-1 min-h-0 flex flex-col overflow-hidden">
       {/* Day header row */}
-      <div className="grid grid-cols-7 border-b border-border shrink-0">
+      <div data-r10n-cal-monthhead className="grid grid-cols-7 border-b border-border shrink-0">
         {DAY_LABELS.map((d) => (
-          <div key={d} className="py-2 text-center text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+          <div key={d} data-r10n-cal-daylabel className="py-2 text-center text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
             {d}
           </div>
         ))}
@@ -385,6 +391,9 @@ function MonthGrid({
                   <div
                     key={di}
                     onClick={handleMonthDayClick}
+                    data-r10n-cal-daycell
+                    data-today={isTodayInTz(day, tz) ? "true" : undefined}
+                    data-outside={!inMonth ? "true" : undefined}
                     className={cn(
                       "min-h-0 p-1.5 border-l border-border/25 first:border-l-0 cursor-pointer overflow-hidden",
                       !inMonth && "bg-muted/20"
@@ -393,6 +402,9 @@ function MonthGrid({
                     {/* Date number */}
                     <div className="flex items-center justify-center mb-1">
                       <span
+                        data-r10n-cal-datenum
+                        data-today={isTodayInTz(day, tz) ? "true" : undefined}
+                        data-outside={!inMonth ? "true" : undefined}
                         className={cn(
                           "w-6 h-6 flex items-center justify-center rounded-full text-xs",
                           isTodayInTz(day, tz)
@@ -416,6 +428,9 @@ function MonthGrid({
                             key={ev.id}
                             onClick={() => onEventClick(ev)}
                             title={ev.summary}
+                            data-r10n-cal-monthevent
+                            data-status={ev.appointmentStatus ?? undefined}
+                            data-source={ev.source ?? undefined}
                             className={cn(
                               "w-full text-left px-1.5 py-0.5 rounded text-[10px] font-medium truncate leading-tight",
                               isGoogle && "opacity-40"
@@ -431,7 +446,7 @@ function MonthGrid({
                         );
                       })}
                       {overflow > 0 && (
-                        <p className="text-[10px] text-muted-foreground px-1">
+                        <p data-r10n-cal-overflow className="text-[10px] text-muted-foreground px-1">
                           +{overflow} more
                         </p>
                       )}
@@ -451,20 +466,24 @@ function MonthGrid({
 
 function DayHeaders({ days, tz }: { days: Date[]; tz: string }) {
   return (
-    <div className="flex border-b border-border shrink-0">
+    <div data-r10n-cal-dayheaders className="flex border-b border-border shrink-0">
       <div className="w-14 shrink-0" /> {/* align with time labels */}
       {days.map((day, i) => (
         <div
           key={i}
+          data-r10n-cal-dayhead
+          data-today={isTodayInTz(day, tz) ? "true" : undefined}
           className={cn(
             "flex-1 py-2 text-center border-l border-border/40",
             isTodayInTz(day, tz) && "bg-primary/[0.025]"
           )}
         >
-          <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+          <p data-r10n-cal-daylabel className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
             {format(toZonedDate(day, tz), "EEE")}
           </p>
           <p
+            data-r10n-cal-daynum
+            data-today={isTodayInTz(day, tz) ? "true" : undefined}
             className={cn(
               "text-sm font-bold mt-0.5",
               isTodayInTz(day, tz) ? "text-primary" : "text-foreground"
@@ -645,8 +664,8 @@ export function CalendarClient() {
   if (!eventsLoading && googleNotConfig) {
     return (
       <div className="flex flex-col h-full items-center justify-center gap-3 p-8 text-center">
-        <Calendar className="w-10 h-10 text-border" />
-        <p className="text-sm font-semibold text-foreground">
+        <Calendar data-r10n-cal-empty-glyph className="w-10 h-10 text-border" />
+        <p data-r10n-cal-empty-title className="text-sm font-semibold text-foreground">
           Google Workspace not connected
         </p>
         <p className="text-xs text-muted-foreground max-w-sm leading-relaxed">
@@ -664,12 +683,13 @@ export function CalendarClient() {
     <div className="flex flex-col h-full overflow-hidden">
 
       {/* ── Toolbar ─────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-4 border-b border-border h-12 shrink-0">
+      <div data-r10n-cal-toolbar className="flex items-center gap-3 px-4 border-b border-border h-12 shrink-0">
 
         {/* Left: navigation */}
         <div className="flex items-center gap-1">
           <button
             onClick={() => navigate("prev")}
+            data-r10n-cal-navbtn
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             aria-label="Previous"
           >
@@ -677,6 +697,7 @@ export function CalendarClient() {
           </button>
           <button
             onClick={() => navigate("next")}
+            data-r10n-cal-navbtn
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             aria-label="Next"
           >
@@ -684,6 +705,7 @@ export function CalendarClient() {
           </button>
           <button
             onClick={goToday}
+            data-r10n-cal-todaybtn
             className="ml-1 px-2.5 py-1 text-xs font-medium border border-border rounded-[7px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           >
             Today
@@ -693,6 +715,7 @@ export function CalendarClient() {
         {/* Center: range label */}
         <div className="flex-1 flex justify-center">
           <span
+            data-r10n-cal-rangelabel
             className="text-sm font-semibold text-foreground"
             style={{ fontFamily: "var(--font-heading)" }}
           >
@@ -713,6 +736,8 @@ export function CalendarClient() {
                     key={m.id}
                     onClick={() => toggleRep(m.id)}
                     title={m.email}
+                    data-r10n-cal-reppill
+                    data-active={active ? "true" : "false"}
                     className={cn(
                       "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all",
                       active
@@ -733,11 +758,13 @@ export function CalendarClient() {
           )}
 
           {/* View switcher */}
-          <div className="flex items-center border border-border rounded-[8px] overflow-hidden text-xs font-medium">
+          <div data-r10n-cal-viewswitch className="flex items-center border border-border rounded-[8px] overflow-hidden text-xs font-medium">
             {(["week", "month", "day"] as ViewMode[]).map((v) => (
               <button
                 key={v}
                 onClick={() => setView(v)}
+                data-r10n-cal-viewbtn
+                data-active={view === v ? "true" : "false"}
                 className={cn(
                   "px-3 py-1.5 capitalize transition-colors",
                   view === v
@@ -757,6 +784,7 @@ export function CalendarClient() {
               setBookCallInitialStartTime(undefined);
               setBookCallOpen(true);
             }}
+            data-r10n-cal-bookbtn
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-[8px] hover:bg-primary/90 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />

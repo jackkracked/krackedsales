@@ -84,6 +84,7 @@ export function CustomEdge({
           >
             <button
               onClick={handleInsert}
+              data-r10n-wf-edgebtn="insert"
               className="w-6 h-6 rounded-full bg-card border border-border shadow-sm flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary transition-colors"
               title="Insert node"
             >
@@ -91,6 +92,7 @@ export function CustomEdge({
             </button>
             <button
               onClick={handleDelete}
+              data-r10n-wf-edgebtn="delete"
               className="w-6 h-6 rounded-full bg-card border border-border shadow-sm flex items-center justify-center text-muted-foreground hover:text-red-500 hover:border-red-400 transition-colors"
               title="Delete connection"
             >
@@ -113,14 +115,15 @@ export function CustomEdge({
               className="fixed inset-0 z-[-1]"
               onClick={() => setShowPicker(false)}
             />
-            <div className="bg-card border border-border rounded-xl shadow-xl p-2 w-56 max-h-72 overflow-y-auto">
-              <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground px-2 py-1 mb-1">
+            <div data-r10n-wf-edgepicker="" className="bg-card border border-border rounded-xl shadow-xl p-2 w-56 max-h-72 overflow-y-auto">
+              <p data-r10n-wf-edgepicker-label="" className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground px-2 py-1 mb-1">
                 Insert node
               </p>
               {NODE_CATALOG.map((def) => (
                 <button
                   key={def.type}
                   onClick={() => handlePickNode(def.type)}
+                  data-r10n-wf-edgepicker-item=""
                   className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg text-left hover:bg-primary/10 hover:text-primary transition-colors"
                 >
                   <span className="text-sm shrink-0">{def.icon}</span>

@@ -27,21 +27,33 @@ function getAgeClasses(days: number): string {
 function CallBadge({ link, daysSinceSent }: { link: DemoLinkData; daysSinceSent: number }) {
   if (link.callStatus === "booked") {
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+      <span
+        className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200"
+        data-r10n-status-pill
+        data-status="won"
+      >
         ✅ Booked{link.daysToCall != null ? ` · Day ${link.daysToCall}` : ""}
       </span>
     );
   }
   if (link.callStatus === "no_response") {
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
+      <span
+        className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200"
+        data-r10n-status-pill
+        data-status="no_response"
+      >
         ❌ No response · {daysSinceSent}d
       </span>
     );
   }
   // awaiting
   return (
-    <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+    <span
+      className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200"
+      data-r10n-status-pill
+      data-status="needs_attention"
+    >
       ⏳ Awaiting · {daysSinceSent}d
     </span>
   );
@@ -67,15 +79,20 @@ export function DemoTaskCard({ task, link }: { task: EnrichedTask; link?: DemoLi
     ? Math.floor((Date.now() - new Date(task.dateSent).getTime()) / (1000 * 60 * 60 * 24))
     : null;
 
+  // Age tier for the inert r10n hook (mirrors getAgeClasses): fast / mid / late.
+  const ageTier = task.daysInStage <= 3 ? "fast" : task.daysInStage <= 7 ? "mid" : "late";
+
   return (
     <>
       <div
         onClick={() => setShowModal(true)}
         className="group bg-card border border-border rounded-[10px] p-3 hover:border-primary/30 transition-all duration-150 hover:shadow-sm cursor-pointer"
+        data-r10n-demo-card
+        data-r10n-demo-bucket={task.bucket}
       >
         {/* Name + ClickUp link */}
         <div className="flex items-start justify-between gap-2 mb-1">
-          <p className="text-sm font-semibold text-foreground leading-tight line-clamp-2 flex-1">
+          <p className="text-sm font-semibold text-foreground leading-tight line-clamp-2 flex-1" data-r10n-demo-card-name>
             {task.name}
           </p>
           <a
@@ -92,14 +109,17 @@ export function DemoTaskCard({ task, link }: { task: EnrichedTask; link?: DemoLi
 
         {/* Brand subtitle */}
         {brand && (
-          <p className="text-[11px] text-muted-foreground mb-2 truncate">{brand}</p>
+          <p className="text-[11px] text-muted-foreground mb-2 truncate" data-r10n-demo-card-brand>{brand}</p>
         )}
 
         {/* Stage badge */}
-        <span className={cn(
-          "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
-          badge.className
-        )}>
+        <span
+          className={cn(
+            "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
+            badge.className
+          )}
+          data-r10n-demo-stagebadge
+        >
           {badge.label}
         </span>
 
@@ -107,7 +127,11 @@ export function DemoTaskCard({ task, link }: { task: EnrichedTask; link?: DemoLi
         <div className="flex items-center justify-between mt-2">
           {/* Age indicator */}
           {!isDemoSent && (
-            <div className={cn("flex items-center gap-1 text-xs font-medium", ageClasses)}>
+            <div
+              className={cn("flex items-center gap-1 text-xs font-medium", ageClasses)}
+              data-r10n-demo-age={ageTier}
+              data-r10n-demo-atrisk={isAtRisk ? "true" : "false"}
+            >
               <Clock className="w-3 h-3" />
               <span>{task.daysInStage === 0 ? "Today" : `Day ${task.daysInStage}`}</span>
               {isAtRisk && <span className="ml-0.5">⚠</span>}

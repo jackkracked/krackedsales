@@ -75,13 +75,15 @@ const PROMOTED_KEYWORDS = ["website", "url", "company", "brand", "revenue"];
 const SKIP_VALUES = ["", "--", "N/A", "n/a", "null", "undefined"];
 
 function resolveCustomFields(
-  rawFields: Array<{ id: string; field_value?: string; value?: string }>,
+  rawFields: Array<{ id: string; field_value?: unknown; value?: unknown }>,
   fieldDefs: Record<string, FieldDef>
 ): ResolvedCustomField[] {
   const results: ResolvedCustomField[] = [];
 
   for (const f of rawFields) {
-    const rawValue = f.field_value ?? f.value ?? "";
+    // GHL custom-field values may be numbers/arrays, not just strings — coerce first.
+    const raw = f.field_value ?? f.value ?? "";
+    const rawValue = typeof raw === "string" ? raw : Array.isArray(raw) ? raw.join(", ") : String(raw);
     if (!rawValue || SKIP_VALUES.includes(rawValue.trim())) continue;
 
     const def = fieldDefs[f.id];

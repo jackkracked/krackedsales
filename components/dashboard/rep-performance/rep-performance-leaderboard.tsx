@@ -77,10 +77,10 @@ export function RepPerformanceLeaderboard() {
   const isLoading = isPending && !data;
 
   return (
-    <div className="bg-card border border-border rounded-[10px] overflow-hidden shrink-0">
+    <div data-r10n-card className="bg-card border border-border rounded-[10px] overflow-hidden shrink-0">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>Rep Performance</h3>
+          <h3 data-r10n-section-title className="text-sm font-semibold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>Rep Performance</h3>
           <p className="text-[10.5px] text-muted-foreground/70 mt-0.5">Click any number to verify the records behind it</p>
         </div>
         <DateRangePicker value={dateRange} onChange={setDateRange} />
@@ -89,9 +89,9 @@ export function RepPerformanceLeaderboard() {
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border">
-            <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">Rep</th>
+            <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">Rep</th>
             {COLUMNS.map((col) => (
-              <th key={col.key} className="px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground text-right">
+              <th key={col.key} data-r10n-th className="px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground text-right">
                 {col.label}
               </th>
             ))}
@@ -122,6 +122,7 @@ export function RepPerformanceLeaderboard() {
                   return (
                     <td key={col.key} className="px-4 py-2 text-right">
                       <button
+                        data-demo={`rep-cell-${col.drill}`}
                         onClick={() => setDrill({ userId: rep.id, rep: rep.name, metric: col.drill, label: col.label })}
                         className="ml-auto inline-flex items-center rounded-[6px] px-2 py-1 tabular-nums text-sm text-foreground/80 hover:bg-primary/[0.07] hover:text-primary transition-colors cursor-pointer"
                         title={`See ${rep.name}'s ${col.label.toLowerCase()}`}
@@ -160,13 +161,18 @@ export function RepPerformanceLeaderboard() {
 function DrilldownDrawer({
   userId, rep, metric, label, queryParams, onClose,
 }: { userId: string; rep: string; metric: string; label: string; queryParams: string; onClose: () => void }) {
-  const { data, isLoading } = useQuery<{ items: DrillItem[] }>({
+  const { data, isLoading } = useQuery<{ items: DrillItem[]; total?: number }>({
     queryKey: ["rep-drilldown", userId, metric, queryParams],
     queryFn: () => fetch(`/api/dashboard/rep-performance/drilldown?userId=${userId}&metric=${metric}&${queryParams}`).then((r) => r.json()),
   });
   const items = data?.items ?? [];
   const isMoney = metric === "closed";
-  const total = isMoney ? items.reduce((s, i) => s + (i.amount ?? 0), 0) : items.length;
+  // Count comes from the server's `total` (for "open" it's GHL's reliable filtered
+  // total and matches the leaderboard). $ Closed sums the amounts in the list.
+  const count = data?.total ?? items.length;
+  const total = isMoney ? items.reduce((s, i) => s + (i.amount ?? 0), 0) : count;
+  // The "open" list is a capped sample; everything else shows the full set.
+  const isSample = items.length < count;
 
   if (typeof document === "undefined") return null;
   return createPortal(
@@ -196,6 +202,12 @@ function DrilldownDrawer({
               <p className="text-xs text-muted-foreground">No {label.toLowerCase()} for {rep} in this period.</p>
             </div>
           ) : (
+            <>
+            {isSample && (
+              <p className="px-5 py-2.5 text-[11px] text-muted-foreground bg-muted/20 border-b border-border/50">
+                Showing the {items.length} most recent of {count.toLocaleString()} open leads.
+              </p>
+            )}
             <ul className="divide-y divide-border/50">
               {items.map((it) => {
                 const Row = (
@@ -218,6 +230,7 @@ function DrilldownDrawer({
                 );
               })}
             </ul>
+            </>
           )}
         </div>
       </div>

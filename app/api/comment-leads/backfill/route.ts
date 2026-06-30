@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { commentLeads, keywordTriggers } from "@/lib/db/schema";
+import { socialLeads, keywordTriggers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { meta, pageId } from "@/lib/meta/client";
 
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Load already-imported commentIds so we can skip duplicates
-  const existing = await client.select({ commentId: commentLeads.commentId }).from(commentLeads);
+  const existing = await client.select({ commentId: socialLeads.commentId }).from(socialLeads);
   const existingIds = new Set(existing.map((r) => r.commentId).filter(Boolean) as string[]);
 
   const pid = pageId();
@@ -137,7 +137,7 @@ export async function POST(req: NextRequest) {
       const postId = post.id;
 
       try {
-        await client.insert(commentLeads).values({
+        await client.insert(socialLeads).values({
           name: commenterName,
           platform: "facebook",
           commentText: comment.message,

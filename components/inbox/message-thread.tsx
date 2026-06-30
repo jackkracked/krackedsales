@@ -1,23 +1,58 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils/cn";
 import { formatDateTime, relativeTime } from "@/lib/utils/date";
 import { Mail, ChevronDown, RefreshCw } from "lucide-react";
 import type { GHLMessage } from "@/lib/ghl/types";
 import { useStageHistoryStore, findStageChange } from "@/store/stage-history-store";
 import { MessageBody } from "@/components/shared/message-body";
+import { SmartBanner, EnrichChip, type AttachTarget } from "@/components/shared/chat-bubble";
+import { extractContactData, scanThread, filterAlreadyOnFile } from "@/lib/utils/extract-contact-data";
 
 interface MessageThreadProps {
   messages: GHLMessage[];
+  /** GHL contact for this conversation — enables click-to-attach chips when present. */
+  contactId?: string;
 }
 
-export function MessageThread({ messages }: MessageThreadProps) {
+export function MessageThread({ messages, contactId }: MessageThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
   const stageChanges = useStageHistoryStore((s) => s.changes);
   const [expandedEmails, setExpandedEmails] = useState<Set<string>>(new Set());
   const [emailHtml, setEmailHtml] = useState<Record<string, string | null>>({});
   const [emailLoading, setEmailLoading] = useState<Set<string>>(new Set());
+
+  // Current contact data — powers click-to-attach + the "only show new data" filter.
+  // websiteRaw is the custom field GHL actually reads website from.
+  const hasContact = !!contactId;
+  const { data: contactData } = useQuery<{
+    contact?: { email?: string; phone?: string } | null;
+    websiteRaw?: string | null;
+  }>({
+    queryKey: ["ghl-contact-basic", contactId],
+    queryFn: () => fetch(`/api/ghl/contacts/${contactId}`).then((r) => r.json()),
+    enabled: hasContact,
+    staleTime: 60_000,
+  });
+  const attachTarget: AttachTarget | null = hasContact
+    ? { kind: "ghl", contactId: contactId! }
+    : null;
+  const existing = hasContact
+    ? {
+        email: contactData?.contact?.email ?? null,
+        phone: contactData?.contact?.phone ?? null,
+        website: contactData?.websiteRaw ?? null,
+      }
+    : null;
+
+  function handleFieldSaved() {
+    if (!contactId) return;
+    queryClient.invalidateQueries({ queryKey: ["ghl-contact-basic", contactId] });
+    queryClient.invalidateQueries({ queryKey: ["contact-opportunity", contactId] });
+  }
 
   const fetchEmailHtml = useCallback(async (stateId: string, fetchId: string) => {
     if (emailHtml[stateId] !== undefined || emailLoading.has(stateId)) return;
@@ -63,8 +98,25 @@ export function MessageThread({ messages }: MessageThreadProps) {
   // Reverse to oldest-first (GHL returns newest first)
   const sorted = [...messages].reverse();
 
+  // Detected contact data not already on file — gates the top banner so we never show an
+  // empty bar (the banner is OUTSIDE the scroll area; inside it auto-scrolls out of view).
+  const newData = attachTarget ? filterAlreadyOnFile(scanThread(sorted), existing) : null;
+  const hasNewData =
+    !!newData && newData.urls.length + newData.emails.length + newData.phones.length > 0;
+
   return (
-    <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3">
+    <div className="flex-1 min-h-0 flex flex-col">
+      {attachTarget && hasNewData && (
+        <div className="px-5 pt-3 shrink-0">
+          <SmartBanner
+            messages={sorted}
+            target={attachTarget}
+            existing={existing}
+            onFieldSaved={handleFieldSaved}
+          />
+        </div>
+      )}
+      <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3">
       {sorted.map((msg) => {
         const isOutbound = msg.direction === "outbound";
         const isActivity = msg.messageType === "TYPE_ACTIVITY_OPPORTUNITY";
@@ -89,7 +141,7 @@ export function MessageThread({ messages }: MessageThreadProps) {
             : "🔄 Stage changed";
           return (
             <div key={msg.id} className="flex justify-center my-1">
-              <span className="text-xs text-muted-foreground bg-muted/60 px-3 py-1 rounded-full">
+              <span data-r10n-activity-pill className="text-xs text-muted-foreground bg-muted/60 px-3 py-1 rounded-full">
                 {label} · {msg.dateAdded ? relativeTime(msg.dateAdded) : ""}
               </span>
             </div>
@@ -108,17 +160,17 @@ export function MessageThread({ messages }: MessageThreadProps) {
 
           return (
             <div key={msg.id} className={cn("flex flex-col gap-0.5", sentByUs ? "items-end" : "items-start")}>
-              <div className={cn(
+              <div data-r10n-email-card data-sent={sentByUs} className={cn(
                 "w-[72%] rounded-[10px] border overflow-hidden",
                 sentByUs ? "border-[#C8A96E]/40" : "border-border"
               )}>
                 {/* Email header strip */}
-                <div className={cn(
+                <div data-r10n-email-strip data-sent={sentByUs} className={cn(
                   "flex items-center gap-2 px-3 py-1.5 border-b",
                   sentByUs ? "bg-[#C8A96E]/12 border-[#C8A96E]/20" : "bg-muted/60 border-border"
                 )}>
-                  <Mail className={cn("w-3 h-3 shrink-0", sentByUs ? "text-[#C8A96E]" : "text-muted-foreground")} />
-                  <span className={cn(
+                  <Mail data-r10n-email-icon className={cn("w-3 h-3 shrink-0", sentByUs ? "text-[#C8A96E]" : "text-muted-foreground")} />
+                  <span data-r10n-email-label className={cn(
                     "text-[10px] font-semibold uppercase tracking-widest flex-1",
                     sentByUs ? "text-[#C8A96E]" : "text-muted-foreground"
                   )}>
@@ -205,9 +257,15 @@ export function MessageThread({ messages }: MessageThreadProps) {
           : null;
 
         // ── Regular message bubble (SMS / FB / IG / etc.) ────────────
+        const chips =
+          !isOutbound && attachTarget
+            ? filterAlreadyOnFile(extractContactData(msg.body), existing)
+            : null;
+        const hasChips =
+          !!chips && chips.urls.length + chips.emails.length + chips.phones.length > 0;
         return (
           <div key={msg.id} className={cn("flex flex-col gap-1", isOutbound ? "items-end" : "items-start")}>
-            <div className={cn(
+            <div data-r10n-bubble data-dir={isOutbound ? "out" : "in"} className={cn(
               "max-w-[68%] px-3.5 py-2.5 text-sm leading-relaxed",
               isOutbound
                 ? "bg-primary text-primary-foreground rounded-[16px] rounded-br-[5px] shadow-[0_4px_14px_-8px_rgba(15,58,92,0.5)]"
@@ -217,7 +275,7 @@ export function MessageThread({ messages }: MessageThreadProps) {
                 body={msg.body}
                 linkClassName={isOutbound ? "text-primary-foreground underline" : "text-primary"}
               />
-              <p className={cn(
+              <p data-r10n-bubble-time className={cn(
                 "text-[10px] mt-1.5 text-right tabular-nums",
                 isOutbound ? "text-primary-foreground/65" : "text-muted-foreground"
               )}>
@@ -225,14 +283,28 @@ export function MessageThread({ messages }: MessageThreadProps) {
               </p>
             </div>
             {channelLabel && (
-              <span className="text-[10px] text-muted-foreground/70 px-1.5">
+              <span data-r10n-bubble-channel className="text-[10px] text-muted-foreground/70 px-1.5">
                 {channelLabel}
               </span>
+            )}
+            {hasChips && attachTarget && (
+              <div className="flex flex-wrap gap-1.5 mt-1 max-w-[68%]">
+                {chips!.urls.map((v) => (
+                  <EnrichChip key={v} type="url" value={v} target={attachTarget} onSaved={handleFieldSaved} />
+                ))}
+                {chips!.emails.map((v) => (
+                  <EnrichChip key={v} type="email" value={v} target={attachTarget} onSaved={handleFieldSaved} />
+                ))}
+                {chips!.phones.map((v) => (
+                  <EnrichChip key={v} type="phone" value={v} target={attachTarget} onSaved={handleFieldSaved} />
+                ))}
+              </div>
             )}
           </div>
         );
       })}
       <div ref={bottomRef} />
+      </div>
     </div>
   );
 }

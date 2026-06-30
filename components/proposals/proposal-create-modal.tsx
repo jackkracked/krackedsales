@@ -383,9 +383,9 @@ function ContactSearch({ value, onChange, onClear }: {
       )}
 
       {value && (
-        <div className="mt-3 flex items-center gap-2 px-3 py-2 bg-primary/5 border border-primary/20 rounded-[8px]">
-          <Check className="w-3.5 h-3.5 text-primary shrink-0" />
-          <span className="text-sm text-primary font-medium">{toTitleCase(value.name)}</span>
+        <div data-r10n-proposal-contact-chip className="mt-3 flex items-center gap-2 px-3 py-2 bg-primary/5 border border-primary/20 rounded-[8px]">
+          <Check data-r10n-proposal-contact-check className="w-3.5 h-3.5 text-primary shrink-0" />
+          <span data-r10n-proposal-contact-name className="text-sm text-primary font-medium">{toTitleCase(value.name)}</span>
           {value.email && <span className="text-xs text-muted-foreground">{value.email}</span>}
           <button type="button" onClick={() => { onClear(); setQuery(""); resetCreateForm(); }}
             className="ml-auto p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors">
@@ -410,13 +410,14 @@ function FlowPill({ label, count, onToggle, onCountChange, unit }: {
   if (!selected) {
     return (
       <button type="button" onClick={onToggle}
+        data-r10n-proposal-flowpill data-selected="false"
         className="px-3 py-1.5 rounded-[7px] border border-border bg-background text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-foreground transition-all whitespace-nowrap">
         {label}
       </button>
     );
   }
   return (
-    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] border border-primary bg-primary/8 text-primary">
+    <div data-r10n-proposal-flowpill data-selected="true" className="flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] border border-primary bg-primary/8 text-primary">
       <span className="text-xs font-medium whitespace-nowrap">{label}</span>
       <input type="number" value={raw} min={1} max={99}
         onChange={e => { setRaw(e.target.value); const n = parseInt(e.target.value); if (!isNaN(n) && n >= 1) onCountChange(n); }}
@@ -442,6 +443,9 @@ function ChoiceCard({ active, icon: Icon, title, desc, onClick, children }: {
       whileHover={reduce ? undefined : { y: -2 }}
       whileTap={reduce ? undefined : { scale: 0.99 }}
       transition={SPRING_SELECT}
+      data-r10n-proposal-choice
+      data-active={active}
+      data-filled={filled}
       className={cn(
         "rounded-[12px] border p-4 cursor-pointer transition-colors duration-200",
         filled
@@ -559,7 +563,7 @@ function ScheduleEditor({ rows, currencySymbol, onUpdate, onAdd, onRemove, onDis
         <Plus className="w-3.5 h-3.5" /> {addLabel}
       </button>
       {total > 0 && (
-        <div className={cn("mt-3 px-3 py-2 rounded-[7px] text-xs", diff < 0.01 ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700")}>
+        <div {...(diff < 0.01 ? { "data-r10n-proposal-schedule-ok": "" } : { "data-r10n-proposal-schedule-pending": "" })} className={cn("mt-3 px-3 py-2 rounded-[7px] text-xs", diff < 0.01 ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700")}>
           {diff < 0.01
             ? `Adds up to ${currencySymbol}${sum.toLocaleString()} ✓`
             : `So far ${currencySymbol}${sum.toLocaleString()} of ${currencySymbol}${total.toLocaleString()} — ${currencySymbol}${diff.toFixed(2)} ${sum < total ? "left" : "over"}`}
@@ -798,23 +802,25 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}
+        data-r10n-proposal-wizard-overlay
         className="absolute inset-0 bg-[#171d2b]/45 backdrop-blur-md" onClick={onClose} />
 
       <motion.div
         initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.965, y: 10 }}
         animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.28, ease: EASE_OUT }}
+        data-r10n-proposal-wizard
         className="relative bg-[#FBFBF9] border border-border/60 rounded-t-[20px] sm:rounded-[18px] shadow-[0_24px_64px_-32px_rgba(15,23,42,0.22)] ring-1 ring-foreground/[0.03] w-full sm:max-w-[452px] z-10 flex flex-col max-h-[92vh] overflow-hidden"
       >
         {/* Header — step counter + filling progress rail */}
         <div className="px-7 pt-6 pb-4 shrink-0">
           <div className="flex items-center justify-between mb-3.5">
             <div className="flex items-center gap-2.5">
-              <span className="text-[11px] font-bold tabular-nums text-primary tracking-widest" style={{ fontFamily: "var(--font-heading)" }}>
+              <span data-r10n-proposal-stepcount className="text-[11px] font-bold tabular-nums text-primary tracking-widest" style={{ fontFamily: "var(--font-heading)" }}>
                 {String(Math.min(safeIndex + 1, steps.length)).padStart(2, "0")}<span className="text-muted-foreground/45"> / {String(steps.length).padStart(2, "0")}</span>
               </span>
               <span className="w-px h-3 bg-border" />
-              <span className="text-[11px] font-semibold text-muted-foreground tracking-[0.14em] uppercase" style={{ fontFamily: "var(--font-heading)" }}>
+              <span data-r10n-proposal-steplabel className="text-[11px] font-semibold text-muted-foreground tracking-[0.14em] uppercase" style={{ fontFamily: "var(--font-heading)" }}>
                 {isLast ? "Ready to send" : STEP_LABEL[currentKey]}
               </span>
             </div>
@@ -824,6 +830,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
             {steps.map((s, i) => (
               <div key={s} className="h-[3px] rounded-full flex-1 bg-muted overflow-hidden">
                 <motion.div initial={false} animate={{ width: i <= safeIndex ? "100%" : "0%" }} transition={{ duration: 0.42, ease: EASE_OUT }}
+                  data-r10n-proposal-railfill
                   className="h-full rounded-full bg-primary" style={{ opacity: i < safeIndex ? 0.45 : 1 }} />
               </div>
             ))}
@@ -844,7 +851,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
               {/* ── CLIENT ── */}
               {currentKey === "client" && (
                 <div>
-                  <h3 className="text-[1.6rem] leading-[1.15] font-bold text-foreground mb-1.5 tracking-[-0.02em] text-balance" style={{ fontFamily: "var(--font-heading)" }}>Who is this for?</h3>
+                  <h3 data-r10n-proposal-q className="text-[1.6rem] leading-[1.15] font-bold text-foreground mb-1.5 tracking-[-0.02em] text-balance" style={{ fontFamily: "var(--font-heading)" }}>Who is this for?</h3>
                   <p className="text-sm text-muted-foreground mb-5">Search your contacts, or add a new one.</p>
                   <ContactSearch value={form.contact} onChange={c => set("contact", c)} onClear={() => set("contact", null)} />
                 </div>
@@ -853,7 +860,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
               {/* ── WORK ── */}
               {currentKey === "work" && (
                 <div>
-                  <h3 className="text-[1.6rem] leading-[1.15] font-bold text-foreground mb-1.5 tracking-[-0.02em] text-balance" style={{ fontFamily: "var(--font-heading)" }}>What kind of work?</h3>
+                  <h3 data-r10n-proposal-q className="text-[1.6rem] leading-[1.15] font-bold text-foreground mb-1.5 tracking-[-0.02em] text-balance" style={{ fontFamily: "var(--font-heading)" }}>What kind of work?</h3>
                   <p className="text-sm text-muted-foreground mb-5">This sets how the deal is billed.</p>
                   <div className="space-y-3">
                     <ChoiceCard active={form.type === "management"} icon={Repeat} title="Management" desc="Ongoing email + SMS retainer." onClick={() => handleTypeChange("management")} />
@@ -865,7 +872,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
               {/* ── SCOPE ── */}
               {currentKey === "scope" && (
                 <div>
-                  <h3 className="text-[1.6rem] leading-[1.15] font-bold text-foreground mb-1.5 tracking-[-0.02em] text-balance" style={{ fontFamily: "var(--font-heading)" }}>What&apos;s included?</h3>
+                  <h3 data-r10n-proposal-q className="text-[1.6rem] leading-[1.15] font-bold text-foreground mb-1.5 tracking-[-0.02em] text-balance" style={{ fontFamily: "var(--font-heading)" }}>What&apos;s included?</h3>
                   <p className="text-sm text-muted-foreground mb-5">{form.type === "management" ? "Monthly deliverables." : "Pick the flows in this build."}</p>
                   {form.type === "management" ? (
                     <div className="grid grid-cols-3 gap-3">
@@ -932,7 +939,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
               {/* ── DEAL ── */}
               {currentKey === "deal" && (
                 <div>
-                  <h3 className="text-[1.6rem] leading-[1.15] font-bold text-foreground mb-1.5 tracking-[-0.02em] text-balance" style={{ fontFamily: "var(--font-heading)" }}>How does {form.contact ? toTitleCase(form.contact.name.split(" ")[0]) : "the client"} pay?</h3>
+                  <h3 data-r10n-proposal-q className="text-[1.6rem] leading-[1.15] font-bold text-foreground mb-1.5 tracking-[-0.02em] text-balance" style={{ fontFamily: "var(--font-heading)" }}>How does {form.contact ? toTitleCase(form.contact.name.split(" ")[0]) : "the client"} pay?</h3>
                   <p className="text-sm text-muted-foreground mb-5">Pick the deal — we handle the billing.</p>
 
                   {form.type === "management" ? (
@@ -1000,7 +1007,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
               {/* ── PRICE ── */}
               {currentKey === "price" && (
                 <div>
-                  <h3 className="text-[1.6rem] leading-[1.15] font-bold text-foreground mb-1.5 tracking-[-0.02em] text-balance" style={{ fontFamily: "var(--font-heading)" }}>How much?</h3>
+                  <h3 data-r10n-proposal-q className="text-[1.6rem] leading-[1.15] font-bold text-foreground mb-1.5 tracking-[-0.02em] text-balance" style={{ fontFamily: "var(--font-heading)" }}>How much?</h3>
                   <p className="text-sm text-muted-foreground mb-5">{amountLabel(form)}.</p>
 
                   <div className="grid grid-cols-3 gap-3">
@@ -1044,11 +1051,11 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
                     <AnimatePresence>
                       {hasDiscount && (
                         <motion.div initial={reduce ? false : { opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.18 }} className="overflow-hidden">
-                          <div className="mt-2 flex items-center gap-2.5 px-3 py-2.5 rounded-[8px] bg-green-50 border border-green-200">
+                          <div data-r10n-proposal-discount-strip className="mt-2 flex items-center gap-2.5 px-3 py-2.5 rounded-[8px] bg-green-50 border border-green-200">
                             <span className="text-sm text-muted-foreground line-through tabular-nums">{fmtMoney(enteredPrice, form.currency)}</span>
                             <span className="text-muted-foreground">→</span>
                             <span className="text-sm font-bold text-foreground tabular-nums">{fmtMoney(billedTotal, form.currency)}</span>
-                            <span className="ml-auto text-[11px] font-semibold text-green-700">{discountPct}% off · saves {fmtMoney(discountAmount, form.currency)}</span>
+                            <span data-r10n-proposal-discount-save className="ml-auto text-[11px] font-semibold text-green-700">{discountPct}% off · saves {fmtMoney(discountAmount, form.currency)}</span>
                           </div>
                         </motion.div>
                       )}
@@ -1067,7 +1074,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
               {/* ── SCHEDULE ── */}
               {currentKey === "schedule" && (
                 <div>
-                  <h3 className="text-[1.6rem] leading-[1.15] font-bold text-foreground mb-1.5 tracking-[-0.02em] text-balance" style={{ fontFamily: "var(--font-heading)" }}>Set the schedule</h3>
+                  <h3 data-r10n-proposal-q className="text-[1.6rem] leading-[1.15] font-bold text-foreground mb-1.5 tracking-[-0.02em] text-balance" style={{ fontFamily: "var(--font-heading)" }}>Set the schedule</h3>
                   <p className="text-sm text-muted-foreground mb-5">
                     {form.type === "project" ? `Split ${fmtMoney(billedTotal, form.currency)} into payments.` : `The deposit covers the first cycle — ${fmtMoney(billedTotal, form.currency)}.`}
                   </p>
@@ -1092,8 +1099,9 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
           {showDealLine && (
             <motion.div initial={reduce ? false : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
               transition={{ duration: 0.2, ease: EASE_OUT }}
+              data-r10n-proposal-dealline
               className="mx-7 mb-1.5 px-3.5 py-2.5 rounded-[10px] bg-primary/[0.05] border border-primary/15 flex items-start gap-2.5">
-              <span className="mt-px w-4 h-4 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
+              <span data-r10n-proposal-dealline-node className="mt-px w-4 h-4 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
                 <ArrowRight className="w-2.5 h-2.5 text-primary" />
               </span>
               <p className="text-[11px] leading-relaxed text-foreground/80">{clientSentence(previewTerms)}</p>
@@ -1115,6 +1123,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
               </button>
               <motion.button type="button" onClick={() => handleSubmit(true)} disabled={submitting}
                 whileTap={!submitting && !reduce ? { scale: 0.97 } : undefined}
+                data-r10n-proposal-wizard-cta
                 className={cn("group/cta flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold rounded-[9px] transition-colors",
                   !submitting ? "bg-primary text-primary-foreground hover:bg-[#0c3251] shadow-[0_4px_12px_-8px_rgba(15,58,92,0.3)]" : "bg-muted text-muted-foreground cursor-not-allowed")}>
                 {submitting && submitAction === "send" ? "Sending…" : <>Send to {form.contact ? toTitleCase(form.contact.name.split(" ")[0]) : "client"} <ArrowRight className="w-4 h-4 transition-transform group-hover/cta:translate-x-0.5" /></>}
@@ -1123,6 +1132,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
           ) : (
             <motion.button type="button" onClick={goNext} disabled={!advanceable}
               whileTap={advanceable && !reduce ? { scale: 0.97 } : undefined}
+              data-r10n-proposal-wizard-cta
               className={cn("group/cta flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold rounded-[9px] transition-colors",
                 advanceable ? "bg-primary text-primary-foreground hover:bg-[#0c3251] shadow-[0_4px_12px_-8px_rgba(15,58,92,0.3)]" : "bg-muted text-muted-foreground cursor-not-allowed")}>
               Continue <ChevronRight className="w-4 h-4 transition-transform group-hover/cta:translate-x-0.5" />
@@ -1173,20 +1183,22 @@ function Reveal({ form, billedTotal, enteredPrice, hasDiscount, discountPct, dis
 
   return (
     <div className="pt-1">
-      <div className="relative rounded-[14px] border border-border/70 bg-background overflow-hidden shadow-[0_8px_28px_-26px_rgba(15,23,42,0.16)] ring-1 ring-foreground/[0.025]">
+      <div data-r10n-proposal-reveal-card className="relative rounded-[14px] border border-border/70 bg-background overflow-hidden shadow-[0_8px_28px_-26px_rgba(15,23,42,0.16)] ring-1 ring-foreground/[0.025]">
         {/* Price hero */}
         <div className="relative px-5 pt-6 pb-5 text-center overflow-hidden">
           {!reduce && <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.6, ease: EASE_OUT }}
+            data-r10n-proposal-reveal-glow
             className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 rounded-full bg-primary/[0.06] blur-2xl" />}
-          <p className="relative text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground/70 mb-1.5 truncate px-6">{firstName === "Client" ? "New proposal" : form.contact?.name && toTitleCase(form.contact.name)}</p>
-          <p className="relative text-[13px] font-semibold text-primary/90 mb-4" style={{ fontFamily: "var(--font-heading)" }}>{dealTitle}</p>
+          <p data-r10n-proposal-reveal-eyebrow className="relative text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground/70 mb-1.5 truncate px-6">{firstName === "Client" ? "New proposal" : form.contact?.name && toTitleCase(form.contact.name)}</p>
+          <p data-r10n-proposal-reveal-deal className="relative text-[13px] font-semibold text-primary/90 mb-4" style={{ fontFamily: "var(--font-heading)" }}>{dealTitle}</p>
 
-          {hasDiscount && <p className="relative text-sm text-muted-foreground/55 line-through tabular-nums leading-none">{fmtMoney(enteredPrice, form.currency)}</p>}
-          <div className="relative text-[3.25rem] leading-none font-bold text-foreground tracking-[-0.03em] tabular-nums mt-1" style={{ fontFamily: "var(--font-heading)" }}>
+          {hasDiscount && <p data-r10n-proposal-hero-strike className="relative text-sm text-muted-foreground/55 line-through tabular-nums leading-none">{fmtMoney(enteredPrice, form.currency)}</p>}
+          <div data-r10n-proposal-reveal-amount className="relative text-[3.25rem] leading-none font-bold text-foreground tracking-[-0.03em] tabular-nums mt-1" style={{ fontFamily: "var(--font-heading)" }}>
             <CountUp value={billedTotal} prefix={currencySymbol || ""} animateOn={!reduce} />
           </div>
           {hasDiscount && (
             <motion.div initial={reduce ? false : { opacity: 0, scale: 0.9, y: 4 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={{ delay: 0.42, ...SPRING_SELECT }}
+              data-r10n-proposal-reveal-savechip
               className="relative inline-flex items-center gap-1.5 mt-2.5 px-3 py-1 rounded-full bg-accent-green/10 border border-accent-green/25 overflow-hidden">
               {!reduce && <motion.span initial={{ x: "-130%" }} animate={{ x: "170%" }} transition={{ delay: 0.75, duration: 0.9, ease: EASE_OUT }}
                 className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/45 to-transparent" />}
@@ -1196,17 +1208,17 @@ function Reveal({ form, billedTotal, enteredPrice, hasDiscount, discountPct, dis
         </div>
 
         {/* What happens — nodes with connectors that draw in */}
-        <div className="px-5 py-4 border-t border-border/70 bg-muted/25">
+        <div data-r10n-proposal-reveal-band className="px-5 py-4 border-t border-border/70 bg-muted/25">
           <div className="flex items-stretch justify-between gap-1">
             {nodes.map((n, i) => (
               <div key={i} className="flex items-center gap-1 flex-1 min-w-0">
                 <motion.div {...stagger(i)} className="flex-1 min-w-0 text-center">
-                  <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/70">{n.top}</p>
-                  <p className="text-[11px] font-semibold text-foreground mt-1 leading-tight truncate" title={n.bot}>{n.bot}</p>
+                  <p data-r10n-proposal-reveal-node-top className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/70">{n.top}</p>
+                  <p data-r10n-proposal-reveal-node-bot className="text-[11px] font-semibold text-foreground mt-1 leading-tight truncate" title={n.bot}>{n.bot}</p>
                 </motion.div>
                 {i < nodes.length - 1 && (
                   <motion.span initial={reduce ? false : { opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.3 + i * 0.08, duration: 0.3, ease: EASE_OUT }}>
-                    <ArrowRight className="w-3 h-3 text-primary/35 shrink-0" />
+                    <ArrowRight data-r10n-proposal-reveal-arrow className="w-3 h-3 text-primary/35 shrink-0" />
                   </motion.span>
                 )}
               </div>

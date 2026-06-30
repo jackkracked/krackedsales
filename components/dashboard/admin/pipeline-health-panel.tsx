@@ -64,11 +64,12 @@ export function PipelineHealthPanel() {
   if (!isLoading && pipelines.length === 0) return null;
 
   return (
-    <div className="bg-card border border-border rounded-[10px] overflow-hidden flex flex-col" style={{ height: 320 }}>
+    <div data-r10n-card className="bg-card border border-border rounded-[10px] overflow-hidden flex flex-col" style={{ height: 320 }}>
       {/* Header — pipeline name + open count */}
       <div className="px-4 pt-3 pb-2 border-b border-border shrink-0">
         <div className="flex items-center justify-between gap-2">
           <h3
+            data-r10n-section-title
             className="text-sm font-semibold text-foreground truncate flex-1 min-w-0"
             style={{ fontFamily: "var(--font-heading)" }}
             title={selectedPipeline?.name}

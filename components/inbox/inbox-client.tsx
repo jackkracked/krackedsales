@@ -61,19 +61,21 @@ export function InboxClient() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div data-r10n-inbox className="flex h-full overflow-hidden">
       {/* ── Vertical channel rail ── */}
-      <nav className="w-[68px] shrink-0 border-r border-border bg-card flex flex-col items-stretch py-2 overflow-y-auto">
+      <nav data-r10n-channel-rail className="w-[68px] shrink-0 border-r border-border bg-card flex flex-col items-stretch py-2 overflow-y-auto">
         {INBOX_TABS.map(({ key, label, icon: Icon }) => {
           const active = inboxTab === key;
           return (
             <button
               key={key}
+              data-r10n-channel-tab
+              data-active={active}
               onClick={() => setInboxTab(key)}
               title={label}
               className="group flex flex-col items-center gap-1 px-1 py-1.5 outline-none"
             >
-              <span className={cn(
+              <span data-r10n-channel-tab-icon className={cn(
                 "relative w-10 h-10 rounded-[12px] flex items-center justify-center transition-all duration-150 active:scale-[0.94]",
                 active
                   ? "bg-primary text-primary-foreground shadow-[0_4px_12px_-6px_rgba(15,58,92,0.5)]"
@@ -81,7 +83,7 @@ export function InboxClient() {
               )}>
                 {Icon ? <Icon className="w-[18px] h-[18px]" /> : <span className="text-[13px] font-bold">{label[0]}</span>}
               </span>
-              <span className={cn("text-[10px] font-medium leading-none", active ? "text-foreground" : "text-muted-foreground")}>{label}</span>
+              <span data-r10n-channel-tab-label className={cn("text-[10px] font-medium leading-none", active ? "text-foreground" : "text-muted-foreground")}>{label}</span>
             </button>
           );
         })}
@@ -121,16 +123,18 @@ export function InboxClient() {
         mobileView === "thread" ? "hidden lg:flex" : "flex"
       )}>
         {/* Header */}
-        <div className="px-4 py-3.5 border-b border-border">
+        <div data-r10n-list-header className="px-4 py-3.5 border-b border-border">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-base font-bold text-foreground tracking-[-0.01em]" style={{ fontFamily: "var(--font-heading)" }}>
+            <h2 data-r10n-list-title className="text-base font-bold text-foreground tracking-[-0.01em]" style={{ fontFamily: "var(--font-heading)" }}>
               Inbox
             </h2>
             <div className="flex items-center gap-2">
               {isFetching && <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
               {/* Unread / All toggle */}
-              <div className="flex items-center bg-muted/60 rounded-[9px] p-0.5">
+              <div data-r10n-segmented className="flex items-center bg-muted/60 rounded-[9px] p-0.5">
                 <button
+                  data-r10n-segmented-btn
+                  data-active={unreadOnly}
                   onClick={() => setUnreadOnly(true)}
                   className={cn(
                     "px-2.5 py-1 text-xs font-medium rounded-[7px] transition-all",
@@ -142,6 +146,8 @@ export function InboxClient() {
                   Unread
                 </button>
                 <button
+                  data-r10n-segmented-btn
+                  data-active={!unreadOnly}
                   onClick={() => setUnreadOnly(false)}
                   className={cn(
                     "px-2.5 py-1 text-xs font-medium rounded-[7px] transition-all",
@@ -202,7 +208,7 @@ export function InboxClient() {
             {/* Middle: thread */}
             <div className="flex-1 flex flex-col min-w-0 bg-background">
               {/* Thread header */}
-              <div className="flex items-center gap-3 px-5 py-3 border-b border-border bg-card shrink-0">
+              <div data-r10n-thread-header className="flex items-center gap-3 px-5 py-3 border-b border-border bg-card shrink-0">
                 <button
                   onClick={() => setMobileView("list")}
                   className="lg:hidden p-1.5 -ml-1 rounded-md text-muted-foreground hover:text-foreground transition-colors"
@@ -211,19 +217,20 @@ export function InboxClient() {
                 </button>
                 <Avatar name={selectedConversation.fullName ?? selectedConversation.contact?.name ?? "Unknown"} size={36} />
                 <div className="min-w-0">
-                  <h3 className="text-sm font-bold text-foreground truncate tracking-[-0.01em]" style={{ fontFamily: "var(--font-heading)" }}>
+                  <h3 data-r10n-thread-name className="text-sm font-bold text-foreground truncate tracking-[-0.01em]" style={{ fontFamily: "var(--font-heading)" }}>
                     {selectedConversation.fullName ?? selectedConversation.contact?.name ?? "Unknown"}
                   </h3>
-                  <p className="text-xs text-muted-foreground truncate">
+                  <p data-r10n-thread-sub className="text-xs text-muted-foreground truncate">
                     {selectedConversation.contact?.email ?? selectedConversation.email ?? selectedConversation.contact?.phone ?? selectedConversation.phone ?? ""}
                   </p>
                 </div>
                 <div className="ml-auto">
                   <button
+                    data-r10n-thread-action
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-foreground border border-border rounded-[8px] hover:border-primary/40 hover:bg-primary/[0.03] transition-all active:scale-[0.97]"
                     title="Move to pipeline"
                   >
-                    <Move className="w-3.5 h-3.5 text-muted-foreground" />
+                    <Move data-r10n-thread-action-icon className="w-3.5 h-3.5 text-muted-foreground" />
                     Pipeline
                   </button>
                 </div>
@@ -236,7 +243,10 @@ export function InboxClient() {
                   Loading messages…
                 </div>
               ) : (
-                <MessageThread messages={messages} />
+                <MessageThread
+                  messages={messages}
+                  contactId={selectedConversation.contactId ?? selectedConversation.contact?.id ?? ""}
+                />
               )}
 
               {/* Reply */}

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { relativeTime } from "@/lib/utils/date";
 import { cn } from "@/lib/utils/cn";
 import { Check } from "lucide-react";
+import { r10nStageColor } from "@/lib/contacts/stage-colors";
 import type { GHLOpportunity, GHLPipeline } from "@/lib/ghl/types";
 import { OpportunityModal } from "./opportunity-modal";
 
@@ -57,9 +58,9 @@ export function PipelineListView({ pipeline, opportunities }: PipelineListViewPr
 
   return (
     <>
-      <div className="bg-card border border-border rounded-[10px] flex flex-col h-full overflow-hidden">
+      <div data-r10n-table className="bg-card border border-border rounded-[10px] flex flex-col h-full overflow-hidden">
         {/* Sticky table header */}
-        <div className="grid grid-cols-[32px_1fr_140px_140px_120px_100px] gap-4 px-4 py-2.5 border-b border-border bg-muted/30 shrink-0">
+        <div data-r10n-table-head className="grid grid-cols-[32px_1fr_140px_140px_120px_100px] gap-4 px-4 py-2.5 border-b border-border bg-muted/30 shrink-0">
           {/* Select all checkbox */}
           <div className="flex items-center">
             <button
@@ -76,7 +77,7 @@ export function PipelineListView({ pipeline, opportunities }: PipelineListViewPr
             </button>
           </div>
           {["Contact", "Stage", "Source", "Created", "Status"].map((h) => (
-            <span key={h} className="text-xs font-medium text-muted-foreground uppercase tracking-wide self-center">
+            <span key={h} data-r10n-th className="text-xs font-medium text-muted-foreground uppercase tracking-wide self-center">
               {h}
             </span>
           ))}
@@ -99,6 +100,8 @@ export function PipelineListView({ pipeline, opportunities }: PipelineListViewPr
               <div
                 key={opp.id}
                 onClick={() => handleRowClick(opp)}
+                data-r10n-table-row
+                data-selected={isSelected ? "true" : undefined}
                 className={cn(
                   "group grid grid-cols-[32px_1fr_140px_140px_120px_100px] gap-4 px-4 py-3 cursor-pointer transition-colors",
                   isSelected
@@ -124,26 +127,36 @@ export function PipelineListView({ pipeline, opportunities }: PipelineListViewPr
 
                 {/* Contact */}
                 <div className="flex flex-col min-w-0 self-center">
-                  <span className="text-sm font-medium text-foreground truncate">{name}</span>
+                  <span data-r10n-table-name className="text-sm font-medium text-foreground truncate">{name}</span>
                   {opp.contact?.email && (
-                    <span className="text-xs text-muted-foreground truncate mt-0.5">{opp.contact.email}</span>
+                    <span data-r10n-table-sub className="text-xs text-muted-foreground truncate mt-0.5">{opp.contact.email}</span>
                   )}
                 </div>
 
-                {/* Stage */}
-                <span className="text-sm text-foreground self-center truncate">{stageName}</span>
+                {/* Stage — plain text in the default theme; r10n turns the same
+                    node into a distinct, system-coloured stage pill via the
+                    data-r10n-stage-pill hook + the inline --r10n-stage var. */}
+                <span
+                  data-r10n-table-cell
+                  data-r10n-stage-pill
+                  data-r10n-stage-plain="true"
+                  style={{ "--r10n-stage": r10nStageColor(stageName) } as Record<string, string>}
+                  className="text-sm text-foreground self-center truncate"
+                >
+                  {stageName}
+                </span>
 
                 {/* Source */}
-                <span className="text-sm text-muted-foreground self-center truncate">{String(source)}</span>
+                <span data-r10n-table-cell-muted className="text-sm text-muted-foreground self-center truncate">{String(source)}</span>
 
                 {/* Created */}
-                <span className="text-sm text-muted-foreground self-center">
+                <span data-r10n-table-cell-muted className="text-sm text-muted-foreground self-center">
                   {relativeTime(opp.createdAt)}
                 </span>
 
                 {/* Status */}
                 <div className="self-center">
-                  <span className={cn(
+                  <span data-r10n-status-pill data-status={opp.status} className={cn(
                     "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize",
                     STATUS_STYLES[opp.status] ?? "bg-muted text-muted-foreground"
                   )}>
@@ -158,8 +171,8 @@ export function PipelineListView({ pipeline, opportunities }: PipelineListViewPr
 
       {/* Selection bar */}
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2.5 bg-card border border-border rounded-[10px] shadow-lg">
-          <span className="text-sm font-medium text-foreground tabular-nums">
+        <div data-r10n-selectionbar className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2.5 bg-card border border-border rounded-[10px] shadow-lg">
+          <span data-r10n-selectionbar-count className="text-sm font-medium text-foreground tabular-nums">
             {selectedIds.size} selected
           </span>
           <div className="w-px h-4 bg-border" />

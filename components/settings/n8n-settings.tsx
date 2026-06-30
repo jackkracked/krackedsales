@@ -56,7 +56,7 @@ export function N8nSettings() {
   const isConfigured = !!(settings?.demoWebhookUrl);
 
   return (
-    <div className="bg-card border border-border rounded-[10px] p-5">
+    <div className="bg-card border border-border rounded-[10px] p-5" data-r10n-settings-card>
       {/* Header */}
       <div className="flex items-start justify-between mb-1">
         <div className="flex items-center gap-2.5">
@@ -65,6 +65,7 @@ export function N8nSettings() {
           <h2
             className="text-sm font-semibold text-foreground"
             style={{ fontFamily: "var(--font-heading)" }}
+            data-r10n-settings-cardtitle
           >
             n8n
           </h2>

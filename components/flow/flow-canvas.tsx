@@ -65,10 +65,10 @@ function FlowEdge({
   const labelY   = isVerticallyAligned ? midY         : stepLabelY;
 
   const color =
-    branchType === "negative"  ? "#dc2626" :
-    branchType === "followup"  ? "#d97706" :
-    branchType === "immediate" ? "#7c3aed" :
-    branchType === "positive"  ? "#16a34a" :
+    branchType === "negative"  ? "var(--r10n-flow-branch-no, #dc2626)" :
+    branchType === "followup"  ? "var(--r10n-flow-wait-border, #d97706)" :
+    branchType === "immediate" ? "var(--r10n-flow-branch-immediate, #7c3aed)" :
+    branchType === "positive"  ? "var(--r10n-flow-branch-yes, #16a34a)" :
     "var(--muted-foreground)";
 
   return (
@@ -528,12 +528,14 @@ function Canvas({ initialNodes, initialEdges }: { initialNodes: Node[]; initialE
       <MiniMap
         position="bottom-right"
         nodeColor={(n) => {
+          // R10N: minimap dots read restrained graphite/semantic tokens; the hex
+          // fallback keeps the default theme's colorful minimap unchanged.
           if (n.type === "trigger") return "var(--primary)";
-          if (n.type === "message") return "#3b82f6";
-          if (n.type === "condition") return "#f59e0b";
-          if ((n.data as { actionType?: string })?.actionType === "success") return "#16a34a";
-          if ((n.data as { actionType?: string })?.actionType === "wait") return "#d97706";
-          return "#94a3b8";
+          if (n.type === "message") return "var(--r10n-flow-cond-border, #3b82f6)";
+          if (n.type === "condition") return "var(--r10n-flow-wait-border, #f59e0b)";
+          if ((n.data as { actionType?: string })?.actionType === "success") return "var(--r10n-flow-branch-yes, #16a34a)";
+          if ((n.data as { actionType?: string })?.actionType === "wait") return "var(--r10n-flow-wait-border, #d97706)";
+          return "var(--r10n-flow-deadend-border, #94a3b8)";
         }}
         maskColor="rgba(0,0,0,0.06)"
         style={{
@@ -556,7 +558,7 @@ function Canvas({ initialNodes, initialEdges }: { initialNodes: Node[]; initialE
                   key={i}
                   x1={guide.pos} y1={-50000}
                   x2={guide.pos} y2={50000}
-                  stroke="#3b82f6"
+                  stroke="var(--r10n-flow-cond-border, #3b82f6)"
                   strokeWidth={1 / zoom}
                   strokeDasharray={`${5 / zoom} ${4 / zoom}`}
                   opacity={0.8}
@@ -566,7 +568,7 @@ function Canvas({ initialNodes, initialEdges }: { initialNodes: Node[]; initialE
                   key={i}
                   x1={-50000} y1={guide.pos}
                   x2={50000}  y2={guide.pos}
-                  stroke="#3b82f6"
+                  stroke="var(--r10n-flow-cond-border, #3b82f6)"
                   strokeWidth={1 / zoom}
                   strokeDasharray={`${5 / zoom} ${4 / zoom}`}
                   opacity={0.8}

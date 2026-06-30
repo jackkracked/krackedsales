@@ -48,6 +48,9 @@ export function CommentLeadCard({ lead, isDragging, onClick, onMessageClick }: C
   return (
     <div
       onClick={onClick}
+      data-r10n-oppcard
+      data-status={needsOutreach ? "no_response" : "replied"}
+      data-r10n-health={needsOutreach ? "at_risk" : "neutral"}
       className={cn(
         "bg-card border rounded-[10px] p-3 cursor-pointer transition-all duration-150",
         "hover:shadow-sm border-border hover:border-primary/40",
@@ -56,35 +59,35 @@ export function CommentLeadCard({ lead, isDragging, onClick, onMessageClick }: C
       )}
     >
       {/* Name */}
-      <p className="text-sm font-semibold text-foreground leading-tight mb-1.5 line-clamp-1">
+      <p data-r10n-oppcard-name className="text-sm font-semibold text-foreground leading-tight mb-1.5 line-clamp-1">
         {lead.name}
       </p>
 
       {/* Platform badge + Comment pill */}
       <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-        <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium", platformBadge.className)}>
+        <span data-r10n-oppcard-badge className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium", platformBadge.className)}>
           {platformBadge.label}
         </span>
-        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-medium bg-violet-50 text-violet-700">
+        <span data-r10n-oppcard-badge className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-medium bg-violet-50 text-violet-700">
           <MessageSquare className="w-2.5 h-2.5" />
           Comment
         </span>
       </div>
 
       {/* Comment preview */}
-      <p className="text-xs text-muted-foreground italic mb-2 line-clamp-1">
+      <p data-r10n-oppcard-quote className="text-xs text-muted-foreground italic mb-2 line-clamp-1">
         &ldquo;{lead.commentText}&rdquo;
       </p>
 
       {/* Created date */}
-      <div className="flex items-center gap-1 text-xs text-muted-foreground mb-2.5">
+      <div data-r10n-oppcard-meta className="flex items-center gap-1 text-xs text-muted-foreground mb-2.5">
         <Clock className="w-3 h-3" />
         {relativeTime(lead.createdAt)}
       </div>
 
       {/* Footer: Status pill + Chat icon */}
       <div className="flex items-center justify-between">
-        <span className={cn(
+        <span data-r10n-status-pill data-status={needsOutreach ? "needs_attention" : "replied"} className={cn(
           "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border",
           statusPill.className
         )}>

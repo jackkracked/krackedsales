@@ -236,7 +236,7 @@ export function WorkflowCanvas({ onNodeSelect, onOpenLibrary }: WorkflowCanvasPr
   );
 
   return (
-    <div className="w-full h-full relative">
+    <div data-r10n-wf-canvas="" className="w-full h-full relative">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -292,6 +292,7 @@ export function WorkflowCanvas({ onNodeSelect, onOpenLibrary }: WorkflowCanvasPr
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
           <button
             onClick={autoLayout}
+            data-r10n-wf-autolayout=""
             className="px-3 py-1.5 bg-card border border-border rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors shadow-sm"
           >
             Auto-layout
@@ -305,13 +306,14 @@ export function WorkflowCanvas({ onNodeSelect, onOpenLibrary }: WorkflowCanvasPr
           <div className="flex flex-col items-center gap-4">
             <button
               onClick={onOpenLibrary}
+              data-r10n-wf-empty-btn=""
               className="w-20 h-20 rounded-2xl bg-muted/50 border-2 border-dashed border-border flex items-center justify-center hover:bg-primary/10 hover:border-primary transition-colors pointer-events-auto"
               title="Add a node"
             >
               <span className="text-4xl">⚡</span>
             </button>
             <div className="text-center">
-              <p className="text-base font-bold text-foreground">Add your first node</p>
+              <p data-r10n-wf-empty-title="" className="text-base font-bold text-foreground">Add your first node</p>
               <p className="text-sm text-muted-foreground mt-1">
                 Click the lightning bolt or press <span className="font-semibold">+</span> to add a trigger
               </p>

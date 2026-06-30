@@ -23,10 +23,12 @@ export function formatActivitySentence(event: ActivityEvent): string {
     case "opportunity.created":
     case "lead.added":
       return `added ${name} to the pipeline`;
-    case "opportunity.stage_changed":
-      return meta.from_stage
+    case "opportunity.stage_changed": {
+      const move = meta.from_stage
         ? `moved ${name} from ${meta.from_stage} to ${meta.to_stage}`
         : `moved ${name} to ${meta.to_stage ?? "a new stage"}`;
+      return meta.reason ? `${move}: ${meta.reason}` : move;
+    }
     case "note.created":
       return `added a note on ${name}`;
     case "note.updated":

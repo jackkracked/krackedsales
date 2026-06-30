@@ -41,16 +41,17 @@ function SettingsTabsInner() {
   const active = TABS.find((t) => t.id === activeTab)!;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" data-r10n-settings>
       {/* Tab bar */}
-      <div className="border-b border-border bg-card px-6 pt-6 flex-shrink-0">
+      <div className="border-b border-border bg-card px-6 pt-6 flex-shrink-0" data-r10n-settings-header>
         <h1
           className="text-2xl font-bold text-foreground mb-1"
           style={{ fontFamily: "var(--font-heading)" }}
+          data-r10n-settings-title
         >
           Settings
         </h1>
-        <p className="text-sm text-muted-foreground mb-5">{active.description}</p>
+        <p className="text-sm text-muted-foreground mb-5" data-r10n-settings-subtitle>{active.description}</p>
 
         <nav className="flex gap-1">
           {TABS.map((tab) => {
@@ -60,6 +61,8 @@ function SettingsTabsInner() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
+                data-r10n-settings-tab
+                data-active={isActive}
                 className={cn(
                   "flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-[6px] transition-colors relative",
                   "focus:outline-none",

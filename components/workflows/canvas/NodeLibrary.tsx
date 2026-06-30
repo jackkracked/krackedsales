@@ -44,6 +44,7 @@ export function NodeLibrary({ onAddNode, collapsed, onToggle, showCollapsedButto
       <div className="relative w-0 overflow-visible shrink-0">
         <button
           onClick={onToggle}
+          data-r10n-wf-fab=""
           className="absolute left-3 top-3 w-10 h-10 rounded-full bg-card border border-border shadow-lg flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary hover:shadow-xl transition-all z-10"
           title="Add node"
         >
@@ -54,10 +55,10 @@ export function NodeLibrary({ onAddNode, collapsed, onToggle, showCollapsedButto
   }
 
   return (
-    <div className="w-64 h-full flex flex-col border-r border-border bg-card shrink-0">
+    <div data-r10n-wf-library="" className="w-64 h-full flex flex-col border-r border-border bg-card shrink-0">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
-        <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Nodes</span>
+        <span data-r10n-wf-library-title="" className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Nodes</span>
         <button onClick={onToggle} className="p-1 rounded hover:bg-border/50 transition-colors">
           <X className="w-3.5 h-3.5 text-muted-foreground" />
         </button>
@@ -91,6 +92,8 @@ export function NodeLibrary({ onAddNode, collapsed, onToggle, showCollapsedButto
                   isOpen ? next.delete(cat) : next.add(cat);
                   setOpenCategories(next);
                 }}
+                data-r10n-wf-libcat=""
+                data-category={cat}
                 className="flex items-center gap-1.5 w-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
               >
                 {isOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
@@ -108,6 +111,8 @@ export function NodeLibrary({ onAddNode, collapsed, onToggle, showCollapsedButto
                         e.dataTransfer.setData("application/nodeType", node.type);
                         e.dataTransfer.effectAllowed = "move";
                       }}
+                      data-r10n-wf-libitem=""
+                      data-category={cat}
                       className="flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-left hover:bg-primary/10 hover:text-primary transition-colors group cursor-grab active:cursor-grabbing"
                       title={node.description}
                     >

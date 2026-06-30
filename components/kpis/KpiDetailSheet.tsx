@@ -132,13 +132,14 @@ export function KpiDetailSheet({ metric, start, end, userId, ghlUserId, email, p
       <div
         ref={panelRef}
         tabIndex={-1}
+        data-r10n-kpi-drawer
         className="relative w-full max-w-md bg-card border-l border-border shadow-2xl flex flex-col h-full outline-none animate-in slide-in-from-right duration-200"
       >
         {/* Header */}
         <div className="flex items-start justify-between px-5 py-4 border-b border-border shrink-0">
           <div className="min-w-0">
-            <p className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground/60">Detail View</p>
-            <h2 className="text-base font-bold text-foreground mt-0.5 truncate">{isLoading ? "Loading…" : meta?.title ?? metric}</h2>
+            <p data-r10n-kpi-eyebrow className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground/60">Detail View</p>
+            <h2 data-r10n-kpi-drawer-title className="text-base font-bold text-foreground mt-0.5 truncate">{isLoading ? "Loading…" : meta?.title ?? metric}</h2>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-border/50 transition-colors shrink-0">
             <X className="w-4 h-4" />
@@ -153,7 +154,7 @@ export function KpiDetailSheet({ metric, start, end, userId, ghlUserId, email, p
               <p className="text-xs text-muted-foreground leading-relaxed">{meta.explanation}</p>
             </div>
             {meta.kind === "list" && (
-              <div className="flex items-baseline justify-between gap-2 rounded-lg bg-primary/5 border border-primary/20 px-3 py-2">
+              <div data-r10n-kpi-summary className="flex items-baseline justify-between gap-2 rounded-lg bg-primary/5 border border-primary/20 px-3 py-2">
                 <span className="text-[11px] font-medium text-muted-foreground">
                   {meta.isSnapshot ? "Current total" : `In ${periodLabel ?? "selected period"}`}
                 </span>
@@ -197,6 +198,8 @@ export function KpiDetailSheet({ metric, start, end, userId, ghlUserId, email, p
                   return (
                     <div
                       key={row.id ?? `${row.date ?? ""}-${row.label}-${i}`}
+                      data-r10n-kpi-row
+                      data-in-period={row.inPeriod}
                       className={cn(
                         "flex items-center justify-between px-5 py-3 transition-colors border-l-2",
                         row.inPeriod
@@ -219,7 +222,7 @@ export function KpiDetailSheet({ metric, start, end, userId, ghlUserId, email, p
                           onChange={(s) => setProjectStatus.mutate({ proposalId: row.id as string, status: s })}
                         />
                       ) : row.amount != null ? (
-                        <span className={cn("ml-4 shrink-0 text-sm font-semibold tabular-nums", row.amount >= 0 ? "text-foreground" : "text-red-500")}>
+                        <span data-r10n-kpi-amount data-negative={row.amount < 0} className={cn("ml-4 shrink-0 text-sm font-semibold tabular-nums", row.amount >= 0 ? "text-foreground" : "text-red-500")}>
                           {fmtUSD(row.amount)}
                         </span>
                       ) : null}
@@ -242,7 +245,7 @@ export function KpiDetailSheet({ metric, start, end, userId, ghlUserId, email, p
               {rows.length}{meta.totalCount != null ? ` of ${meta.totalCount}` : ""} shown
             </p>
             <p className="text-[11px] text-muted-foreground/70 flex items-center gap-1.5">
-              <span className="inline-block w-2 h-2 rounded-sm bg-primary/60" /> in {periodLabel ?? "period"}
+              <span data-r10n-kpi-dot className="inline-block w-2 h-2 rounded-sm bg-primary/60" /> in {periodLabel ?? "period"}
             </p>
           </div>
         )}

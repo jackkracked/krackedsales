@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import { X, Layers, CheckCircle2, RefreshCw, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
-import { cleanUrl, looksLikeUrl, parseQualificationNote, isQualificationNote } from "@/lib/utils/url";
+import { cleanUrl, looksLikeUrl } from "@/lib/utils/url";
+import { deriveWebsite } from "@/lib/ghl/qualification";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -130,6 +131,14 @@ interface CreateDemoModalProps {
   opportunityId?: string;
   commentLeadId?: string;
   opportunitySource?: string;
+  /** Set when opened from a Meta/TikTok conversation — drives "demo creates a real
+   *  GHL lead, source-tagged" in the demo webhook. */
+  platform?: "instagram" | "facebook" | "tiktok";
+  /** Meta participant id for a DM (no comment lead row yet), stored on the mirror. */
+  participantId?: string;
+  /** Prefill from data we already have on the lead (Task B) — all editable. */
+  defaultWebsite?: string;
+  defaultSocialHandle?: string;
   onClose: () => void;
 }
 
@@ -151,45 +160,63 @@ export function CreateDemoModal({
   opportunityId,
   commentLeadId,
   opportunitySource,
+  platform,
+  participantId,
+  defaultWebsite,
+  defaultSocialHandle,
   onClose,
 }: CreateDemoModalProps) {
-  const [brandName, setBrandName] = useState("");
-  const [website, setWebsite] = useState("");
+  // Prefill website + brand from data we already have (editable). cleanUrl normalizes raw input.
+  const cleanedDefaultWebsite = defaultWebsite
+    ? cleanUrl(defaultWebsite).toLowerCase().replace(/\/$/, "")
+    : "";
+  const [brandName, setBrandName] = useState(
+    cleanedDefaultWebsite ? domainToBrandName(cleanedDefaultWebsite) : ""
+  );
+  const [website, setWebsite] = useState(cleanedDefaultWebsite);
   const [emailType, setEmailType] = useState("");
   const [designNotes, setDesignNotes] = useState("");
   const [leadSource, setLeadSource] = useState(() => inferLeadSource(opportunitySource));
   const [contactMethod, setContactMethod] = useState("");
   const [email, setEmail] = useState(contactEmail ?? "");
   const [phone, setPhone] = useState(contactPhone ?? "");
-  const [socialHandle, setSocialHandle] = useState("");
+  const [socialHandle, setSocialHandle] = useState(defaultSocialHandle ?? "");
 
   const [loadingWebsite, setLoadingWebsite] = useState(false);
-  const [websitePrefilled, setWebsitePrefilled] = useState(false);
+  const [websitePrefilled, setWebsitePrefilled] = useState(!!cleanedDefaultWebsite);
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [error, setError] = useState("");
 
-  // Fetch website from qualification note
+  // Prefill website from the contact (form-agnostic: standard field → custom field
+  // → note), skipping when we already prefilled from known data.
   useEffect(() => {
-    if (!contactId) return;
+    if (!contactId || cleanedDefaultWebsite) return;
     setLoadingWebsite(true);
-    fetch(`/api/ghl/contacts/${contactId}/notes`)
-      .then((r) => r.json())
-      .then((data) => {
-        const notes: Array<{ body: string }> = data.notes ?? [];
-        const qualNote = notes.find((n) => isQualificationNote(n.body));
-        if (!qualNote) return;
-        const qaPairs = parseQualificationNote(qualNote.body);
-        const urlPair = qaPairs.find((qa) => qa.isUrl);
-        const raw = urlPair?.cleanedUrl ?? null;
+    (async () => {
+      try {
+        const contactRes = await fetch(`/api/ghl/contacts/${contactId}`);
+        const contactData = contactRes.ok ? await contactRes.json() : null;
+        const contact = contactData?.contact ?? null;
+        let raw = deriveWebsite(contact);
+        if (!raw) {
+          const notesRes = await fetch(`/api/ghl/contacts/${contactId}/notes`);
+          if (notesRes.ok) {
+            const notesData = await notesRes.json();
+            raw = deriveWebsite(contact, notesData.notes ?? []);
+          }
+        }
         if (raw && looksLikeUrl(raw)) {
           const cleaned = cleanUrl(raw).toLowerCase().replace(/\/$/, "");
           setWebsite(cleaned);
           setBrandName(domainToBrandName(cleaned));
           setWebsitePrefilled(true);
         }
-      })
-      .catch(() => {})
-      .finally(() => setLoadingWebsite(false));
+      } catch {
+        /* prefill is best-effort */
+      } finally {
+        setLoadingWebsite(false);
+      }
+    })();
   }, [contactId]);
 
   const canSubmit =
@@ -219,6 +246,10 @@ export function CreateDemoModal({
         "Contact Name": contactName ?? "",
         "Opportunity ID": opportunityId ?? "",
         "Comment Lead ID": commentLeadId ?? "",
+        // When set (Meta/TikTok conversation), the demo webhook creates a real GHL lead
+        // tagged with this platform. Empty for normal GHL email leads.
+        "Lead Platform": platform ?? "",
+        "Participant ID": participantId ?? "",
       };
 
       const res = await fetch(WEBHOOK_URL, {

@@ -25,12 +25,13 @@ export function FollowUpMessageEditor({ body, subject, channel, onChange }: Prop
   if (!isEditing) {
     return (
       <div
+        data-r10n-followup-editor
         onClick={() => setIsEditing(true)}
         className="group relative cursor-text rounded-[8px] border border-border bg-muted/20 hover:border-primary/40 hover:bg-muted/30 transition-all"
       >
         {isEmail && localSubject && (
           <div className="px-3 pt-2.5 pb-1 border-b border-border/60">
-            <span className="text-xs text-muted-foreground">Subject: </span>
+            <span data-r10n-followup-subj-label className="text-xs text-muted-foreground">Subject: </span>
             <span className="text-xs font-medium text-foreground">{localSubject}</span>
           </div>
         )}
@@ -38,7 +39,7 @@ export function FollowUpMessageEditor({ body, subject, channel, onChange }: Prop
           {localBody}
         </p>
         <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-          <span className="flex items-center gap-1 text-xs text-muted-foreground bg-background border border-border rounded-md px-1.5 py-0.5">
+          <span data-r10n-followup-editchip className="flex items-center gap-1 text-xs text-muted-foreground bg-background border border-border rounded-md px-1.5 py-0.5">
             <Edit3 className="w-3 h-3" />
             edit
           </span>
@@ -48,7 +49,7 @@ export function FollowUpMessageEditor({ body, subject, channel, onChange }: Prop
   }
 
   return (
-    <div className="rounded-[8px] border border-primary/40 bg-background shadow-sm">
+    <div data-r10n-followup-editor data-editing="true" className="rounded-[8px] border border-primary/40 bg-background shadow-sm">
       {isEmail && (
         <input
           type="text"
@@ -67,6 +68,7 @@ export function FollowUpMessageEditor({ body, subject, channel, onChange }: Prop
       />
       <div className="flex items-center justify-end gap-2 px-3 pb-2">
         <button
+          data-r10n-followup-editcancel
           onClick={() => {
             setLocalBody(body);
             setLocalSubject(subject ?? "");
@@ -77,6 +79,7 @@ export function FollowUpMessageEditor({ body, subject, channel, onChange }: Prop
           Cancel
         </button>
         <button
+          data-r10n-followup-editdone
           onClick={commit}
           className="text-xs font-medium text-primary hover:text-primary/80 transition-colors"
         >

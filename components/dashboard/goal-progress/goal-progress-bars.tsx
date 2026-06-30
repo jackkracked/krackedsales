@@ -28,6 +28,14 @@ function barColor(current: number, target: number): string {
   return "bg-rose-400";
 }
 
+function goalState(current: number, target: number): "none" | "ahead" | "mid" | "behind" {
+  if (target <= 0) return "none";
+  const pct = current / target;
+  if (pct >= 1) return "ahead";
+  if (pct >= 0.6) return "mid";
+  return "behind";
+}
+
 function ProgressBar({ goal }: { goal: GoalBar }) {
   const pct = goal.target > 0 ? Math.min((goal.current / goal.target) * 100, 100) : 0;
   const noTarget = goal.target <= 0;
@@ -35,7 +43,7 @@ function ProgressBar({ goal }: { goal: GoalBar }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between">
-        <span className="text-[11px] font-medium text-muted-foreground">
+        <span data-r10n-goal-label className="text-[11px] font-medium text-muted-foreground">
           {goal.label}
         </span>
         {noTarget ? (
@@ -53,6 +61,8 @@ function ProgressBar({ goal }: { goal: GoalBar }) {
       {!noTarget && (
         <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
           <div
+            data-r10n-goal-bar
+            data-state={goalState(goal.current, goal.target)}
             className={cn(
               "h-full rounded-full transition-all duration-500",
               barColor(goal.current, goal.target)
@@ -80,9 +90,10 @@ export function GoalProgressBars() {
   if (!isLoading && goals.length === 0) return null;
 
   return (
-    <div className="bg-card border border-border rounded-[10px] overflow-hidden">
+    <div data-r10n-card className="bg-card border border-border rounded-[10px] overflow-hidden">
       <div className="px-5 py-3.5 border-b border-border">
         <h3
+          data-r10n-section-title
           className="text-sm font-semibold text-foreground"
           style={{ fontFamily: "var(--font-heading)" }}
         >

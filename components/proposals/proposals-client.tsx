@@ -69,6 +69,7 @@ function fmtAmount(amount: number, currency: string) {
 function TypeBadge({ type }: { type: string }) {
   return (
     <span
+      data-r10n-proposal-type
       className={cn(
         "inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-semibold uppercase tracking-wide",
         type === "management"
@@ -414,6 +415,7 @@ export function ProposalsClient() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <h1
+            data-r10n-proposal-title
             className="text-2xl font-bold text-foreground"
             style={{ fontFamily: "var(--font-heading)" }}
           >
@@ -440,10 +442,10 @@ export function ProposalsClient() {
             { label: "Lost", value: counts.lost },
           ].map((s, i) => (
             <div key={s.label} className={cn("flex items-center gap-3", i > 0 && "pl-4 border-l border-border ml-4")}>
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <span data-r10n-proposal-stat-label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                 {s.label}
               </span>
-              <span className="text-xl font-bold text-foreground tabular-nums" style={{ fontFamily: "var(--font-heading)" }}>
+              <span data-r10n-proposal-stat-value className="text-xl font-bold text-foreground tabular-nums" style={{ fontFamily: "var(--font-heading)" }}>
                 {s.value}
               </span>
             </div>
@@ -458,6 +460,8 @@ export function ProposalsClient() {
             <button
               key={f}
               onClick={() => setFilter(f)}
+              data-r10n-proposal-tab
+              data-active={filter === f}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors -mb-px border-b-2",
                 filter === f
@@ -467,7 +471,9 @@ export function ProposalsClient() {
             >
               {f}
               {draftCount > 0 && (
-                <span className={cn(
+                <span
+                  data-r10n-proposal-tab-count
+                  className={cn(
                   "text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none tabular-nums",
                   filter === f
                     ? "bg-primary text-white"
@@ -482,10 +488,10 @@ export function ProposalsClient() {
         </div>
 
         {/* Table */}
-        <div className="bg-card border border-border rounded-[10px] overflow-hidden">
+        <div data-r10n-proposal-table className="bg-card border border-border rounded-[10px] overflow-hidden">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border group">
+              <tr data-r10n-proposal-table-head className="border-b border-border group">
                 <th className="w-10 pl-4 pr-0 py-2.5">
                   {filtered.length > 0 && (
                     <SelectCheckbox
@@ -495,14 +501,14 @@ export function ProposalsClient() {
                     />
                   )}
                 </th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Client</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Rep</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Type</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sent</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Signed</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Paid</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Amount</th>
+                <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Client</th>
+                <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Rep</th>
+                <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Type</th>
+                <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
+                <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sent</th>
+                <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Signed</th>
+                <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Paid</th>
+                <th data-r10n-th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Amount</th>
                 <th className="px-4 py-2.5" />
               </tr>
             </thead>
@@ -513,7 +519,7 @@ export function ProposalsClient() {
                 <tr>
                   <td colSpan={10} className="px-4 py-16 text-center">
                     <FileText className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
-                    <p className="text-sm text-muted-foreground">
+                    <p data-r10n-proposal-empty-text className="text-sm text-muted-foreground">
                       {filter === "All"
                         ? allProposals.some((p) => p.status === "draft")
                           ? "No active proposals — check the Draft tab to finish and send."
@@ -523,6 +529,7 @@ export function ProposalsClient() {
                     {filter === "All" && !allProposals.some((p) => p.status === "draft") && (
                       <button
                         onClick={() => setShowCreate(true)}
+                        data-r10n-proposal-empty-cta
                         className="mt-3 text-sm font-medium text-primary hover:text-primary/80 transition-colors"
                       >
                         Create proposal
@@ -537,6 +544,8 @@ export function ProposalsClient() {
                   <tr
                     key={proposal.id}
                     onClick={() => { setSelected(proposal); setSelectedSendStep("idle"); }}
+                    data-r10n-proposal-table-row
+                    data-selected={isRowSelected}
                     className={cn(
                       "border-b border-border last:border-0 hover:bg-muted/30 transition-colors duration-100 cursor-pointer group",
                       isRowSelected && "bg-primary/[0.03]"
@@ -553,15 +562,15 @@ export function ProposalsClient() {
                       <div className="flex items-center gap-2.5">
                         <Avatar name={proposal.contactName} size={28} />
                         <div className="min-w-0">
-                          <p className="text-sm font-medium text-foreground truncate leading-tight">
+                          <p data-r10n-proposal-name className="text-sm font-medium text-foreground truncate leading-tight">
                             {proposal.contactName}
                           </p>
                           {proposal.status === "lost" && proposal.lostReason ? (
-                            <p className="text-xs text-red-500/70 truncate leading-tight" title={proposal.lostReason}>
+                            <p data-r10n-proposal-sub data-tone="lost" className="text-xs text-red-500/70 truncate leading-tight" title={proposal.lostReason}>
                               Lost: {proposal.lostReason}
                             </p>
                           ) : proposal.contactEmail ? (
-                            <p className="text-xs text-muted-foreground truncate leading-tight">
+                            <p data-r10n-proposal-sub className="text-xs text-muted-foreground truncate leading-tight">
                               {proposal.contactEmail}
                             </p>
                           ) : null}
@@ -586,16 +595,16 @@ export function ProposalsClient() {
                     <td className="px-4 py-3">
                       <ProposalStatusBadge status={proposal.status} />
                     </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground tabular-nums">
+                    <td data-r10n-proposal-cell-date className="px-4 py-3 text-sm text-muted-foreground tabular-nums">
                       {fmtDate(proposal.sentAt, tz) ?? <span className="text-muted-foreground/40">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground tabular-nums">
+                    <td data-r10n-proposal-cell-date className="px-4 py-3 text-sm text-muted-foreground tabular-nums">
                       {fmtDate(proposal.signedAt, tz) ?? <span className="text-muted-foreground/40">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground tabular-nums">
+                    <td data-r10n-proposal-cell-date className="px-4 py-3 text-sm text-muted-foreground tabular-nums">
                       {fmtDate(proposal.paidAt, tz) ?? <span className="text-muted-foreground/40">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums font-medium text-foreground/80">
+                    <td data-r10n-proposal-amount className="px-4 py-3 text-right tabular-nums font-medium text-foreground/80">
                       {fmtAmount(proposal.totalAmount, proposal.currency)}
                     </td>
                     <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
@@ -604,6 +613,7 @@ export function ProposalsClient() {
                           <button
                             title="Send proposal"
                             onClick={(e) => { e.stopPropagation(); openWithSend(proposal); }}
+                            data-r10n-proposal-action="send"
                             className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/8 transition-colors"
                           >
                             <Send className="w-3.5 h-3.5" />
@@ -629,6 +639,7 @@ export function ProposalsClient() {
                           <button
                             title="Mark as lost"
                             onClick={(e) => { e.stopPropagation(); setLostTarget(proposal); }}
+                            data-r10n-proposal-action="lost"
                             className="p-1.5 rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
                           >
                             <Ban className="w-3.5 h-3.5" />
@@ -676,8 +687,8 @@ export function ProposalsClient() {
 
       {/* Floating bulk action bar */}
       {bulkSelected.size > 0 && (
-        <div className="fixed bottom-6 z-50 animate-slide-up-fade flex items-center gap-2.5 bg-card border border-border rounded-[10px] px-4 py-2.5 shadow-xl" style={{ left: "calc(50% + 6rem)", transform: "translateX(-50%)" }}>
-          <span className="text-sm font-semibold text-foreground tabular-nums whitespace-nowrap">
+        <div data-r10n-proposal-bulkbar className="fixed bottom-6 z-50 animate-slide-up-fade flex items-center gap-2.5 bg-card border border-border rounded-[10px] px-4 py-2.5 shadow-xl" style={{ left: "calc(50% + 6rem)", transform: "translateX(-50%)" }}>
+          <span data-r10n-proposal-bulkbar-count className="text-sm font-semibold text-foreground tabular-nums whitespace-nowrap">
             {bulkSelected.size} selected
           </span>
           <div className="w-px h-5 bg-border" />
@@ -699,6 +710,7 @@ export function ProposalsClient() {
               </button>
               <button
                 onClick={() => setShowDeleteConfirm(true)}
+                data-r10n-proposal-bulk-delete
                 className="flex items-center gap-1.5 border border-red-200 bg-red-50 rounded-[7px] px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 transition-colors"
               >
                 <Trash2 className="w-3.5 h-3.5" />

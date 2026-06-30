@@ -362,16 +362,18 @@ export function TasksClient() {
           <div className="flex items-start justify-between mb-5">
             <div>
               <h1
+                data-r10n-task-title
                 className="text-xl font-bold text-foreground tracking-tight"
                 style={{ fontFamily: "var(--font-heading)" }}
               >
                 Tasks
               </h1>
-              <p className="text-sm text-muted-foreground mt-0.5">
+              <p data-r10n-task-subtitle className="text-sm text-muted-foreground mt-0.5">
                 Your command center for everything that needs doing
               </p>
             </div>
             <button
+              data-r10n-task-newbtn
               onClick={() => setShowCreate(true)}
               className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-primary text-primary-foreground rounded-[8px] hover:bg-primary/90 transition-colors shadow-sm"
             >
@@ -383,6 +385,7 @@ export function TasksClient() {
           {/* Stats bar */}
           <div className="flex gap-3 mb-5">
             <StatCard
+              statKey="overdue"
               label="Overdue"
               value={stats.overdue}
               color="text-rose-600"
@@ -390,6 +393,7 @@ export function TasksClient() {
               onClick={() => setFilter("overdue")}
             />
             <StatCard
+              statKey="today"
               label="Due Today"
               value={stats.today}
               color="text-amber-600"
@@ -397,6 +401,7 @@ export function TasksClient() {
               onClick={() => setFilter("today")}
             />
             <StatCard
+              statKey="thisWeek"
               label="This Week"
               value={stats.thisWeek}
               color="text-foreground"
@@ -404,6 +409,7 @@ export function TasksClient() {
               onClick={() => setFilter("all")}
             />
             <StatCard
+              statKey="completed"
               label="Completed"
               value={stats.completedThisWeek}
               color="text-emerald-600"
@@ -413,11 +419,13 @@ export function TasksClient() {
           </div>
 
           {/* Filter tabs + View toggle */}
-          <div className="flex items-center justify-between gap-4 pb-4 border-b border-border">
+          <div data-r10n-task-filterbar className="flex items-center justify-between gap-4 pb-4 border-b border-border">
             <div className="flex items-center gap-1">
               {FILTERS.map((f) => (
                 <button
                   key={f.key}
+                  data-r10n-task-filter
+                  data-active={filter === f.key}
                   onClick={() => { setFilter(f.key); clearSelection(); }}
                   className={cn(
                     "px-3 py-1.5 text-xs font-medium rounded-[7px] transition-colors",
@@ -431,8 +439,10 @@ export function TasksClient() {
               ))}
 
               {/* Team toggle */}
-              <div className="ml-3 pl-3 border-l border-border">
+              <div data-r10n-task-teamsep className="ml-3 pl-3 border-l border-border">
                 <button
+                  data-r10n-task-team
+                  data-active={teamView}
                   onClick={() => { setTeamView(!teamView); clearSelection(); }}
                   className={cn(
                     "flex items-center gap-1.5 border rounded-[7px] px-3 py-1 text-xs font-medium transition-colors",
@@ -448,7 +458,7 @@ export function TasksClient() {
             </div>
 
             {/* View toggle */}
-            <div className="flex items-center border border-border rounded-[8px] overflow-hidden">
+            <div data-r10n-task-viewtoggle className="flex items-center border border-border rounded-[8px] overflow-hidden">
               {([
                 { key: "tiles" as ViewMode, icon: LayoutGrid },
                 { key: "list" as ViewMode, icon: List },
@@ -456,6 +466,8 @@ export function TasksClient() {
               ]).map(({ key, icon: Icon }) => (
                 <button
                   key={key}
+                  data-r10n-task-viewbtn
+                  data-active={view === key}
                   onClick={() => setView(key)}
                   className={cn(
                     "p-1.5 transition-colors",
@@ -513,12 +525,13 @@ export function TasksClient() {
 
         {/* Floating bulk action bar */}
         {selectedIds.size > 0 && (
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-card border border-border shadow-xl rounded-[10px] px-4 py-2.5">
-            <span className="text-xs font-semibold text-foreground tabular-nums">
+          <div data-r10n-selectionbar className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-card border border-border shadow-xl rounded-[10px] px-4 py-2.5">
+            <span data-r10n-selectionbar-count className="text-xs font-semibold text-foreground tabular-nums">
               {selectedIds.size} selected
             </span>
             <div className="w-px h-4 bg-border" />
             <button
+              data-r10n-task-bulk-complete
               onClick={bulkComplete}
               disabled={bulkActioning}
               className="flex items-center gap-1.5 text-xs font-medium text-emerald-600 hover:text-emerald-700 transition-colors disabled:opacity-50"
@@ -527,6 +540,7 @@ export function TasksClient() {
               Complete
             </button>
             <button
+              data-r10n-task-bulk-delete
               onClick={bulkDelete}
               disabled={bulkActioning}
               className="flex items-center gap-1.5 text-xs font-medium text-rose-500 hover:text-rose-600 transition-colors disabled:opacity-50"
@@ -536,6 +550,7 @@ export function TasksClient() {
             </button>
             <div className="w-px h-4 bg-border" />
             <button
+              data-r10n-task-bulk-clear
               onClick={clearSelection}
               className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             >
@@ -578,13 +593,14 @@ export function TasksClient() {
 
 // ─── Stat Card ───────────────────────────────────────────────────────────────
 
-function StatCard({ label, value, color, bg, onClick }: { label: string; value: number; color: string; bg: string; onClick?: () => void }) {
+function StatCard({ statKey, label, value, color, bg, onClick }: { statKey: string; label: string; value: number; color: string; bg: string; onClick?: () => void }) {
   return (
-    <div onClick={onClick} className={cn("flex-1 rounded-[10px] border p-4 transition-all", bg, onClick && "cursor-pointer hover:shadow-sm hover:scale-[1.02]")}>
-      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+    <div data-r10n-task-stat={statKey} onClick={onClick} className={cn("flex-1 rounded-[10px] border p-4 transition-all", bg, onClick && "cursor-pointer hover:shadow-sm hover:scale-[1.02]")}>
+      <p data-r10n-task-stat-label className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
         {label}
       </p>
       <p
+        data-r10n-task-stat-value
         className={cn("text-2xl font-bold tabular-nums mt-1", color)}
         style={{ fontFamily: "var(--font-heading)" }}
       >
@@ -608,9 +624,9 @@ function EmptyState({ filter }: { filter: FilterTab }) {
   const Icon = m.icon;
   return (
     <div className="flex flex-col items-center justify-center py-20 text-center">
-      <Icon className="w-8 h-8 text-muted-foreground/20 mb-3" />
-      <p className="text-sm font-semibold text-foreground">{m.title}</p>
-      <p className="text-xs text-muted-foreground mt-1">{m.sub}</p>
+      <Icon data-r10n-task-empty-glyph className="w-8 h-8 text-muted-foreground/20 mb-3" />
+      <p data-r10n-task-empty-title className="text-sm font-semibold text-foreground">{m.title}</p>
+      <p data-r10n-task-empty-sub className="text-xs text-muted-foreground mt-1">{m.sub}</p>
     </div>
   );
 }
@@ -635,9 +651,14 @@ function TaskCard({
   const tz = useUserTimezone();
   const overdue = isOverdue(task, tz);
   const today = isDueToday(task, tz);
+  const urgency = overdue ? "overdue" : today ? "today" : "none";
+  const dueStatus = overdue ? "overdue" : today ? "today" : "none";
 
   return (
     <div
+      data-r10n-task-card
+      data-urgency={urgency}
+      data-selected={selected}
       onClick={() => onClick(task)}
       className={cn(
         "bg-card border rounded-[10px] p-4 cursor-pointer transition-all group relative",
@@ -651,11 +672,11 @@ function TaskCard({
       {/* Top row: priority + due date */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-1.5">
-          <span className={cn("w-2 h-2 rounded-full shrink-0", PRIORITY_DOT[task.priority] ?? PRIORITY_DOT.medium)} />
-          <span className="text-[10px] font-medium text-muted-foreground capitalize">{task.priority}</span>
+          <span data-r10n-task-prio-dot data-status={task.priority} className={cn("w-2 h-2 rounded-full shrink-0", PRIORITY_DOT[task.priority] ?? PRIORITY_DOT.medium)} />
+          <span data-r10n-task-prio-label className="text-[10px] font-medium text-muted-foreground capitalize">{task.priority}</span>
         </div>
         {task.dueDate && (
-          <span className={cn("text-[10px] font-semibold uppercase tracking-wide", urgencyColor(task.dueDate, task.completed, tz))}>
+          <span data-r10n-task-due data-status={dueStatus} className={cn("text-[10px] font-semibold uppercase tracking-wide", urgencyColor(task.dueDate, task.completed, tz))}>
             {dueDateLabel(task.dueDate, tz)}
           </span>
         )}
@@ -669,6 +690,8 @@ function TaskCard({
           selected ? "w-6 opacity-100" : "w-0 opacity-0 group-hover:w-6 group-hover:opacity-100"
         )}>
           <button
+            data-r10n-task-checkbox
+            data-checked={selected}
             onClick={(e) => { e.stopPropagation(); onToggleSelect(task.id); }}
             className={cn(
               "w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors",
@@ -681,6 +704,7 @@ function TaskCard({
         {/* Complete circle */}
         {!task.completed && (
           <button
+            data-r10n-task-complete
             onClick={(e) => { e.stopPropagation(); onRequestComplete(task); }}
             className="w-[18px] h-[18px] rounded-full border-2 border-border/60 hover:border-emerald-500 hover:bg-emerald-50 flex items-center justify-center transition-colors shrink-0 mr-2 mt-0.5"
             title="Mark complete"
@@ -688,14 +712,14 @@ function TaskCard({
             <Check className="w-2 h-2 text-transparent group-hover:text-emerald-500/50" />
           </button>
         )}
-        <p className="text-sm font-semibold text-foreground leading-tight line-clamp-2">
+        <p data-r10n-task-card-title className="text-sm font-semibold text-foreground leading-tight line-clamp-2">
           {task.title}
         </p>
       </div>
 
       {/* Contact */}
       {task.contactName && (
-        <div className="flex items-center gap-1 mb-1">
+        <div data-r10n-task-card-contact className="flex items-center gap-1 mb-1">
           <User className="w-3 h-3 text-muted-foreground/50" />
           <span className="text-xs text-muted-foreground truncate">{task.contactName}</span>
         </div>
@@ -703,7 +727,7 @@ function TaskCard({
 
       {/* Notes */}
       {task.notes && (
-        <p className="text-xs text-muted-foreground/70 line-clamp-1 italic mb-2">
+        <p data-r10n-task-card-notes className="text-xs text-muted-foreground/70 line-clamp-1 italic mb-2">
           {task.notes}
         </p>
       )}
@@ -714,7 +738,7 @@ function TaskCard({
           <Avatar name={task.userName} size={20} variant="rep" />
         )}
         {task.opportunityId && (
-          <span className="text-[10px] text-muted-foreground/50 flex items-center gap-1">
+          <span data-r10n-task-card-meta className="text-[10px] text-muted-foreground/50 flex items-center gap-1">
             <CalendarClock className="w-3 h-3" />
             Linked to opportunity
           </span>
@@ -756,17 +780,17 @@ function TilesView({
               className="flex items-center gap-2 mb-3 group/header"
             >
               {collapsed ? (
-                <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+                <ChevronRight data-r10n-task-groupchevron className="w-3.5 h-3.5 text-muted-foreground" />
               ) : (
-                <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                <ChevronDown data-r10n-task-groupchevron className="w-3.5 h-3.5 text-muted-foreground" />
               )}
-              <span className={cn(
+              <span data-r10n-task-grouphead data-group={group.key} className={cn(
                 "text-xs font-semibold uppercase tracking-wide",
                 group.color ?? "text-muted-foreground"
               )}>
                 {group.label}
               </span>
-              <span className="bg-muted px-2 py-0.5 rounded-full text-xs text-muted-foreground tabular-nums">
+              <span data-r10n-task-groupcount className="bg-muted px-2 py-0.5 rounded-full text-xs text-muted-foreground tabular-nums">
                 {group.tasks.length}
               </span>
             </button>
@@ -811,23 +835,28 @@ function ListView({
 }) {
   const tz = useUserTimezone();
   return (
-    <div className="bg-card border border-border rounded-[10px] overflow-hidden">
+    <div data-r10n-task-table className="bg-card border border-border rounded-[10px] overflow-hidden">
       {/* Table header */}
-      <div className="grid grid-cols-[1fr_160px_80px_120px_100px_100px] items-center px-4 py-2 border-b border-border bg-muted/30 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-        <span>Title</span>
-        <span>Contact</span>
-        <span>Priority</span>
-        <span>Due Date</span>
-        {teamView && <span>Assignee</span>}
-        <span>Created</span>
+      <div data-r10n-task-table-head className="grid grid-cols-[1fr_160px_80px_120px_100px_100px] items-center px-4 py-2 border-b border-border bg-muted/30 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        <span data-r10n-th>Title</span>
+        <span data-r10n-th>Contact</span>
+        <span data-r10n-th>Priority</span>
+        <span data-r10n-th>Due Date</span>
+        {teamView && <span data-r10n-th>Assignee</span>}
+        <span data-r10n-th>Created</span>
       </div>
 
       {/* Rows */}
       {tasks.map((task) => {
         const selected = selectedIds.has(task.id);
+        const rowOverdue = isOverdue(task, tz);
+        const rowToday = isDueToday(task, tz);
+        const dueStatus = rowOverdue ? "overdue" : rowToday ? "today" : "none";
         return (
           <div
             key={task.id}
+            data-r10n-task-row
+            data-selected={selected}
             onClick={() => onClickTask(task)}
             className={cn(
               "grid grid-cols-[1fr_160px_80px_120px_100px_100px] items-center px-4 py-2 border-b border-border/50 cursor-pointer transition-colors hover:bg-muted/20 group",
@@ -842,6 +871,8 @@ function ListView({
                 selected ? "w-6 opacity-100" : "w-0 opacity-0 group-hover:w-6 group-hover:opacity-100"
               )}>
                 <button
+                  data-r10n-task-checkbox
+                  data-checked={selected}
                   onClick={(e) => { e.stopPropagation(); onToggleSelect(task.id); }}
                   className={cn(
                     "w-4 h-4 rounded border flex items-center justify-center transition-colors shrink-0",
@@ -853,42 +884,43 @@ function ListView({
               </div>
               {!task.completed && (
                 <button
+                  data-r10n-task-complete
                   onClick={(e) => { e.stopPropagation(); onRequestComplete(task); }}
                   className="w-4 h-4 rounded-full border border-border hover:border-emerald-500 flex items-center justify-center transition-colors shrink-0 mr-2"
                 >
                   <Check className="w-2 h-2 text-transparent group-hover:text-emerald-400" />
                 </button>
               )}
-              <span className={cn("text-sm font-medium truncate", task.completed && "line-through text-muted-foreground")}>
+              <span data-r10n-task-row-title data-status={task.completed ? "done" : "open"} className={cn("text-sm font-medium truncate", task.completed && "line-through text-muted-foreground")}>
                 {task.title}
               </span>
             </div>
 
             {/* Contact */}
-            <span className="text-xs text-muted-foreground truncate">
+            <span data-r10n-task-row-cell className="text-xs text-muted-foreground truncate">
               {task.contactName ?? "—"}
             </span>
 
             {/* Priority */}
             <div className="flex items-center gap-1.5">
-              <span className={cn("w-2 h-2 rounded-full", PRIORITY_DOT[task.priority] ?? PRIORITY_DOT.medium)} />
-              <span className="text-xs text-muted-foreground capitalize">{task.priority}</span>
+              <span data-r10n-task-prio-dot data-status={task.priority} className={cn("w-2 h-2 rounded-full", PRIORITY_DOT[task.priority] ?? PRIORITY_DOT.medium)} />
+              <span data-r10n-task-prio-label className="text-xs text-muted-foreground capitalize">{task.priority}</span>
             </div>
 
             {/* Due date */}
-            <span className={cn("text-xs font-medium", urgencyColor(task.dueDate, task.completed, tz))}>
+            <span data-r10n-task-due data-status={dueStatus} className={cn("text-xs font-medium", urgencyColor(task.dueDate, task.completed, tz))}>
               {task.dueDate ? dueDateLabel(task.dueDate, tz) : "—"}
             </span>
 
             {/* Assignee */}
             {teamView && (
-              <span className="text-xs text-muted-foreground truncate">
+              <span data-r10n-task-row-cell className="text-xs text-muted-foreground truncate">
                 {task.userName ?? "—"}
               </span>
             )}
 
             {/* Created */}
-            <span className="text-xs text-muted-foreground">
+            <span data-r10n-task-row-cell className="text-xs text-muted-foreground">
               {format(toZonedDate(new Date(task.createdAt), tz), "MMM d")}
             </span>
           </div>
@@ -940,10 +972,10 @@ function BoardView({
         <div key={col.key} className="min-w-[280px] flex-1">
           {/* Column header */}
           <div className="flex items-center gap-2 mb-3">
-            <span className={cn("text-xs font-semibold uppercase tracking-wide", col.color ?? "text-muted-foreground")}>
+            <span data-r10n-task-grouphead data-group={col.key} className={cn("text-xs font-semibold uppercase tracking-wide", col.color ?? "text-muted-foreground")}>
               {col.label}
             </span>
-            <span className="bg-muted px-2 py-0.5 rounded-full text-xs text-muted-foreground tabular-nums">
+            <span data-r10n-task-groupcount className="bg-muted px-2 py-0.5 rounded-full text-xs text-muted-foreground tabular-nums">
               {col.tasks.length}
             </span>
           </div>
@@ -962,8 +994,8 @@ function BoardView({
               />
             ))}
             {col.tasks.length === 0 && (
-              <div className="border border-dashed border-border/60 rounded-[10px] py-8 text-center">
-                <p className="text-xs text-muted-foreground/40">No tasks</p>
+              <div data-r10n-task-board-empty className="border border-dashed border-border/60 rounded-[10px] py-8 text-center">
+                <p data-r10n-task-board-empty-text className="text-xs text-muted-foreground/40">No tasks</p>
               </div>
             )}
           </div>

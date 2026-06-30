@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { desc, isNotNull } from "drizzle-orm";
+import { desc, isNotNull, and, gt, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { commentLeads, brandCategories, demoGhlLinks, proposals, localContacts, audits } from "@/lib/db/schema";
+import { socialLeads, brandCategories, demoGhlLinks, proposals, localContacts, audits, followupSends } from "@/lib/db/schema";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { fetchAllOpportunities } from "@/lib/ghl/paginate";
 import { daysAgo } from "@/lib/utils/date";
@@ -108,6 +108,19 @@ function applyRule(c: UnifiedContact, rule: FilterRule): boolean {
       if (operator === "is_none_of") return !match;
       return true;
     }
+    case "stageName": {
+      const match = c.stage != null && values.includes(c.stage);
+      if (operator === "is_any_of") return match;
+      if (operator === "is_none_of") return !match;
+      return true;
+    }
+    case "inSequence": {
+      const inSeq = c.autoSequence || !!c.followupScheduledAt;
+      const want = values[0] !== "false";
+      if (operator === "is_any_of") return inSeq === want;
+      if (operator === "is_none_of") return inSeq !== want;
+      return true;
+    }
     case "urgency": {
       // single bucket value: today | 3to5 | 7plus | "<number>" (custom: at least N days)
       const v = values[0] ?? "";
@@ -167,17 +180,23 @@ function channelLabel(type: string): string {
   return "Unknown";
 }
 
-// ─── Conversations cache (3-min TTL) — contactId → last channel ───────────────
+// ─── Conversations cache (3-min TTL) — contactId → channel + automation signal ─
+// We also read `lastOutboundMessageAction` ("automated" = a GHL workflow/sequence
+// sent the last outbound, vs "manual" = a human), the only readable GHL signal for
+// "this contact is being worked by an automation". Costs zero extra calls — we
+// already page every conversation here.
 
-let _convMap: Map<string, string> | null = null;
+interface ConvInfo { channel: string; autoAction: string | null; lastMessageAt: number | null }
+
+let _convMap: Map<string, ConvInfo> | null = null;
 let _convAt = 0;
 const CONV_TTL = 3 * 60 * 1000;
 
-async function getConversationChannelMap(): Promise<Map<string, string>> {
+async function getConversationChannelMap(): Promise<Map<string, ConvInfo>> {
   const now = Date.now();
   if (_convMap && now - _convAt < CONV_TTL) return _convMap;
 
-  const map = new Map<string, string>();
+  const map = new Map<string, ConvInfo>();
   try {
     const locId = locationId();
     const MAX_ROUNDS = 20;
@@ -186,7 +205,7 @@ async function getConversationChannelMap(): Promise<Map<string, string>> {
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const cursor = lastId ? `&lastId=${lastId}` : "";
       const data = await ghl.get<{
-        conversations: Array<{ id: string; contactId: string; type: string }>;
+        conversations: Array<{ id: string; contactId: string; type: string; lastOutboundMessageAction?: string; lastMessageDate?: number }>;
         meta?: { total?: number; currentPage?: number; nextPage?: boolean };
       }>(
         `/conversations/search?locationId=${locId}&limit=100&sortBy=last_message_date&sortOrder=desc${cursor}`
@@ -195,7 +214,11 @@ async function getConversationChannelMap(): Promise<Map<string, string>> {
       for (const conv of batch) {
         // First entry per contactId wins (sorted by most recent)
         if (conv.contactId && !map.has(conv.contactId)) {
-          map.set(conv.contactId, channelLabel(conv.type ?? ""));
+          map.set(conv.contactId, {
+            channel: channelLabel(conv.type ?? ""),
+            autoAction: conv.lastOutboundMessageAction ?? null,
+            lastMessageAt: conv.lastMessageDate ? new Date(conv.lastMessageDate).getTime() : null,
+          });
         }
       }
       if (batch.length < 100) break;
@@ -282,16 +305,29 @@ export async function GET(req: NextRequest) {
   try {
     const database = db();
 
-    const [allOpps, clRows, catRows, demoRows, convMap, proposalRows, dndRows, auditRows] = await Promise.all([
+    const [allOpps, clRows, catRows, demoRows, convMap, proposalRows, dndRows, auditRows, followupRows] = await Promise.all([
       getAllOpportunities(),
-      database.select().from(commentLeads).orderBy(desc(commentLeads.createdAt)),
+      database.select().from(socialLeads).orderBy(desc(socialLeads.createdAt)),
       database.select().from(brandCategories),
       database.select({ ghlContactId: demoGhlLinks.ghlContactId }).from(demoGhlLinks),
       getConversationChannelMap(),
       database.select({ ghlContactId: proposals.ghlContactId, status: proposals.status }).from(proposals).where(isNotNull(proposals.ghlContactId)),
       database.select({ id: localContacts.id, dnd: localContacts.dnd }).from(localContacts),
       database.select({ ghlContactId: audits.ghlContactId, status: audits.status }).from(audits).where(isNotNull(audits.ghlContactId)),
+      // Our own follow-ups queued for the future (scheduled, not yet delivered)
+      database.select({ ghlContactId: followupSends.ghlContactId, scheduledFor: followupSends.scheduledFor })
+        .from(followupSends)
+        .where(and(isNotNull(followupSends.scheduledFor), gt(followupSends.scheduledFor, new Date()), isNull(followupSends.sentAtActual))),
     ]);
+
+    // Earliest queued follow-up per contact (our system) — for the "Follow-up" pill.
+    const followupMap = new Map<string, Date>();
+    for (const f of followupRows) {
+      if (!f.ghlContactId || !f.scheduledFor) continue;
+      const cur = followupMap.get(f.ghlContactId);
+      if (!cur || f.scheduledFor < cur) followupMap.set(f.ghlContactId, f.scheduledFor);
+    }
+    const AUTO_WINDOW_MS = 14 * 24 * 60 * 60 * 1000; // "actively in a sequence" recency
 
     const catMap = new Map(catRows.map((r) => [r.domain, r.category]));
     const demoContactIds = new Set(demoRows.map((r) => r.ghlContactId).filter(Boolean) as string[]);
@@ -317,6 +353,15 @@ export async function GET(req: NextRequest) {
 
     // DND map
     const dndMap = new Map(dndRows.filter((r) => r.dnd).map((r) => [r.id, true]));
+
+    // A comment lead becomes a real pipeline lead only when a demo is submitted (which
+    // creates a GHL contact + opportunity and sets ghl_contact_id). Carry its real platform
+    // (instagram/facebook/tiktok) onto that GHL entry so source attribution survives, and
+    // dedup the comment-lead row out (below) so it isn't double-listed.
+    const metaPlatformByGhlId = new Map<string, string>();
+    for (const cl of clRows) {
+      if (cl.ghlContactId && cl.platform) metaPlatformByGhlId.set(cl.ghlContactId, cl.platform);
+    }
 
     // ─── GHL contacts: one UnifiedContact per unique contact from opportunities ─
     const seenContactIds = new Set<string>();
@@ -348,6 +393,13 @@ export async function GET(req: NextRequest) {
       const propStatus = proposalMap.get(c.id) ?? null;
       const auditStatus = auditMap.get(c.id) ?? null;
 
+      // Sequence signal: GHL automation (last outbound automated + recent) and/or
+      // our own queued follow-up.
+      const conv = convMap.get(c.id);
+      const autoAt = conv?.autoAction === "automated" ? conv.lastMessageAt : null;
+      const inAutoSequence = autoAt != null && Date.now() - autoAt < AUTO_WINDOW_MS;
+      const followupAt = followupMap.get(c.id) ?? null;
+
       ghlUnified.push({
         uid: `ghl_${c.id}`,
         source: "ghl",
@@ -355,7 +407,7 @@ export async function GET(req: NextRequest) {
         email: c.email ?? null,
         phone: c.phone ?? null,
         website: c.website ?? null,
-        platform: "lead_form",
+        platform: (metaPlatformByGhlId.get(c.id) as UnifiedContact["platform"]) ?? "lead_form",
         ghlContactId: c.id,
         opportunityId: opp.id,
         stage: opp.pipelineStageId_name,
@@ -373,7 +425,7 @@ export async function GET(req: NextRequest) {
         hasAudit: !!auditStatus,
         auditStatus,
         awaitingReply: false,
-        lastChannel: convMap.get(c.id) ?? null,
+        lastChannel: conv?.channel ?? null,
         daysSinceLastTouch: daysSince,
         daysInCurrentStage: daysInStage,
         lastActivityAt,
@@ -382,11 +434,21 @@ export async function GET(req: NextRequest) {
         dnd: dndMap.has(c.id),
         responseStatus,
         reachableChannels: channels,
+        autoSequence: inAutoSequence,
+        autoSequenceAt: autoAt != null ? new Date(autoAt).toISOString() : null,
+        followupScheduledAt: followupAt ? followupAt.toISOString() : null,
       });
     }
 
     // ─── Comment leads → UnifiedContact ──────────────────────────────────────
-    const clUnified: UnifiedContact[] = clRows.map((cl) => {
+    // A comment lead is a pipeline lead ONLY once a demo has been submitted (demoStartedAt
+    // set). Un-demoed trigger-word comments stay in the Meta inbox but are NOT counted as
+    // leads here. Promoted leads (ghlContactId set) are represented by their GHL entry
+    // above, so dedup them out — leaving only the rare demo-started-but-GHL-promotion-failed
+    // rows, which still surface with their real platform.
+    const clUnified: UnifiedContact[] = clRows
+      .filter((cl) => cl.demoStartedAt != null && !cl.ghlContactId)
+      .map((cl) => {
       const createdAt = cl.createdAt.toISOString();
       const lastActivityAt = cl.contactedAt?.toISOString() ?? createdAt;
       const domain = (cl.website ?? "").replace(/^https?:\/\/(www\.)?/, "").split("/")[0];
@@ -431,6 +493,9 @@ export async function GET(req: NextRequest) {
         dnd: false,
         responseStatus: !cl.contactedAt ? "awaiting_reply" : clDaysSince >= 7 ? "no_response" : "replied",
         reachableChannels: clChannels,
+        autoSequence: false,
+        autoSequenceAt: null,
+        followupScheduledAt: null,
       };
     });
 

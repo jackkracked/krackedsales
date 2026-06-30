@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { commentLeads, proposals, callDispositions } from "@/lib/db/schema";
+import { socialLeads, proposals, callDispositions, activityEvents } from "@/lib/db/schema";
 import { outcomeMeta } from "@/lib/activity/outcomes";
 import { ghl } from "@/lib/ghl/client";
 import type { TimelineEvent } from "@/lib/contacts/types";
@@ -114,6 +114,7 @@ export async function GET(
 ) {
   const { id } = await params;
   const createdAt = req.nextUrl.searchParams.get("createdAt") ?? new Date().toISOString();
+  const opportunityId = req.nextUrl.searchParams.get("opportunityId");
 
   try {
     let events: TimelineEvent[] = [];
@@ -193,13 +194,47 @@ export async function GET(
           });
         }
       } catch { /* ignore — dispositions are optional context */ }
+
+      // Inject pipeline stage-change events (with the reason) from the activity log,
+      // keyed by this contact's opportunity. This is how a manual "Move stage" shows
+      // in the timeline as "Stage: New Lead → Demo Sent" with the reason beneath.
+      if (opportunityId) {
+        try {
+          const moves = await db()
+            .select({
+              id: activityEvents.id,
+              metadata: activityEvents.metadata,
+              createdAt: activityEvents.createdAt,
+            })
+            .from(activityEvents)
+            .where(and(
+              eq(activityEvents.entityId, opportunityId),
+              eq(activityEvents.action, "opportunity.stage_changed"),
+            ))
+            .orderBy(desc(activityEvents.createdAt))
+            .limit(50);
+
+          for (const m of moves) {
+            const meta = (m.metadata ?? {}) as Record<string, unknown>;
+            const from = meta.from_stage ? String(meta.from_stage) : null;
+            const to = meta.to_stage ? String(meta.to_stage) : "a new stage";
+            events.push({
+              id: `stage_${m.id}`,
+              type: "stage_change",
+              title: from ? `Stage: ${from} → ${to}` : `Stage: moved to ${to}`,
+              body: meta.reason ? String(meta.reason) : undefined,
+              occurredAt: m.createdAt.toISOString(),
+            });
+          }
+        } catch { /* ignore — stage history is optional context */ }
+      }
     } else if (id.startsWith("cl_")) {
       const clId = id.slice(3);
       const database = db();
       const [cl] = await database
         .select()
-        .from(commentLeads)
-        .where(eq(commentLeads.id, clId))
+        .from(socialLeads)
+        .where(eq(socialLeads.id, clId))
         .limit(1);
 
       if (cl) {

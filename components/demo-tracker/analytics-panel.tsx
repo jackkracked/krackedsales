@@ -13,10 +13,16 @@ import { toZonedDate } from "@/lib/utils/timezone";
 
 type Period = "today" | "week" | "month" | "quarter";
 
+// Each colour resolves to an r10n ramp token when [data-theme="r10n"] sets it on
+// a wrapping element, and falls back to the original hex in the default theme so
+// the stock surface is byte-for-byte unchanged.
+//   IN_PROGRESS     → primary work   → obsidian  var(--chart-1)
+//   DEMO_SENT       → success/highlight → Signal lime var(--r10n-signal)
+//   WAITING_TO_SEND → comparison/mid  → steel     var(--chart-3)
 const BUCKET_COLORS = {
-  IN_PROGRESS: "#0F3A5C",
-  WAITING_TO_SEND: "#D4A574",
-  DEMO_SENT: "#2D5E3F",
+  IN_PROGRESS: "var(--r10n-demo-bucket-in-progress, #0F3A5C)",
+  WAITING_TO_SEND: "var(--r10n-demo-bucket-waiting, #D4A574)",
+  DEMO_SENT: "var(--r10n-demo-bucket-sent, #2D5E3F)",
 };
 
 function getPeriodStart(period: Period): Date {
@@ -104,17 +110,19 @@ export function AnalyticsPanel({ tasks }: AnalyticsPanelProps) {
   ];
 
   return (
-    <div className="bg-card border border-border rounded-[10px] p-4 flex flex-col gap-4">
+    <div className="bg-card border border-border rounded-[10px] p-4 flex flex-col gap-4" data-r10n-demo-analytics>
       {/* Header + period toggle */}
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>
+        <h3 className="text-sm font-semibold text-foreground" style={{ fontFamily: "var(--font-heading)" }} data-r10n-demo-section-title>
           Analytics
         </h3>
-        <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
+        <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5" data-r10n-demo-periods>
           {PERIODS.map(({ key, label }) => (
             <button
               key={key}
               onClick={() => setPeriod(key)}
+              data-r10n-demo-period
+              data-r10n-demo-active={period === key ? "true" : "false"}
               className={cn(
                 "px-2.5 py-1 text-xs font-medium rounded-md transition-colors",
                 period === key
@@ -131,23 +139,23 @@ export function AnalyticsPanel({ tasks }: AnalyticsPanelProps) {
       {/* Key stats */}
       <div className="flex items-center gap-3">
         <div>
-          <p className="text-2xl font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>
+          <p className="text-2xl font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }} data-r10n-demo-stat-value>
             {stats.inPeriod}
           </p>
-          <p className="text-xs text-muted-foreground">demos requested</p>
+          <p className="text-xs text-muted-foreground" data-r10n-demo-stat-label>demos requested</p>
         </div>
-        <div className="h-8 w-px bg-border" />
+        <div className="h-8 w-px bg-border" data-r10n-demo-stat-divider />
         <div>
-          <p className="text-2xl font-bold text-gold" style={{ fontFamily: "var(--font-heading)" }}>
+          <p className="text-2xl font-bold text-gold" style={{ fontFamily: "var(--font-heading)" }} data-r10n-demo-stat-value data-r10n-demo-highlight="true">
             {stats.avgTurnaround}d
           </p>
-          <p className="text-xs text-muted-foreground">avg turnaround</p>
+          <p className="text-xs text-muted-foreground" data-r10n-demo-stat-label>avg turnaround</p>
         </div>
       </div>
 
       {/* Bar chart */}
       <div>
-        <p className="text-xs font-medium text-muted-foreground mb-2">Demos per day</p>
+        <p className="text-xs font-medium text-muted-foreground mb-2" data-r10n-demo-chart-title>Demos per day</p>
         <ResponsiveContainer width="100%" height={80}>
           <BarChart data={stats.barData} barSize={8}>
             <XAxis
@@ -180,7 +188,7 @@ export function AnalyticsPanel({ tasks }: AnalyticsPanelProps) {
       {/* Donut chart */}
       {stats.donutData.length > 0 && (
         <div>
-          <p className="text-xs font-medium text-muted-foreground mb-1">Stage distribution</p>
+          <p className="text-xs font-medium text-muted-foreground mb-1" data-r10n-demo-chart-title>Stage distribution</p>
           <ResponsiveContainer width="100%" height={100}>
             <PieChart>
               <Pie
@@ -214,15 +222,19 @@ export function AnalyticsPanel({ tasks }: AnalyticsPanelProps) {
       {/* Slowest in-progress */}
       {stats.slowest.length > 0 && (
         <div>
-          <p className="text-xs font-medium text-muted-foreground mb-1.5">Longest active</p>
-          <div className="space-y-1">
+          <p className="text-xs font-medium text-muted-foreground mb-1.5" data-r10n-demo-chart-title>Longest active</p>
+          <div className="space-y-1" data-r10n-demo-slowest>
             {stats.slowest.map((task) => (
-              <div key={task.id} className="flex items-center justify-between gap-2">
-                <span className="text-xs text-foreground truncate flex-1">{task.name}</span>
-                <span className={cn(
-                  "text-xs font-medium shrink-0",
-                  task.daysInStage > 5 ? "text-destructive" : "text-muted-foreground"
-                )}>
+              <div key={task.id} className="flex items-center justify-between gap-2" data-r10n-demo-slowest-row>
+                <span className="text-xs text-foreground truncate flex-1" data-r10n-demo-slowest-name>{task.name}</span>
+                <span
+                  className={cn(
+                    "text-xs font-medium shrink-0",
+                    task.daysInStage > 5 ? "text-destructive" : "text-muted-foreground"
+                  )}
+                  data-r10n-demo-slowest-days
+                  data-r10n-demo-over={task.daysInStage > 5 ? "true" : "false"}
+                >
                   {task.daysInStage}d
                 </span>
               </div>

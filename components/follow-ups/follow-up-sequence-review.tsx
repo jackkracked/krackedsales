@@ -40,6 +40,8 @@ export function FollowUpSequenceReview({ messages, onChange }: Props) {
         return (
           <div
             key={i}
+            data-r10n-followup-seqstep
+            data-expanded={isExpanded}
             className={cn(
               "rounded-[8px] border transition-colors",
               isExpanded ? "border-primary/40 bg-background" : "border-border bg-muted/20"
@@ -51,10 +53,10 @@ export function FollowUpSequenceReview({ messages, onChange }: Props) {
               className="w-full flex items-center justify-between px-3 py-2.5 text-left"
             >
               <div className="flex items-center gap-2">
-                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-semibold">
+                <span data-r10n-followup-seqnum className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-semibold">
                   {i + 1}
                 </span>
-                <span className="text-xs font-medium text-foreground">{dayLabel}</span>
+                <span data-r10n-followup-seqday className="text-xs font-medium text-foreground">{dayLabel}</span>
                 {!isExpanded && (
                   <span className="text-xs text-muted-foreground truncate max-w-[180px]">
                     · {msg.body.slice(0, 50)}…

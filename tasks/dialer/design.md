@@ -79,3 +79,12 @@ Three-zone cockpit on `/dialer`:
 - Voicemail drop (pre-recorded VM on outbound no-answer to save rep time) — natural v2 efficiency add.
 - Local-presence dialing (number pool matching area code) — later upgrade.
 - GHL push of dialer calls — later.
+
+## Build note — quick actions reuse existing modals (locked 2026-06-30)
+Dialer Create demo/task/audit MUST mount the EXISTING shared components, not the
+preview placeholder: `CreateTaskModal`, `CreateDemoModal`, `CreateAuditModal`
+(components/shared/), exactly as components/pipeline/opportunity-modal.tsx does
+(lines 1273-1299). Props are a direct pass-through from the loaded contact
+(contactId, contactName, contactEmail, contactPhone, opportunityId,
+opportunitySource). The preview QuickActionModal is a stub only because mock
+contacts have no real GHL id and to avoid creating real records on a demo click.

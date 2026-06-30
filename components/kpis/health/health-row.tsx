@@ -198,7 +198,12 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
     : "Never checked";
 
   return (
-    <div className="bg-card border border-border rounded-[10px] p-5">
+    <div
+      data-r10n-card
+      data-r10n-health-row
+      data-status={status}
+      className="bg-card border border-border rounded-[10px] p-5"
+    >
       {/* ── Top section (always visible) ─────────────────────────── */}
       <button
         type="button"
@@ -207,11 +212,12 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
       >
         {/* Left: status + name */}
         <div className="flex items-center gap-2.5 min-w-0 flex-1">
-          <Icon className={cn("w-5 h-5 shrink-0", config.iconClass)} />
-          <span className="font-medium text-foreground truncate">
+          <Icon data-r10n-health-icon className={cn("w-5 h-5 shrink-0", config.iconClass)} />
+          <span data-r10n-health-name className="font-medium text-foreground truncate">
             {metric.name}
           </span>
           <span
+            data-r10n-health-label
             className={cn(
               "text-xs font-medium shrink-0",
               config.labelClass,
@@ -223,7 +229,7 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
 
         {/* Right: value + checked ago + chevron */}
         <div className="flex items-center gap-3 shrink-0">
-          <span className="text-lg font-semibold tabular-nums text-foreground">
+          <span data-r10n-health-value className="text-lg font-semibold tabular-nums text-foreground">
             {formatValue(
               metric.override?.value ?? metric.value,
               metric.unit,
@@ -265,11 +271,11 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
 
           {/* Error section */}
           {status === "error" && metric.error && (
-            <div className="rounded-lg bg-red-500/5 border border-red-500/10 p-4">
-              <p className="text-[10px] font-bold tracking-widest uppercase text-red-600 mb-1">
+            <div data-r10n-health-panel data-tone="error" className="rounded-lg bg-red-500/5 border border-red-500/10 p-4">
+              <p data-r10n-health-panel-title className="text-[10px] font-bold tracking-widest uppercase text-red-600 mb-1">
                 What went wrong
               </p>
-              <p className="text-sm text-red-600 leading-relaxed">
+              <p data-r10n-health-panel-body className="text-sm text-red-600 leading-relaxed">
                 {metric.error}
               </p>
               <p className="text-xs text-muted-foreground mt-2">
@@ -282,8 +288,8 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
 
           {/* Override section */}
           {status === "override" && metric.override && (
-            <div className="rounded-lg bg-blue-500/5 border border-blue-500/10 p-4">
-              <p className="text-[10px] font-bold tracking-widest uppercase text-blue-600 mb-1">
+            <div data-r10n-health-panel data-tone="override" className="rounded-lg bg-blue-500/5 border border-blue-500/10 p-4">
+              <p data-r10n-health-panel-title className="text-[10px] font-bold tracking-widest uppercase text-blue-600 mb-1">
                 This value was set manually
               </p>
               <p className="text-sm text-foreground">
@@ -313,6 +319,7 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
           <div className="flex items-center gap-2 flex-wrap">
             {/* Check now */}
             <button
+              data-r10n-health-btn
               onClick={() => verify.mutate()}
               disabled={verify.isPending}
               className={cn(
@@ -333,6 +340,7 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
             {/* Open in source */}
             {metric.sourceUrl && (
               <a
+                data-r10n-health-btn
                 href={metric.sourceUrl}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -348,6 +356,7 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
 
             {/* Override value toggle */}
             <button
+              data-r10n-health-btn
               onClick={() =>
                 setShowOverrideForm((prev) => !prev)
               }
@@ -364,6 +373,8 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
           {/* ── Verify result inline ─────────────────────────────── */}
           {verify.isSuccess && verify.data && (
             <div
+              data-r10n-health-panel
+              data-tone={verify.data.match ? "match" : "mismatch"}
               className={cn(
                 "rounded-lg p-3 text-sm",
                 verify.data.match
@@ -378,7 +389,7 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
           )}
 
           {verify.isError && (
-            <div className="rounded-lg bg-red-500/5 border border-red-500/10 p-3 text-sm text-red-600">
+            <div data-r10n-health-panel data-tone="error" className="rounded-lg bg-red-500/5 border border-red-500/10 p-3 text-sm text-red-600">
               Error: {(verify.error as Error).message}
             </div>
           )}
@@ -391,6 +402,7 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
                   Value
                 </label>
                 <input
+                  data-r10n-kpi-input
                   type="number"
                   value={overrideValue}
                   onChange={(e) => setOverrideValue(e.target.value)}
@@ -403,6 +415,7 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
                   Reason
                 </label>
                 <input
+                  data-r10n-kpi-input
                   type="text"
                   value={overrideNote}
                   onChange={(e) => setOverrideNote(e.target.value)}
@@ -411,6 +424,7 @@ export function HealthRow({ metric }: { metric: HealthMetric }) {
                 />
               </div>
               <button
+                data-r10n-kpi-save
                 onClick={() => saveOverride.mutate()}
                 disabled={
                   saveOverride.isPending || !overrideValue

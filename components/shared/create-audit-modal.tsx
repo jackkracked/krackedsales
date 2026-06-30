@@ -14,12 +14,8 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
-import {
-  cleanUrl,
-  looksLikeUrl,
-  parseQualificationNote,
-  isQualificationNote,
-} from "@/lib/utils/url";
+import { cleanUrl, looksLikeUrl } from "@/lib/utils/url";
+import { deriveWebsite } from "@/lib/ghl/qualification";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -254,20 +250,29 @@ function SegmentedYesNo({ value, onChange, options }: { value: string; onChange:
 export interface CreateAuditModalProps {
   contactId?: string;
   contactName?: string;
+  /** Prefill website + brand from data we already have (Task B) — editable. */
+  defaultWebsite?: string;
   onClose: () => void;
 }
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
-export function CreateAuditModal({ contactId, contactName, onClose }: CreateAuditModalProps) {
+export function CreateAuditModal({ contactId, contactName, defaultWebsite, onClose }: CreateAuditModalProps) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
   const [step, setStep] = useState<1 | 2>(1);
 
+  // Prefill website + brand from data we already have (editable). cleanUrl normalizes raw input.
+  const cleanedDefaultWebsite = defaultWebsite
+    ? cleanUrl(defaultWebsite).toLowerCase().replace(/\/$/, "")
+    : "";
+
   // Step 1 — the client
-  const [brandName, setBrandName] = useState("");
-  const [website, setWebsite] = useState("");
+  const [brandName, setBrandName] = useState(
+    cleanedDefaultWebsite ? domainToBrandName(cleanedDefaultWebsite) : ""
+  );
+  const [website, setWebsite] = useState(cleanedDefaultWebsite);
   const [esp, setEsp] = useState<string>("");
   const [clientContact, setClientContact] = useState<number | null>(null);
 
@@ -281,7 +286,7 @@ export function CreateAuditModal({ contactId, contactName, onClose }: CreateAudi
 
   // UI state
   const [loadingWebsite, setLoadingWebsite] = useState(false);
-  const [websitePrefilled, setWebsitePrefilled] = useState(false);
+  const [websitePrefilled, setWebsitePrefilled] = useState(!!cleanedDefaultWebsite);
   const [step1Error, setStep1Error] = useState("");
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [submitError, setSubmitError] = useState("");
@@ -304,28 +309,36 @@ export function CreateAuditModal({ contactId, contactName, onClose }: CreateAudi
     setDefaulted(true);
   }, [me, defaulted]);
 
-  // Auto-fill brand + website from the GHL qualification note (hard data)
+  // Auto-fill brand + website from the contact (form-agnostic: standard field →
+  // custom field → note), skipping when we already prefilled from known data.
   useEffect(() => {
-    if (!contactId) return;
+    if (!contactId || cleanedDefaultWebsite) return;
     setLoadingWebsite(true);
-    fetch(`/api/ghl/contacts/${contactId}/notes`)
-      .then((r) => r.json())
-      .then((data) => {
-        const notes: Array<{ body: string }> = data.notes ?? [];
-        const qualNote = notes.find((n) => isQualificationNote(n.body));
-        if (!qualNote) return;
-        const qaPairs = parseQualificationNote(qualNote.body);
-        const urlPair = qaPairs.find((qa) => qa.isUrl);
-        const raw = urlPair?.cleanedUrl ?? null;
+    (async () => {
+      try {
+        const contactRes = await fetch(`/api/ghl/contacts/${contactId}`);
+        const contactData = contactRes.ok ? await contactRes.json() : null;
+        const contact = contactData?.contact ?? null;
+        let raw = deriveWebsite(contact);
+        if (!raw) {
+          const notesRes = await fetch(`/api/ghl/contacts/${contactId}/notes`);
+          if (notesRes.ok) {
+            const notesData = await notesRes.json();
+            raw = deriveWebsite(contact, notesData.notes ?? []);
+          }
+        }
         if (raw && looksLikeUrl(raw)) {
           const cleaned = cleanUrl(raw).toLowerCase().replace(/\/$/, "");
           setWebsite(cleaned);
           setBrandName(domainToBrandName(cleaned));
           setWebsitePrefilled(true);
         }
-      })
-      .catch(() => {})
-      .finally(() => setLoadingWebsite(false));
+      } catch {
+        /* prefill is best-effort */
+      } finally {
+        setLoadingWebsite(false);
+      }
+    })();
   }, [contactId]);
 
   // Escape to close

@@ -3,7 +3,7 @@
 export function FollowUpEmpty() {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-8 py-16">
-      <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mb-4">
+      <div data-r10n-followup-empty-icon className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mb-4">
         <svg
           className="w-6 h-6 text-green-600"
           fill="none"
@@ -14,8 +14,8 @@ export function FollowUpEmpty() {
           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
         </svg>
       </div>
-      <p className="text-sm font-semibold text-foreground mb-1">All caught up</p>
-      <p className="text-xs text-muted-foreground max-w-[200px]">
+      <p data-r10n-followup-empty-title className="text-sm font-semibold text-foreground mb-1">All caught up</p>
+      <p data-r10n-followup-empty-sub className="text-xs text-muted-foreground max-w-[200px]">
         No one in the pipeline needs a follow-up right now.
       </p>
     </div>
@@ -25,7 +25,7 @@ export function FollowUpEmpty() {
 export function WorkspaceEmpty() {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-8">
-      <div className="w-10 h-10 rounded-full bg-muted/60 flex items-center justify-center mb-3">
+      <div data-r10n-followup-empty-icon data-variant="neutral" className="w-10 h-10 rounded-full bg-muted/60 flex items-center justify-center mb-3">
         <svg
           className="w-5 h-5 text-muted-foreground/50"
           fill="none"
@@ -40,7 +40,7 @@ export function WorkspaceEmpty() {
           />
         </svg>
       </div>
-      <p className="text-xs text-muted-foreground">
+      <p data-r10n-followup-empty-sub className="text-xs text-muted-foreground">
         Select a contact to see the AI recommendation
       </p>
     </div>

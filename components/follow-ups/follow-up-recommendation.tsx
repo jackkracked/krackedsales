@@ -165,8 +165,9 @@ export function FollowUpRecommendation({
 
   if (sendStatus === "sent") {
     return (
-      <div className="flex items-center gap-2 px-4 py-3 rounded-[10px] bg-green-50 border border-green-200">
+      <div data-r10n-followup-sent className="flex items-center gap-2 px-4 py-3 rounded-[10px] bg-green-50 border border-green-200">
         <svg
+          data-r10n-followup-sent-icon
           className="w-4 h-4 text-green-600 shrink-0"
           fill="none"
           viewBox="0 0 24 24"
@@ -175,17 +176,18 @@ export function FollowUpRecommendation({
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
         </svg>
-        <p className="text-sm text-green-800 font-medium">Message sent</p>
+        <p data-r10n-followup-sent-text className="text-sm text-green-800 font-medium">Message sent</p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-[10px] border border-border bg-muted/10 overflow-hidden">
+    <div data-r10n-followup-reccard className="rounded-[10px] border border-border bg-muted/10 overflow-hidden">
       {/* Reasoning */}
       <div className="px-4 pt-3.5 pb-3 border-b border-border/60">
         <div className="flex items-center gap-1.5 mb-2">
           <svg
+            data-r10n-followup-spark
             className="w-3.5 h-3.5 text-primary shrink-0"
             fill="none"
             viewBox="0 0 24 24"
@@ -198,11 +200,11 @@ export function FollowUpRecommendation({
               d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
             />
           </svg>
-          <span className="text-xs font-semibold text-foreground">
+          <span data-r10n-followup-rec-title className="text-xs font-semibold text-foreground">
             {isSingle ? "Sending a single message" : `Recommending a ${messages.length}-message sequence`}
           </span>
         </div>
-        <p className="text-xs text-muted-foreground leading-relaxed">
+        <p data-r10n-followup-rec-reason className="text-xs text-muted-foreground leading-relaxed">
           {recommendation.reasoning}
         </p>
       </div>
@@ -227,6 +229,7 @@ export function FollowUpRecommendation({
       <div className="px-4 pb-3.5 flex items-center gap-2 flex-wrap">
         {isSingle ? (
           <button
+            data-r10n-followup-send
             onClick={handleSend}
             disabled={sendStatus === "sending" || !firstMsg}
             className={cn(
@@ -241,6 +244,7 @@ export function FollowUpRecommendation({
           </button>
         ) : (
           <button
+            data-r10n-followup-send
             onClick={handleApproveSequence}
             disabled={sendStatus === "sending"}
             className={cn(
@@ -256,6 +260,7 @@ export function FollowUpRecommendation({
         )}
 
         <button
+          data-r10n-followup-btn
           onClick={handleRegenerate}
           disabled={regenerating}
           className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[8px] hover:border-primary/30 hover:text-foreground transition-colors"
@@ -265,6 +270,7 @@ export function FollowUpRecommendation({
         </button>
 
         <button
+          data-r10n-followup-btn
           onClick={handleSkip}
           disabled={skipping}
           className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[8px] hover:border-primary/30 hover:text-foreground transition-colors"
@@ -274,6 +280,7 @@ export function FollowUpRecommendation({
         </button>
 
         <button
+          data-r10n-followup-remove
           onClick={onRemoved}
           className="ml-auto flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground/50 hover:text-destructive transition-colors"
         >
@@ -283,7 +290,7 @@ export function FollowUpRecommendation({
       </div>
 
       {sendStatus === "error" && (
-        <p className="text-xs text-destructive px-4 pb-3 -mt-1">
+        <p data-r10n-followup-error className="text-xs text-destructive px-4 pb-3 -mt-1">
           Failed to send. Check your GHL connection and try again.
         </p>
       )}

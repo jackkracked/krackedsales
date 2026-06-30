@@ -148,6 +148,8 @@ function RepFilterDropdown({
   return (
     <div ref={ref} className="relative">
       <button
+        data-r10n-call-repfilter
+        data-active={selected.length > 0}
         onClick={() => setOpen((v) => !v)}
         className={cn(
           "flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-[8px] border transition-colors",
@@ -161,7 +163,7 @@ function RepFilterDropdown({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-30 w-52 bg-card border border-border rounded-[10px] shadow-lg py-1 overflow-hidden">
+        <div data-r10n-call-repmenu className="absolute right-0 top-full mt-1 z-30 w-52 bg-card border border-border rounded-[10px] shadow-lg py-1 overflow-hidden">
           {reps.length === 0 ? (
             <p className="px-3 py-2 text-xs text-muted-foreground">No reps found</p>
           ) : (
@@ -183,6 +185,8 @@ function RepFilterDropdown({
                     className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-muted transition-colors"
                   >
                     <span
+                      data-r10n-call-checkbox
+                      data-checked={checked}
                       className={cn(
                         "w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-colors",
                         checked ? "bg-primary border-primary" : "border-border"
@@ -270,12 +274,13 @@ export function CallsClient() {
     <div className="flex flex-col flex-1 min-h-0 gap-3">
 
       {/* ── Toolbar ── */}
-      <div className="flex items-center gap-3 flex-wrap shrink-0 border-b border-border pb-3">
+      <div data-r10n-call-toolbar className="flex items-center gap-3 flex-wrap shrink-0 border-b border-border pb-3">
 
         {/* Search */}
         <div className={cn("relative flex items-center transition-all duration-200", search ? "w-56" : "w-44 focus-within:w-56")}>
           <Search className="absolute left-2.5 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
           <input
+            data-r10n-search
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search contacts…"
@@ -292,10 +297,12 @@ export function CallsClient() {
         </div>
 
         {/* Type toggle */}
-        <div className="flex items-center gap-1 p-1 bg-muted rounded-[9px] border border-border/50">
+        <div data-r10n-viewtoggle className="flex items-center gap-1 p-1 bg-muted rounded-[9px] border border-border/50">
           {(["all", "meet", "dialer"] as const).map((t) => (
             <button
               key={t}
+              data-r10n-viewtoggle-btn
+              data-active={type === t}
               onClick={() => setType(t)}
               className={cn(
                 "px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors capitalize",
@@ -316,16 +323,18 @@ export function CallsClient() {
         <RepFilterDropdown reps={reps} selected={repFilter} onChange={setRepFilter} />
 
         {/* Date range */}
-        <div className="flex items-center gap-1.5">
+        <div data-r10n-call-daterange className="flex items-center gap-1.5">
           <input
             type="date"
+            data-r10n-call-dateinput
             value={since}
             onChange={(e) => setSince(e.target.value)}
             className="px-2.5 py-2 text-xs border border-border rounded-[8px] bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/15 focus:border-primary/40 transition-all"
           />
-          <span className="text-xs text-muted-foreground">—</span>
+          <span data-r10n-call-datesep className="text-xs text-muted-foreground">—</span>
           <input
             type="date"
+            data-r10n-call-dateinput
             value={until}
             onChange={(e) => setUntil(e.target.value)}
             className="px-2.5 py-2 text-xs border border-border rounded-[8px] bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/15 focus:border-primary/40 transition-all"
@@ -334,6 +343,7 @@ export function CallsClient() {
 
         {/* Sync */}
         <button
+          data-r10n-call-sync
           onClick={handleSync}
           disabled={syncing}
           title="Sync calls"
@@ -345,16 +355,16 @@ export function CallsClient() {
 
         {/* Count + fetching indicator */}
         {isFetching && !isLoading && (
-          <RefreshCw className="w-3 h-3 text-muted-foreground animate-spin" />
+          <RefreshCw data-r10n-syncing className="w-3 h-3 text-muted-foreground animate-spin" />
         )}
-        <span className="text-sm font-medium text-foreground tabular-nums">
+        <span data-r10n-call-count className="text-sm font-medium text-foreground tabular-nums">
           {isLoading ? "—" : total.toLocaleString()}
           <span className="text-muted-foreground font-normal"> calls</span>
         </span>
       </div>
 
       {/* ── Metrics strip ── */}
-      <div className="flex items-center shrink-0 border-b border-border pb-3 gap-0">
+      <div data-r10n-call-metrics className="flex items-center shrink-0 border-b border-border pb-3 gap-0">
         {[
           {
             label: "Total calls",
@@ -375,15 +385,16 @@ export function CallsClient() {
         ].map((stat, i, arr) => (
           <div
             key={stat.label}
+            data-r10n-call-metric
             className={cn(
               "flex flex-col px-5 first:pl-0",
               i < arr.length - 1 && "border-r border-border pr-5 mr-5"
             )}
           >
-            <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+            <span data-r10n-call-metric-label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
               {stat.label}
             </span>
-            <span className="text-xl font-bold text-foreground tabular-nums leading-snug mt-0.5">
+            <span data-r10n-call-metric-value className="text-xl font-bold text-foreground tabular-nums leading-snug mt-0.5">
               {stat.value}
             </span>
           </div>
@@ -391,47 +402,47 @@ export function CallsClient() {
       </div>
 
       {/* ── Table ── */}
-      <div className="flex-1 min-h-0 overflow-auto rounded-[10px] border border-border bg-card">
+      <div data-r10n-table className="flex-1 min-h-0 overflow-auto rounded-[10px] border border-border bg-card">
         <table className="w-full border-collapse text-sm">
-          <thead className="sticky top-0 z-10 bg-card border-b border-border">
+          <thead data-r10n-table-head className="sticky top-0 z-10 bg-card border-b border-border">
             <tr>
               <th className="px-4 py-3 text-left w-20 align-middle">
-                <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                <span data-r10n-th className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Type
                 </span>
               </th>
               <th className="px-4 py-3 text-left min-w-[160px] align-middle">
-                <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                <span data-r10n-th className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Contact
                 </span>
               </th>
               <th className="px-4 py-3 text-left min-w-[120px] align-middle">
-                <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                <span data-r10n-th className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Rep
                 </span>
               </th>
               <th className="px-4 py-3 text-left w-24 align-middle">
-                <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                <span data-r10n-th className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Direction
                 </span>
               </th>
               <th className="px-4 py-3 text-left w-32 align-middle">
-                <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                <span data-r10n-th className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Date
                 </span>
               </th>
               <th className="px-4 py-3 text-left w-24 align-middle">
-                <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                <span data-r10n-th className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Duration
                 </span>
               </th>
               <th className="px-4 py-3 text-left w-24 align-middle">
-                <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                <span data-r10n-th className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Status
                 </span>
               </th>
               <th className="px-4 py-3 text-right w-20 align-middle">
-                <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                <span data-r10n-th className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Actions
                 </span>
               </th>
@@ -443,9 +454,9 @@ export function CallsClient() {
             ) : calls.length === 0 ? (
               <tr>
                 <td colSpan={8} className="py-20 text-center">
-                  <p className="text-sm font-medium text-foreground mb-1">No calls found</p>
+                  <p data-r10n-call-empty-title className="text-sm font-medium text-foreground mb-1">No calls found</p>
                   {(search || type !== "all" || repFilter.length > 0) && (
-                    <p className="text-xs text-muted-foreground">
+                    <p data-r10n-call-empty-sub className="text-xs text-muted-foreground">
                       Try adjusting your filters or date range
                     </p>
                   )}
@@ -485,6 +496,8 @@ function CallRow({
   const isFuture = new Date(call.startedAt) > new Date();
   return (
     <tr
+      data-r10n-table-row
+      data-future={isFuture}
       onClick={onOpen}
       className={cn(
         "border-b border-border/30 transition-colors duration-100 hover:bg-muted/40 cursor-pointer",
@@ -500,10 +513,13 @@ function CallRow({
       <td className="px-4 py-3">
         <div className="flex items-center gap-2.5 min-w-0">
           <Avatar name={call.contactName ?? "Unknown"} size={30} />
-          <span className={cn(
-            "text-sm font-medium truncate max-w-[240px]",
-            call.contactName ? "text-foreground" : "text-muted-foreground/50"
-          )}>
+          <span
+            data-r10n-table-name={call.contactName ? "" : undefined}
+            className={cn(
+              "text-sm font-medium truncate max-w-[240px]",
+              call.contactName ? "text-foreground" : "text-muted-foreground/50"
+            )}
+          >
             {call.contactName ?? "Unknown"}
           </span>
         </div>
@@ -513,11 +529,11 @@ function CallRow({
       <td className="px-4 py-3">
         {call.repName ? (
           <div className="min-w-0">
-            <p className="text-xs font-medium text-foreground truncate max-w-[120px]">
+            <p data-r10n-table-cell className="text-xs font-medium text-foreground truncate max-w-[120px]">
               {call.repName}
             </p>
             {call.repEmail && (
-              <p className="text-[10px] text-muted-foreground truncate max-w-[120px]">
+              <p data-r10n-table-sub className="text-[10px] text-muted-foreground truncate max-w-[120px]">
                 {call.repEmail}
               </p>
             )}
@@ -535,6 +551,8 @@ function CallRow({
       {/* Date */}
       <td className="px-4 py-3">
         <span
+          data-r10n-table-cell-muted
+          data-future={isFuture}
           className={cn(
             "text-xs font-medium",
             isFuture ? "text-emerald-600" : "text-muted-foreground"
@@ -547,7 +565,7 @@ function CallRow({
 
       {/* Duration */}
       <td className="px-4 py-3">
-        <span className="text-xs text-foreground tabular-nums font-medium">
+        <span data-r10n-table-cell-muted className="text-xs text-foreground tabular-nums font-medium">
           {formatDuration(call.durationSeconds)}
         </span>
       </td>
@@ -567,6 +585,7 @@ function CallRow({
           {/* Fathom indicator — shows when call has a Fathom transcript */}
           {call.transcriptAvailable && call.fathomRecordingId != null && (
             <span
+              data-r10n-call-fathom
               title="Fathom transcript available"
               className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-violet-100 text-violet-700 mr-1"
             >
@@ -574,6 +593,8 @@ function CallRow({
             </span>
           )}
           <button
+            data-r10n-call-action
+            data-available={call.transcriptAvailable}
             onClick={(e) => { e.stopPropagation(); onOpen(); }}
             title={call.transcriptAvailable ? "View transcript" : "Open call"}
             className={cn(
@@ -584,6 +605,8 @@ function CallRow({
             <FileText className="w-3.5 h-3.5" />
           </button>
           <button
+            data-r10n-call-action
+            data-available={call.recordingAvailable}
             onClick={(e) => { e.stopPropagation(); onOpen(); }}
             title={call.recordingAvailable ? "View recording" : "Open call"}
             className={cn(
@@ -604,13 +627,13 @@ function CallRow({
 function CallTypeBadge({ type }: { type: "meet" | "dialer" | "scheduled" }) {
   if (type === "meet" || type === "scheduled") {
     return (
-      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+      <span data-r10n-call-typebadge data-kind="meet" className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
         Meet
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
+    <span data-r10n-call-typebadge data-kind="dialer" className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
       Dialer
     </span>
   );
@@ -632,7 +655,12 @@ function AppointmentStatusBadge({ status }: { status: string }) {
   const label = normalized === "noshow" ? "No-show" : status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
 
   return (
-    <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium", style)}>
+    <span
+      data-r10n-status-pill
+      data-r10n-call-statuspill
+      data-status={normalized}
+      className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium", style)}
+    >
       {label}
     </span>
   );
@@ -649,12 +677,12 @@ function DirectionIndicator({
     return <span className="text-muted-foreground/40 text-sm">—</span>;
   }
   return direction === "outbound" ? (
-    <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600">
+    <span data-r10n-call-direction data-dir="outbound" className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600">
       <ArrowUp className="w-3 h-3" />
       Outbound
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600">
+    <span data-r10n-call-direction data-dir="inbound" className="inline-flex items-center gap-1 text-xs font-medium text-amber-600">
       <ArrowDown className="w-3 h-3" />
       Inbound
     </span>

@@ -55,7 +55,7 @@ export function PipelineClient() {
 
   const websiteByContactId = useBrandCategoryStore((s) => s.websiteByContactId);
 
-  const { data: commentLeadsData } = useQuery<{ leads: CommentLead[] }>({
+  const { data: socialLeadsData } = useQuery<{ leads: CommentLead[] }>({
     queryKey: ["comment-leads-inbox"],
     queryFn: async () => {
       const res = await fetch("/api/comment-leads/inbox");
@@ -98,7 +98,7 @@ export function PipelineClient() {
 
   const isLoading = pipelinesLoading || oppsLoading;
   const allOpportunities = opportunitiesData?.opportunities ?? [];
-  const commentLeads = commentLeadsData?.leads ?? [];
+  const socialLeads = socialLeadsData?.leads ?? [];
 
   // Cmd+K / Ctrl+K to focus search
   useEffect(() => {
@@ -129,13 +129,13 @@ export function PipelineClient() {
       })
     : allOpportunities;
   const filteredCommentLeads = q
-    ? commentLeads.filter((cl) => {
+    ? socialLeads.filter((cl) => {
         const name = (cl.name ?? "").toLowerCase();
         const website = (cl.website ?? "").toLowerCase();
         const comment = (cl.commentText ?? "").toLowerCase();
         return name.includes(q) || website.includes(q) || comment.includes(q);
       })
-    : commentLeads;
+    : socialLeads;
 
   if (pipelinesLoading) {
     return (
@@ -156,9 +156,9 @@ export function PipelineClient() {
   }
 
   return (
-    <div className="flex flex-col gap-4 h-full">
+    <div data-r10n-pipeline className="flex flex-col gap-4 h-full">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 flex-wrap">
+      <div data-r10n-toolbar className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           {/* Pipeline selector */}
           <PipelineSelector
@@ -168,9 +168,11 @@ export function PipelineClient() {
           />
 
           {/* View toggle */}
-          <div className="flex items-center bg-muted rounded-lg p-0.5">
+          <div data-r10n-viewtoggle className="flex items-center bg-muted rounded-lg p-0.5">
             <button
               onClick={() => setViewMode("kanban")}
+              data-r10n-viewtoggle-btn
+              data-active={viewMode === "kanban" ? "true" : undefined}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
                 viewMode === "kanban"
@@ -183,6 +185,8 @@ export function PipelineClient() {
             </button>
             <button
               onClick={() => setViewMode("list")}
+              data-r10n-viewtoggle-btn
+              data-active={viewMode === "list" ? "true" : undefined}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
                 viewMode === "list"
@@ -196,7 +200,7 @@ export function PipelineClient() {
           </div>
 
           {isFetching && (
-            <span className="text-xs text-muted-foreground flex items-center gap-1">
+            <span data-r10n-syncing className="text-xs text-muted-foreground flex items-center gap-1">
               <RefreshCw className="w-3 h-3 animate-spin" />
               Syncing…
             </span>
@@ -216,6 +220,7 @@ export function PipelineClient() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search leads…"
+              data-r10n-search
               className="w-full pl-8 pr-8 py-1.5 text-sm border border-border rounded-[8px] bg-card text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition-all"
             />
             {searchQuery ? (
@@ -234,7 +239,7 @@ export function PipelineClient() {
 
           {/* Result count */}
           {q && (
-            <span className="text-xs text-muted-foreground whitespace-nowrap">
+            <span data-r10n-resultcount className="text-xs text-muted-foreground whitespace-nowrap">
               {opportunities.length} result{opportunities.length !== 1 ? "s" : ""}
             </span>
           )}
@@ -242,6 +247,7 @@ export function PipelineClient() {
           {/* Add lead button */}
           <button
             onClick={() => setShowAddLead(true)}
+            data-r10n-addlead
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-primary-foreground bg-primary rounded-[7px] hover:bg-primary/90 transition-colors"
           >
             <Plus className="w-4 h-4" />
@@ -258,7 +264,7 @@ export function PipelineClient() {
             Loading opportunities…
           </div>
         ) : viewMode === "kanban" ? (
-          <KanbanBoard pipeline={pipeline} opportunities={opportunities} commentLeads={filteredCommentLeads} unreadContactIds={unreadContactIds} repMap={repMap} autoOpenContactId={autoOpenContactId ?? undefined} />
+          <KanbanBoard pipeline={pipeline} opportunities={opportunities} socialLeads={filteredCommentLeads} unreadContactIds={unreadContactIds} repMap={repMap} autoOpenContactId={autoOpenContactId ?? undefined} />
         ) : (
           <PipelineListView pipeline={pipeline} opportunities={opportunities} />
         )}

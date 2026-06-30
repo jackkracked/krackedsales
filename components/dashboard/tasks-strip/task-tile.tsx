@@ -70,6 +70,8 @@ export function TaskTile({
   return (
     <div
       onClick={onClick}
+      data-r10n-task-tile
+      data-status={status}
       className={cn(
         "relative h-[108px] flex items-stretch rounded-[10px] border bg-card cursor-pointer select-none overflow-hidden",
         "transition-all duration-200",
@@ -144,6 +146,8 @@ export function TaskTile({
           {task.dueDate ? (
             <>
               <span
+                data-r10n-task-datenum
+                data-status={status}
                 className={cn(
                   "text-[17px] font-bold tabular-nums leading-none",
                   status === "overdue" && "text-destructive",
@@ -153,10 +157,12 @@ export function TaskTile({
               >
                 {format(toZonedDate(new Date(task.dueDate), tz), "d")}
               </span>
-              <span className="text-[9.5px] uppercase tracking-wide text-muted-foreground mt-0.5">
+              <span data-r10n-task-dateday className="text-[9.5px] uppercase tracking-wide text-muted-foreground mt-0.5">
                 {format(toZonedDate(new Date(task.dueDate), tz), "EEE")}
               </span>
               <span
+                data-r10n-task-statuspill
+                data-status={status}
                 className={cn(
                   "text-[8.5px] font-semibold mt-1 px-1.5 py-[2px] rounded-full uppercase tracking-wide",
                   status === "overdue" && "bg-destructive/10 text-destructive",

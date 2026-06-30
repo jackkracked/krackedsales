@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { keywordTriggers, commentLeads } from "@/lib/db/schema";
+import { keywordTriggers, socialLeads } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { pusherTrigger } from "@/lib/pusher/server";
 
@@ -217,7 +217,7 @@ async function saveCommentLead({
 }) {
   try {
     const client = await db();
-    await client.insert(commentLeads).values({
+    await client.insert(socialLeads).values({
       name,
       platform,
       commentText,

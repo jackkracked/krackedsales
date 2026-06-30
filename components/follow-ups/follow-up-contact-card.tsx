@@ -58,6 +58,9 @@ export function FollowUpContactCard({ item, isSelected, onSelect }: Props) {
 
   return (
     <button
+      data-r10n-followup-row
+      data-selected={isSelected}
+      data-urgency={item.urgency}
       onClick={() => onSelect(item)}
       className={cn(
         "w-full text-left p-3 rounded-[10px] border transition-all duration-100",
@@ -68,10 +71,12 @@ export function FollowUpContactCard({ item, isSelected, onSelect }: Props) {
     >
       {/* Name + urgency */}
       <div className="flex items-center justify-between mb-1.5 gap-2">
-        <p className="text-sm font-semibold text-foreground truncate leading-tight">
+        <p data-r10n-followup-name className="text-sm font-semibold text-foreground truncate leading-tight">
           {item.contactName}
         </p>
         <span
+          data-r10n-followup-urgency
+          data-urgency={item.urgency}
           className={cn("w-2 h-2 rounded-full shrink-0", URGENCY_DOT[item.urgency])}
           title={item.urgency}
         />
@@ -80,6 +85,8 @@ export function FollowUpContactCard({ item, isSelected, onSelect }: Props) {
       {/* Stage badge + days since */}
       <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
         <span
+          data-r10n-followup-stage
+          data-zone={item.zone}
           className={cn(
             "inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium",
             badge.className
@@ -90,7 +97,11 @@ export function FollowUpContactCard({ item, isSelected, onSelect }: Props) {
             <span className="ml-1 text-orange-500 font-semibold">·&nbsp;unresponsive</span>
           )}
         </span>
-        <span className="text-xs text-muted-foreground">
+        <span
+          data-r10n-followup-due
+          data-urgency={item.urgency}
+          className="text-xs text-muted-foreground"
+        >
           {item.daysSinceLastContact === 0
             ? "today"
             : `${item.daysSinceLastContact}d no contact`}
@@ -99,14 +110,14 @@ export function FollowUpContactCard({ item, isSelected, onSelect }: Props) {
 
       {/* Footer */}
       <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground/60">
+        <span data-r10n-followup-meta className="text-xs text-muted-foreground/60">
           {item.channel} ·{" "}
           {item.totalFollowUpsSent === 0
             ? "first follow-up"
             : `${item.totalFollowUpsSent} prior`}
         </span>
         {item.recommendation && (
-          <span className="text-xs text-primary font-medium">AI ready</span>
+          <span data-r10n-followup-airead className="text-xs text-primary font-medium">AI ready</span>
         )}
       </div>
     </button>

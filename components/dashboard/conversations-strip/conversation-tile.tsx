@@ -78,8 +78,11 @@ export function ConversationTile({ item, onReply, isLoading }: ConversationTileP
   // Late = over 24h without response
   const isLate = differenceInHours(new Date(), new Date(item.updatedAt)) >= 24;
 
-  const dotColor  = isLate ? RED : TEAL;
-  const timeColor = isLate ? RED : TEAL;
+  // Default theme keeps the literal teal/red. Under r10n these inline styles read
+  // --r10n-convo-accent (set per state on the tile) and fall back to the literal,
+  // so the default render is byte-for-byte identical while r10n calms them.
+  const dotColor  = `var(--r10n-convo-accent, ${isLate ? RED : TEAL})`;
+  const timeColor = `var(--r10n-convo-accent, ${isLate ? RED : TEAL})`;
 
   const preview = item.lastMessage && item.lastMessage !== "undefined"
     ? item.lastMessage
@@ -91,6 +94,8 @@ export function ConversationTile({ item, onReply, isLoading }: ConversationTileP
     <button
       onClick={onReply}
       disabled={isLoading}
+      data-r10n-convo-tile
+      data-late={isLate ? "true" : "false"}
       className={cn(
         "group relative w-[210px] h-[190px] flex flex-col rounded-[12px] bg-card p-3.5 select-none text-left",
         "transition-all duration-150 hover:shadow-md",
@@ -106,6 +111,7 @@ export function ConversationTile({ item, onReply, isLoading }: ConversationTileP
       {/* Top row: badge + dot + time */}
       <div className="flex items-center gap-1.5 mb-2.5 min-w-0">
         <span
+          data-r10n-convo-channel
           className={cn(
             "shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full leading-none uppercase tracking-widest",
             badge.className
@@ -116,12 +122,14 @@ export function ConversationTile({ item, onReply, isLoading }: ConversationTileP
 
         {/* Status dot */}
         <span
+          data-r10n-convo-dot
           className="w-2 h-2 rounded-full shrink-0"
           style={{ backgroundColor: dotColor }}
         />
 
         {/* Timestamp */}
         <span
+          data-r10n-convo-time
           className="text-[10px] font-bold tabular-nums truncate ml-auto"
           style={{ color: timeColor }}
         >
@@ -143,7 +151,7 @@ export function ConversationTile({ item, onReply, isLoading }: ConversationTileP
 
       {/* Bottom row */}
       <div className="flex items-end justify-between mt-auto pt-2 border-t border-border/50">
-        <span className="text-[10.5px] text-muted-foreground font-medium">
+        <span data-r10n-convo-await className="text-[10.5px] text-muted-foreground font-medium">
           Awaiting reply
         </span>
 

@@ -1,240 +1,220 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { CheckCircle2, SlidersHorizontal, ArrowRight } from "lucide-react";
+import Link from "next/link";
 import { CampaignRail } from "./campaign-rail";
 import { ContactCockpit } from "./contact-cockpit";
 import { DialDock, type CallState } from "./dial-dock";
 import { DialerOutcomeModal, type DialerOutcome } from "./dialer-outcome-modal";
 import { CampaignBuilder } from "./campaign-builder";
-import { MOCK_CAMPAIGNS, type DialerCampaign, type DialerContact } from "./mock-data";
+import { useDialer } from "@/providers/dialer-provider";
+import type { CampaignSummary, CampaignDetail, ClaimedContact, DialerContact, DialerCampaign } from "./mock-data";
 
-function digitsOf(phone: string) {
-  return phone.replace(/[^\d+]/g, "");
-}
-function mmss(total: number) {
-  return `${Math.floor(total / 60).toString().padStart(2, "0")}:${(total % 60).toString().padStart(2, "0")}`;
-}
-function initialsOf(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  return (parts.map((p) => p[0]).slice(0, 2).join("") || "YO").toUpperCase();
-}
+const digits = (p: string | null | undefined) => (p ?? "").replace(/[^\d+]/g, "");
+const mmss = (t: number) => `${Math.floor(t / 60).toString().padStart(2, "0")}:${(t % 60).toString().padStart(2, "0")}`;
 
 export function DialerClient({ role, userName }: { role: "admin" | "rep"; userName: string }) {
   const isAdmin = role === "admin";
-  const currentUser = { name: userName || "You", initials: initialsOf(userName || "You") };
+  const qc = useQueryClient();
+  const dialer = useDialer();
 
-  const [campaigns, setCampaigns] = useState<DialerCampaign[]>(MOCK_CAMPAIGNS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [previewId, setPreviewId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [completed, setCompleted] = useState(false);
-  const [working, setWorking] = useState<DialerContact[]>([]); // remaining, current at [0]
+  const [claimed, setClaimed] = useState<ClaimedContact | null>(null);
+  const [previewContactId, setPreviewContactId] = useState<string | null>(null);
   const [number, setNumber] = useState("");
-  const [callState, setCallState] = useState<CallState>("idle");
-  const [muted, setMuted] = useState(false);
-  const [durationSec, setDurationSec] = useState(0);
-  const [outcomeFor, setOutcomeFor] = useState<{ name: string; duration: number } | null>(null);
+  const [outcomeFor, setOutcomeFor] = useState<{ campaignContactId: string | null; name: string; duration: number } | null>(null);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  function fireToast(m: string) {
-    setToast(m);
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2400);
-  }
+  function fireToast(m: string) { setToast(m); if (toastTimer.current) clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(null), 2400); }
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
-  const selectedCampaign = campaigns.find((c) => c.id === selectedId) ?? null;
-  const isPreview = !running && !!previewId;
-  const current = running && !completed
-    ? working[0] ?? null
-    : previewId
-      ? selectedCampaign?.contacts.find((c) => c.id === previewId) ?? null
-      : null;
-  const attempt = current ? { n: current.attempts + 1, max: selectedCampaign?.maxAttempts ?? 3 } : undefined;
+  // ── Data ──────────────────────────────────────────────────────────────────
+  const campaignsQuery = useQuery<{ campaigns: CampaignSummary[] }>({
+    queryKey: ["dialer-campaigns"],
+    queryFn: () => fetch("/api/dialer/campaigns").then((r) => (r.ok ? r.json() : { campaigns: [] })),
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
+  });
+  const campaigns = campaignsQuery.data?.campaigns ?? [];
 
-  // Load the current contact's number whenever the contact changes.
-  const currentId = current?.id;
+  const detailQuery = useQuery<CampaignDetail>({
+    queryKey: ["dialer-campaign", selectedId],
+    queryFn: () => fetch(`/api/dialer/campaigns/${selectedId}`).then((r) => r.json()),
+    enabled: !!selectedId,
+    staleTime: 10_000,
+  });
+  const detail = selectedId ? detailQuery.data ?? null : null;
+
+  const isPreview = !running && !!previewContactId;
+  const cockpitContactId = running && claimed ? claimed.contactId : previewContactId;
+  const cockpitQuery = useQuery<{ contact: DialerContact }>({
+    queryKey: ["dialer-contact", cockpitContactId],
+    queryFn: () => fetch(`/api/dialer/contact/${cockpitContactId}`).then((r) => r.json()),
+    enabled: !!cockpitContactId,
+    staleTime: 60_000,
+  });
+  const cockpitContact = cockpitContactId ? cockpitQuery.data?.contact ?? null : null;
+
+  const dockState: CallState = dialer.callState === "connecting" ? "dialing" : dialer.callState === "open" ? "connected" : "idle";
+  const attempt = running && claimed && detail ? { n: claimed.attempts + 1, max: detail.campaign.maxAttempts } : undefined;
+  const dockName = running && claimed ? claimed.contactName ?? undefined : isPreview ? cockpitContact?.name : undefined;
+
+  // Load the preview contact's number once its data arrives.
   useEffect(() => {
-    if (currentId) setNumber(digitsOf(current!.phone));
+    if (isPreview && cockpitContact?.phone) setNumber(digits(cockpitContact.phone));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentId]);
+  }, [previewContactId, cockpitContact?.phone]);
 
-  // Simulated ring → connect.
+  // ── Detect call end → open the outcome modal ───────────────────────────────
+  const prevCall = useRef(dialer.callState);
+  const inCall = useRef(false);
+  const dialedContact = useRef<{ campaignContactId: string | null; name: string }>({ campaignContactId: null, name: "" });
   useEffect(() => {
-    if (callState !== "dialing") return;
-    const t = setTimeout(() => { setDurationSec(0); setCallState("connected"); }, 1600);
-    return () => clearTimeout(t);
-  }, [callState]);
-
-  // Live call timer.
-  useEffect(() => {
-    if (callState !== "connected") return;
-    const i = setInterval(() => setDurationSec((d) => d + 1), 1000);
-    return () => clearInterval(i);
-  }, [callState]);
-
-  // Physical-keyboard dialing (only when idle and no modal).
-  useEffect(() => {
-    if (callState !== "idle" || outcomeFor || builderOpen) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
-      if (/^[0-9*#+]$/.test(e.key)) setNumber((n) => n + e.key);
-      else if (e.key === "Backspace") setNumber((n) => n.slice(0, -1));
-      else if (e.key === "Enter") setNumber((n) => { if (n) setCallState("dialing"); return n; });
+    const prev = prevCall.current;
+    prevCall.current = dialer.callState;
+    if ((prev === "open" || prev === "connecting") && dialer.callState === "idle" && inCall.current) {
+      inCall.current = false;
+      setOutcomeFor({ campaignContactId: dialedContact.current.campaignContactId, name: dialedContact.current.name, duration: dialer.durationSec });
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [callState, outcomeFor, builderOpen]);
+  }, [dialer.callState, dialer.durationSec]);
 
+  // ── Actions ────────────────────────────────────────────────────────────────
   function selectCampaign(id: string) {
-    setSelectedId(id);
-    setRunning(false);
-    setCompleted(false);
-    setPreviewId(null);
-    setCallState("idle");
-    setNumber("");
+    setSelectedId(id); setRunning(false); setCompleted(false); setClaimed(null); setPreviewContactId(null); setNumber("");
   }
-  function startCampaign() {
-    if (!selectedCampaign || selectedCampaign.contacts.length === 0) return;
-    setCompleted(false);
-    setPreviewId(null);
-    setRunning(true);
-    setWorking([...selectedCampaign.contacts]);
+  async function startCampaign() {
+    if (!selectedId) return;
+    try {
+      const data = await fetch(`/api/dialer/campaigns/${selectedId}/next`, { method: "POST" }).then((r) => r.json());
+      if (data.contact) { setRunning(true); setCompleted(false); setPreviewContactId(null); setClaimed(data.contact); setNumber(digits(data.contact.phone)); }
+      else fireToast("No contacts available to dial");
+    } catch { fireToast("Could not start the campaign"); }
   }
-  function previewContact(id: string) {
-    setPreviewId(id);
-    setCallState("idle");
+  function previewContact(contactId: string) { setPreviewContactId(contactId); }
+  function backToCampaign() { setPreviewContactId(null); setNumber(""); }
+
+  function startDial() {
+    if (!number) return;
+    if (dialer.status !== "ready") { fireToast("Connect Twilio in Settings → Telephony first"); return; }
+    inCall.current = true;
+    const campaignContactId = running && claimed ? claimed.id : null;
+    const name = running && claimed ? claimed.contactName ?? "Contact" : isPreview ? cockpitContact?.name ?? "Contact" : "Manual call";
+    dialedContact.current = { campaignContactId, name };
+    void dialer.dial(number, { contactId: cockpitContactId ?? undefined, campaignContactId: campaignContactId ?? undefined, name });
   }
-  function backToCampaign() {
-    setPreviewId(null);
-    setCallState("idle");
-    setNumber("");
-  }
-  function createCampaign(c: DialerCampaign) {
-    setCampaigns((prev) => [c, ...prev]);
-    setSelectedId(c.id);
-    setRunning(false);
-    setCompleted(false);
-    setBuilderOpen(false);
-    fireToast(`Campaign “${c.name}” created`);
-  }
-  function hangup() {
-    setCallState("idle");
-    setOutcomeFor({ name: current?.name ?? "Manual call", duration: durationSec });
-  }
-  function saveOutcome(o: DialerOutcome) {
+
+  async function saveOutcome(o: DialerOutcome, notes: string) {
+    const oc = outcomeFor;
     setOutcomeFor(null);
-    setMuted(false);
-    setDurationSec(0);
-    if (current && running) {
-      setWorking((prev) => {
-        const [done, ...rest] = prev;
-        const nextAttempts = done.attempts + 1;
-        let next = rest;
-        if (o.requeue && nextAttempts < (selectedCampaign?.maxAttempts ?? 3)) {
-          next = [...rest, { ...done, attempts: nextAttempts }];
-        }
-        if (next.length === 0) setCompleted(true);
-        return next;
-      });
-      fireToast(o.requeue ? `${o.label} · requeued` : `${o.label} · saved`);
+    if (oc?.campaignContactId) {
+      try {
+        const data = await fetch(`/api/dialer/contacts/${oc.campaignContactId}/disposition`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ outcome: o.key, requeue: o.requeue, notes }),
+        }).then((r) => r.json());
+        qc.invalidateQueries({ queryKey: ["dialer-campaign", selectedId] });
+        qc.invalidateQueries({ queryKey: ["dialer-campaigns"] });
+        if (data.next) { setClaimed(data.next); setNumber(digits(data.next.phone)); }
+        else { setClaimed(null); setCompleted(true); }
+        fireToast(o.requeue ? `${o.label} · requeued` : `${o.label} · saved`);
+      } catch { fireToast("Could not save the outcome"); }
     } else {
-      setNumber("");
-      setPreviewId(null);
+      setNumber(""); setPreviewContactId(null);
       fireToast(`${o.label} · saved`);
     }
-    setCallState("idle");
   }
-  function skip() {
-    setWorking((prev) => {
-      if (prev.length < 2) return prev;
-      const [done, ...rest] = prev;
-      return [...rest, done];
-    });
+
+  async function skip() {
+    if (!claimed) return;
+    try {
+      const data = await fetch(`/api/dialer/contacts/${claimed.id}/skip`, { method: "POST" }).then((r) => r.json());
+      qc.invalidateQueries({ queryKey: ["dialer-campaign", selectedId] });
+      if (data.next) { setClaimed(data.next); setNumber(digits(data.next.phone)); }
+      else { setClaimed(null); setCompleted(true); }
+    } catch { fireToast("Could not skip"); }
+  }
+
+  async function createCampaign(c: DialerCampaign) {
+    try {
+      const data = await fetch("/api/dialer/campaigns", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: c.name, maxAttempts: c.maxAttempts }),
+      }).then((r) => r.json());
+      setBuilderOpen(false);
+      await qc.invalidateQueries({ queryKey: ["dialer-campaigns"] });
+      if (data.campaign?.id) selectCampaign(data.campaign.id);
+      fireToast(`Campaign “${c.name}” created`);
+    } catch { fireToast("Could not create the campaign"); }
   }
 
   const keyframes = "@keyframes dialerFade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}";
+  const notConfigured = dialer.status === "not_configured";
 
   return (
     <div className="flex h-full">
       <style>{keyframes}</style>
 
-      {/* Left — campaign rail */}
       <aside className="w-[284px] shrink-0 border-r border-border bg-card/50">
-        <CampaignRail
-          campaigns={campaigns}
-          selectedId={selectedId}
-          onSelect={selectCampaign}
-          onNewCampaign={() => setBuilderOpen(true)}
-          isAdmin={isAdmin}
-        />
+        <CampaignRail campaigns={campaigns} selectedId={selectedId} onSelect={selectCampaign} onNewCampaign={() => setBuilderOpen(true)} loading={campaignsQuery.isLoading} />
       </aside>
 
-      {/* Center — cockpit */}
-      <section className="relative flex-1 min-w-0 bg-background">
-        {completed && running ? (
-          <CompletedPanel name={selectedCampaign?.name ?? "Campaign"} onClose={() => { setRunning(false); setCompleted(false); }} />
-        ) : (
-          <ContactCockpit
-            contact={current}
-            campaign={selectedCampaign}
-            running={running}
-            isPreview={isPreview}
-            onStart={startCampaign}
-            onSkip={skip}
-            onBack={backToCampaign}
-            onSelectContact={previewContact}
-            onToast={fireToast}
-          />
+      <section className="relative flex flex-1 min-w-0 flex-col bg-background">
+        {notConfigured && isAdmin && (
+          <Link href="/settings/telephony" className="flex items-center gap-2 border-b border-warning/30 bg-warning-subtle px-6 py-2.5 text-[12.5px] font-medium text-warning transition-colors hover:bg-warning-subtle/70">
+            <SlidersHorizontal className="h-3.5 w-3.5" /> Connect Twilio to start making calls
+            <ArrowRight className="ml-auto h-3.5 w-3.5" />
+          </Link>
         )}
-
-        <span className="pointer-events-none absolute bottom-3 left-4 rounded-full bg-foreground/5 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Preview · simulated calls
-        </span>
+        <div className="relative min-h-0 flex-1">
+          {completed && running ? (
+            <CompletedPanel name={detail?.campaign.name ?? "Campaign"} onClose={() => { setRunning(false); setCompleted(false); setClaimed(null); }} />
+          ) : (
+            <ContactCockpit
+              contact={cockpitContact}
+              detail={detail}
+              running={running}
+              isPreview={isPreview}
+              contactLoading={!!cockpitContactId && cockpitQuery.isLoading}
+              onStart={startCampaign}
+              onSkip={skip}
+              onBack={backToCampaign}
+              onSelectContact={previewContact}
+              onToast={fireToast}
+            />
+          )}
+        </div>
       </section>
 
-      {/* Right — dial dock */}
       <aside className="w-[372px] shrink-0 border-l border-border bg-muted/15 p-4">
         <DialDock
-          state={callState}
+          state={dockState}
           number={number}
-          contactName={current?.name}
+          contactName={dockName}
           attempt={attempt}
-          muted={muted}
-          durationSec={durationSec}
-          onPress={(k) => setNumber((n) => n + k)}
+          muted={dialer.muted}
+          durationSec={dialer.durationSec}
+          onPress={(k) => { if (dialer.callState === "open") dialer.sendDigits(k); else setNumber((n) => n + k); }}
           onBackspace={() => setNumber((n) => n.slice(0, -1))}
           onClear={() => setNumber("")}
-          onDial={() => number && setCallState("dialing")}
-          onHangup={hangup}
-          onToggleMute={() => setMuted((m) => !m)}
+          onDial={startDial}
+          onHangup={dialer.hangup}
+          onToggleMute={dialer.toggleMute}
         />
       </aside>
 
       {outcomeFor && (
-        <DialerOutcomeModal
-          contactName={outcomeFor.name}
-          durationLabel={outcomeFor.duration > 0 ? mmss(outcomeFor.duration) : "Did not connect"}
-          onSave={saveOutcome}
-        />
+        <DialerOutcomeModal contactName={outcomeFor.name} durationLabel={outcomeFor.duration > 0 ? mmss(outcomeFor.duration) : "Did not connect"} onSave={saveOutcome} />
       )}
-
       {builderOpen && (
-        <CampaignBuilder
-          isAdmin={isAdmin}
-          currentUser={currentUser}
-          onClose={() => setBuilderOpen(false)}
-          onCreate={createCampaign}
-        />
+        <CampaignBuilder isAdmin={isAdmin} currentUser={{ name: userName || "You", initials: (userName || "You").split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase() }} onClose={() => setBuilderOpen(false)} onCreate={createCampaign} />
       )}
-
       {toast && (
-        <div className="pointer-events-none fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-full bg-foreground px-4 py-2 text-[12.5px] font-medium text-background shadow-[0_8px_24px_-8px_rgba(28,35,51,0.5)] motion-safe:animate-[dialerFade_180ms_ease-out]">
-          {toast}
-        </div>
+        <div className="pointer-events-none fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-full bg-foreground px-4 py-2 text-[12.5px] font-medium text-background shadow-[0_8px_24px_-8px_rgba(28,35,51,0.5)] motion-safe:animate-[dialerFade_180ms_ease-out]">{toast}</div>
       )}
     </div>
   );
@@ -243,20 +223,10 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
 function CompletedPanel({ name, onClose }: { name: string; onClose: () => void }) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-8 text-center motion-safe:animate-[dialerFade_220ms_ease-out]">
-      <span className="flex h-16 w-16 items-center justify-center rounded-full bg-info-subtle text-info">
-        <CheckCircle2 className="h-8 w-8" />
-      </span>
+      <span className="flex h-16 w-16 items-center justify-center rounded-full bg-info-subtle text-info"><CheckCircle2 className="h-8 w-8" /></span>
       <h1 className="mt-4 text-[22px] font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>Campaign cleared</h1>
-      <p className="mt-1 max-w-sm text-[13px] text-muted-foreground">
-        You've worked every available contact in {name}. No-answers were requeued up to the attempt limit.
-      </p>
-      <button
-        type="button"
-        onClick={onClose}
-        className="mt-6 rounded-[10px] border border-border bg-card px-5 py-2.5 text-[13px] font-semibold text-foreground transition-colors hover:bg-muted/40"
-      >
-        Back to campaigns
-      </button>
+      <p className="mt-1 max-w-sm text-[13px] text-muted-foreground">You've worked every available contact in {name}. No-answers were requeued up to the attempt limit.</p>
+      <button type="button" onClick={onClose} className="mt-6 rounded-[10px] border border-border bg-card px-5 py-2.5 text-[13px] font-semibold text-foreground transition-colors hover:bg-muted/40">Back to campaigns</button>
     </div>
   );
 }

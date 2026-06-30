@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { slackSettings } from "@/lib/db/schema";
+import { slackSettings, socialLeads } from "@/lib/db/schema";
 import { createBoardFromDemo } from "@/lib/demo-boards/create";
+import { promoteMetaLeadToGhl, type MetaPlatform } from "@/lib/leads/promote-meta-lead";
+import { getSessionUser } from "@/lib/auth/session";
+
+const META_PLATFORMS: MetaPlatform[] = ["instagram", "facebook", "tiktok"];
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +56,60 @@ export async function POST(req: NextRequest) {
       console.error("[demo webhook] board auto-create failed:", boardErr);
     }
 
-    return NextResponse.json({ ok: true, boardToken });
+    // Meta/TikTok conversation → promote to a REAL GHL lead (AD funnel, Demo In
+    // Progress, source-tagged) + mirror locally. Only fires when opened from a Meta
+    // conversation (Lead Platform set) and there's no existing GHL opportunity. Non-fatal:
+    // a promotion failure must never break the demo that already succeeded in n8n.
+    let metaLeadCreated = false;
+    const platform = String(body["Lead Platform"] ?? "").toLowerCase();
+    const hasExistingOpp = !!String(body["Opportunity ID"] ?? "").trim();
+    // This route is public (Meta inbound webhooks share the /api/webhooks/ prefix), so
+    // gate the GHL lead creation behind a real session — the demo modal is always used by
+    // a logged-in rep. Prevents anonymous GHL contact/opportunity spam.
+    const sessionUser = await getSessionUser();
+    if (sessionUser && (META_PLATFORMS as string[]).includes(platform) && !hasExistingOpp) {
+      try {
+        const name = String(
+          body["Contact Name"] || body["Brand Name"] || body["Social Media Handle"] || "Lead",
+        ).trim();
+        const email = String(body["Email"] ?? "").trim() || null;
+        const phone = String(body["Phone"] ?? "").trim() || null;
+        const website = String(body["Website"] ?? "").trim() || null;
+        const source = String(body["Lead Source"] ?? "") || platform;
+
+        const { contactId, opportunityId } = await promoteMetaLeadToGhl({
+          name, email, phone, website, platform: platform as MetaPlatform, source,
+        });
+
+        const commentLeadId = String(body["Comment Lead ID"] ?? "").trim();
+        if (commentLeadId) {
+          // Existing comment lead → promote it (this is what makes it count as a lead).
+          await db()
+            .update(socialLeads)
+            .set({ demoStartedAt: new Date(), ghlContactId: contactId, ghlOpportunityId: opportunityId })
+            .where(eq(socialLeads.id, commentLeadId));
+        } else {
+          // DM (no comment lead row yet) → create the local mirror so it follows the
+          // same dedup + attribution path as comment leads.
+          await db().insert(socialLeads).values({
+            name,
+            platform,
+            commentText: "(Direct message)",
+            keyword: "dm",
+            commenterId: String(body["Participant ID"] ?? "") || null,
+            email, phone, website,
+            demoStartedAt: new Date(),
+            ghlContactId: contactId,
+            ghlOpportunityId: opportunityId,
+          });
+        }
+        metaLeadCreated = true;
+      } catch (metaErr) {
+        console.error("[demo webhook] meta lead promotion failed:", metaErr);
+      }
+    }
+
+    return NextResponse.json({ ok: true, boardToken, metaLeadCreated });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[demo webhook] fetch threw:", message);

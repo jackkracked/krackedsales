@@ -125,7 +125,7 @@ function ConflictTimeline({
   return (
     <div className="space-y-2">
       {/* Timeline bar */}
-      <div className="relative w-full h-6 bg-muted/40 rounded-[6px] border border-border overflow-hidden">
+      <div data-r10n-cal-timeline className="relative w-full h-6 bg-muted/40 rounded-[6px] border border-border overflow-hidden">
         {/* Busy blocks */}
         {busyBlocks.map((b, i) => {
           const left = hoursToPercent(isoToHours(b.start));
@@ -134,6 +134,7 @@ function ConflictTimeline({
           return (
             <div
               key={i}
+              data-r10n-cal-busyblock
               className="absolute top-0 bottom-0 bg-rose-400/50 rounded-[2px]"
               style={{ left: `${left}%`, width: `${width}%` }}
             />
@@ -141,13 +142,14 @@ function ConflictTimeline({
         })}
         {/* Selected time window */}
         <div
+          data-r10n-cal-selblock
           className="absolute top-0 bottom-0 bg-primary/60 rounded-[2px] border border-primary/80"
           style={{ left: `${selStart}%`, width: `${selWidth}%` }}
         />
       </div>
 
       {/* Time labels */}
-      <div className="flex justify-between text-[10px] text-muted-foreground px-0.5">
+      <div data-r10n-cal-timeline-labels className="flex justify-between text-[10px] text-muted-foreground px-0.5">
         <span>8 AM</span>
         <span>12 PM</span>
         <span>6 PM</span>
@@ -155,12 +157,12 @@ function ConflictTimeline({
 
       {/* Status */}
       {hasOverlap ? (
-        <div className="flex items-center gap-1.5 text-xs text-amber-600">
+        <div data-r10n-cal-conflict data-state="conflict" className="flex items-center gap-1.5 text-xs text-amber-600">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
           <span>Conflicts with existing events</span>
         </div>
       ) : (
-        <div className="flex items-center gap-1.5 text-xs text-emerald-600">
+        <div data-r10n-cal-conflict data-state="clear" className="flex items-center gap-1.5 text-xs text-emerald-600">
           <Check className="w-3.5 h-3.5 shrink-0" />
           <span>No conflicts</span>
         </div>
@@ -174,7 +176,7 @@ function ConflictTimeline({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">
+      <label data-r10n-cal-field-label className="block text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">
         {label}
       </label>
       {children}
@@ -445,6 +447,7 @@ export function BookCallDrawer({ open, onClose, onBooked, initialDate, initialSt
       <div
         onClick={onClose}
         aria-hidden="true"
+        data-r10n-cal-backdrop
         className={cn(
           "fixed inset-0 z-40 bg-black/30 transition-opacity duration-200",
           open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
@@ -456,6 +459,7 @@ export function BookCallDrawer({ open, onClose, onBooked, initialDate, initialSt
         role="dialog"
         aria-modal="true"
         aria-label="Book a call"
+        data-r10n-cal-drawer
         className={cn(
           "fixed right-0 top-0 z-50 h-full w-[420px] max-w-[90vw]",
           "bg-card border-l border-border shadow-xl flex flex-col",
@@ -464,8 +468,9 @@ export function BookCallDrawer({ open, onClose, onBooked, initialDate, initialSt
         )}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+        <div data-r10n-cal-drawer-head className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
           <p
+            data-r10n-cal-drawer-title
             className="text-sm font-semibold text-foreground"
             style={{ fontFamily: "var(--font-heading)" }}
           >
@@ -473,6 +478,7 @@ export function BookCallDrawer({ open, onClose, onBooked, initialDate, initialSt
           </p>
           <button
             onClick={onClose}
+            data-r10n-cal-panel-close
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             aria-label="Close"
           >
@@ -615,7 +621,7 @@ export function BookCallDrawer({ open, onClose, onBooked, initialDate, initialSt
 
               {/* Error */}
               {error && (
-                <div className="px-3 py-2.5 rounded-[8px] bg-rose-50 border border-rose-200 text-xs text-rose-700">
+                <div data-r10n-cal-error className="px-3 py-2.5 rounded-[8px] bg-rose-50 border border-rose-200 text-xs text-rose-700">
                   {error}
                 </div>
               )}
@@ -625,11 +631,13 @@ export function BookCallDrawer({ open, onClose, onBooked, initialDate, initialSt
 
         {/* Footer */}
         {!success && (
-          <div className="px-5 py-4 border-t border-border shrink-0">
+          <div data-r10n-cal-drawer-foot className="px-5 py-4 border-t border-border shrink-0">
             <button
               type="submit"
               form="book-call-form"
               disabled={loading || !form.contactId}
+              data-r10n-cal-submit
+              data-disabled={loading || !form.contactId ? "true" : "false"}
               className={cn(
                 "w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-[8px] text-sm font-medium transition-all",
                 loading || !form.contactId

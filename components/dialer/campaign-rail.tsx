@@ -2,10 +2,10 @@
 
 import { Plus, Phone } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
-import type { DialerCampaign } from "./mock-data";
+import type { CampaignSummary } from "./mock-data";
 
-function total(c: DialerCampaign) {
-  return c.reached + c.exhausted + c.contacts.length;
+function initials(name: string) {
+  return (name.trim().split(/\s+/).map((p) => p[0]).slice(0, 2).join("") || "?").toUpperCase();
 }
 
 export function CampaignRail({
@@ -13,13 +13,13 @@ export function CampaignRail({
   selectedId,
   onSelect,
   onNewCampaign,
-  isAdmin,
+  loading,
 }: {
-  campaigns: DialerCampaign[];
+  campaigns: CampaignSummary[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onNewCampaign: () => void;
-  isAdmin: boolean;
+  loading?: boolean;
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -28,19 +28,27 @@ export function CampaignRail({
           Campaigns
         </h2>
         <button
-            type="button"
-            title="New campaign"
-            onClick={onNewCampaign}
-            className="flex h-6 w-6 items-center justify-center rounded-[7px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-          >
-            <Plus className="h-4 w-4" />
-          </button>
+          type="button"
+          title="New campaign"
+          onClick={onNewCampaign}
+          className="flex h-6 w-6 items-center justify-center rounded-[7px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-2.5 pb-3 space-y-1.5">
+        {loading && campaigns.length === 0 && (
+          Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-[68px] rounded-[10px] bg-muted/40 animate-pulse" />)
+        )}
+        {!loading && campaigns.length === 0 && (
+          <p className="px-2 py-8 text-center text-[12px] leading-relaxed text-muted-foreground">
+            No campaigns yet. Create one here, or select contacts on the Contacts or Pipeline page and choose “Add to Power Dialer.”
+          </p>
+        )}
         {campaigns.map((c) => {
-          const t = total(c);
-          const pct = t > 0 ? Math.round((c.reached / t) * 100) : 0;
+          const total = c.counts.total;
+          const pct = total > 0 ? Math.round((c.counts.completed / total) * 100) : 0;
           const selected = c.id === selectedId;
           return (
             <button
@@ -49,37 +57,27 @@ export function CampaignRail({
               onClick={() => onSelect(c.id)}
               className={cn(
                 "group w-full rounded-[10px] border px-3 py-3 text-left transition-all duration-150",
-                selected
-                  ? "border-primary/30 bg-primary/[0.05] shadow-[0_1px_0_rgba(28,35,51,0.02)]"
-                  : "border-transparent hover:border-border/70 hover:bg-muted/40",
+                selected ? "border-primary/30 bg-primary/[0.05]" : "border-transparent hover:border-border/70 hover:bg-muted/40",
               )}
             >
               <div className="flex items-start justify-between gap-2">
-                <p className={cn("text-[13px] font-semibold leading-tight", selected ? "text-foreground" : "text-foreground/90")}>
-                  {c.name}
-                </p>
+                <p className={cn("text-[13px] font-semibold leading-tight", selected ? "text-foreground" : "text-foreground/90")}>{c.name}</p>
                 <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[9.5px] font-semibold text-muted-foreground tabular-nums">
                   <Phone className="h-2.5 w-2.5" />
-                  {c.contacts.length}
+                  {c.counts.queued}
                 </span>
               </div>
-
-              {/* progress */}
               <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-muted">
                 <div className="h-full rounded-full bg-info transition-all" style={{ width: `${pct}%` }} />
               </div>
               <div className="mt-1.5 flex items-center justify-between">
                 <span className="text-[10px] font-medium text-muted-foreground tabular-nums">
-                  {c.reached} reached · {c.contacts.length} left
+                  {c.counts.completed} reached · {c.counts.queued} left
                 </span>
                 <div className="flex -space-x-1.5">
                   {c.reps.map((r) => (
-                    <span
-                      key={r.initials}
-                      title={r.name}
-                      className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-primary/10 text-[8px] font-bold text-primary ring-2 ring-background"
-                    >
-                      {r.initials}
+                    <span key={r.userId} title={r.name} className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-primary/10 text-[8px] font-bold text-primary ring-2 ring-background">
+                      {initials(r.name)}
                     </span>
                   ))}
                 </div>

@@ -71,7 +71,7 @@ function MessageBubble({
   if (isUser) {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[82%] px-3.5 py-2 bg-primary text-primary-foreground rounded-[10px] rounded-br-[3px] text-[13px] leading-relaxed">
+        <div data-r10n-copilot-bubble data-dir="out" className="max-w-[82%] px-3.5 py-2 bg-primary text-primary-foreground rounded-[10px] rounded-br-[3px] text-[13px] leading-relaxed">
           {message.content}
         </div>
       </div>
@@ -81,7 +81,7 @@ function MessageBubble({
   return (
     <div className="flex justify-start gap-2">
       {/* K avatar */}
-      <div className="w-5 h-5 rounded-[4px] bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+      <div data-r10n-copilot-kmark className="w-5 h-5 rounded-[4px] bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
         <span
           className="text-primary font-black leading-none"
           style={{ fontFamily: "var(--font-heading)", fontSize: 11, letterSpacing: "-0.04em" }}
@@ -93,7 +93,7 @@ function MessageBubble({
         {message.streaming && !message.content ? (
           <TypingDots />
         ) : (
-          <div className="text-[13px] leading-relaxed text-foreground copilot-prose">
+          <div data-r10n-copilot-bubble data-dir="in" className="text-[13px] leading-relaxed text-foreground copilot-prose">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
@@ -234,6 +234,7 @@ export function CopilotFAB() {
       {/* Panel */}
       {open && (
         <div
+          data-r10n-copilot-panel
           className="fixed bottom-[80px] right-6 z-50 flex flex-col bg-card border border-border overflow-hidden"
           style={{
             width: 420,
@@ -245,8 +246,8 @@ export function CopilotFAB() {
           }}
         >
           {/* Header */}
-          <div className="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
-            <div className="w-5 h-5 rounded-[5px] bg-primary flex items-center justify-center shrink-0">
+          <div data-r10n-copilot-header className="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
+            <div data-r10n-copilot-kmark data-variant="solid" className="w-5 h-5 rounded-[5px] bg-primary flex items-center justify-center shrink-0">
               <span
                 className="text-primary-foreground font-black leading-none"
                 style={{ fontFamily: "var(--font-heading)", fontSize: 11, letterSpacing: "-0.04em" }}
@@ -255,12 +256,13 @@ export function CopilotFAB() {
               </span>
             </div>
             <span
+              data-r10n-copilot-title
               className="text-[13px] font-semibold text-foreground"
               style={{ fontFamily: "var(--font-heading)" }}
             >
               Co-pilot
             </span>
-            <span className="text-[11px] text-muted-foreground truncate ml-0.5">{pageLabel}</span>
+            <span data-r10n-copilot-pagelabel className="text-[11px] text-muted-foreground truncate ml-0.5">{pageLabel}</span>
             <button
               onClick={() => setOpen(false)}
               className="ml-auto p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
@@ -273,7 +275,7 @@ export function CopilotFAB() {
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full gap-3 pb-4">
-                <div className="w-10 h-10 rounded-[8px] bg-primary/8 flex items-center justify-center">
+                <div data-r10n-copilot-emptyicon className="w-10 h-10 rounded-[8px] bg-primary/8 flex items-center justify-center">
                   <Sparkles className="w-4 h-4 text-primary" />
                 </div>
                 <p className="text-sm text-muted-foreground text-center">What can I help with?</p>
@@ -292,6 +294,7 @@ export function CopilotFAB() {
               {QUICK_PROMPTS.map((p) => (
                 <button
                   key={p}
+                  data-r10n-copilot-quickprompt
                   onClick={() => sendMessage(p)}
                   className="text-[11px] px-2.5 py-1 rounded-full border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 hover:bg-primary/[0.04] transition-colors"
                 >
@@ -302,8 +305,8 @@ export function CopilotFAB() {
           )}
 
           {/* Input */}
-          <div className="px-3 pb-3 shrink-0 border-t border-border pt-3">
-            <div className="flex items-center gap-2 rounded-[8px] border border-border bg-background px-3 py-2 focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10 transition-all">
+          <div data-r10n-copilot-inputbar className="px-3 pb-3 shrink-0 border-t border-border pt-3">
+            <div data-r10n-copilot-inputwrap className="flex items-center gap-2 rounded-[8px] border border-border bg-background px-3 py-2 focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10 transition-all">
               <textarea
                 ref={inputRef}
                 value={input}
@@ -318,6 +321,8 @@ export function CopilotFAB() {
               <button
                 onClick={() => sendMessage(input)}
                 disabled={!input.trim() || isStreaming}
+                data-r10n-copilot-send
+                data-ready={input.trim() && !isStreaming ? "true" : undefined}
                 className={cn(
                   "shrink-0 w-7 h-7 rounded-[6px] flex items-center justify-center transition-colors",
                   input.trim() && !isStreaming
@@ -328,7 +333,7 @@ export function CopilotFAB() {
                 <Send className="w-3.5 h-3.5" />
               </button>
             </div>
-            <p className="text-[10px] text-muted-foreground/40 mt-1.5 text-center">⌘K to toggle · Enter to send</p>
+            <p data-r10n-copilot-hint className="text-[10px] text-muted-foreground/40 mt-1.5 text-center">⌘K to toggle · Enter to send</p>
           </div>
         </div>
       )}
@@ -336,6 +341,8 @@ export function CopilotFAB() {
       {/* FAB */}
       <button
         onClick={() => setOpen((v) => !v)}
+        data-r10n-copilot-fab
+        data-open={open ? "true" : undefined}
         className="fixed bottom-6 right-6 z-50 flex items-center justify-center rounded-full bg-primary text-primary-foreground transition-all duration-200 hover:bg-primary/90 active:scale-95"
         style={{
           width: 48,

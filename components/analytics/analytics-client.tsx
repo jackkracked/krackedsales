@@ -93,11 +93,16 @@ function StatCard({ label, value, subtitle, trend, accent = "default" }: StatCar
       : "text-muted-foreground";
 
   return (
-    <div className="bg-card border border-border rounded-[10px] p-4">
-      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+    <div data-r10n-analytics-card className="bg-card border border-border rounded-[10px] p-4">
+      <p
+        data-r10n-analytics-metric-label
+        className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2"
+      >
         {label}
       </p>
       <p
+        data-r10n-analytics-metric-value
+        data-accent={accent}
         className={cn("text-3xl font-bold leading-none", valueColor)}
         style={{ fontFamily: "var(--font-heading)" }}
       >
@@ -106,12 +111,20 @@ function StatCard({ label, value, subtitle, trend, accent = "default" }: StatCar
       {(subtitle || trend) && (
         <div className="flex items-center gap-2 mt-1.5">
           {trend && (
-            <span className={cn("flex items-center gap-0.5 text-xs font-medium", trendColor)}>
+            <span
+              data-r10n-analytics-trend
+              data-dir={trend.up === true ? "up" : trend.up === false ? "down" : "flat"}
+              className={cn("flex items-center gap-0.5 text-xs font-medium", trendColor)}
+            >
               <TrendIcon className="w-3 h-3" />
               {trend.value}
             </span>
           )}
-          {subtitle && <span className="text-xs text-muted-foreground">{subtitle}</span>}
+          {subtitle && (
+            <span data-r10n-analytics-metric-sub className="text-xs text-muted-foreground">
+              {subtitle}
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -342,8 +355,9 @@ function MarketingEfficiencyCard({
     : [];
 
   return (
-    <div className="bg-card border border-border rounded-[10px] p-5">
+    <div data-r10n-analytics-card className="bg-card border border-border rounded-[10px] p-5">
       <h3
+        data-r10n-analytics-chart-title
         className="text-sm font-semibold text-foreground mb-4"
         style={{ fontFamily: "var(--font-heading)" }}
       >
@@ -357,7 +371,7 @@ function MarketingEfficiencyCard({
           ))}
         </div>
       ) : allZero ? (
-        <div className="flex items-start gap-2 py-3 text-muted-foreground">
+        <div data-r10n-analytics-empty className="flex items-start gap-2 py-3 text-muted-foreground">
           <Info className="w-4 h-4 shrink-0 mt-0.5" />
           <p className="text-xs">Connect Meta Ads to see live data</p>
         </div>
@@ -366,10 +380,15 @@ function MarketingEfficiencyCard({
           {rows.map(({ label, value, highlight }) => (
             <div
               key={label}
+              data-r10n-analytics-row
               className="flex items-center justify-between py-2 border-b border-border last:border-0"
             >
-              <span className="text-sm text-muted-foreground">{label}</span>
+              <span data-r10n-analytics-row-label className="text-sm text-muted-foreground">
+                {label}
+              </span>
               <span
+                data-r10n-analytics-row-value
+                data-highlight={highlight && value !== "—" ? "true" : "false"}
                 className={cn(
                   "text-sm font-semibold",
                   highlight && value !== "—" ? "text-gold" : "text-foreground"
@@ -424,6 +443,7 @@ function CommentLeadsSection({ period }: { period: Period }) {
     <div className="space-y-4">
       {/* Section header */}
       <h2
+        data-r10n-analytics-section-title
         className="text-base font-semibold text-foreground"
         style={{ fontFamily: "var(--font-heading)" }}
       >
@@ -440,50 +460,63 @@ function CommentLeadsSection({ period }: { period: Period }) {
       {/* Chart + keywords */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Chart — takes 2 cols */}
-        <div className="lg:col-span-2 bg-card border border-border rounded-[10px] p-5">
+        <div data-r10n-analytics-card className="lg:col-span-2 bg-card border border-border rounded-[10px] p-5">
           <h3
+            data-r10n-analytics-chart-title
             className="text-sm font-semibold text-foreground mb-4"
             style={{ fontFamily: "var(--font-heading)" }}
           >
             Trigger word comments over time
           </h3>
           {!hasData ? (
-            <div className="flex items-center gap-2 py-6 text-muted-foreground">
+            <div data-r10n-analytics-empty className="flex items-center gap-2 py-6 text-muted-foreground">
               <Info className="w-4 h-4 shrink-0" />
               <p className="text-xs">No trigger word comments in this period yet.</p>
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={data.chartData} barSize={12} margin={{ top: 8, right: 4, bottom: 0, left: -16 }}>
-                <CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
-                  tickLine={false}
-                  axisLine={false}
-                  width={24}
-                  allowDecimals={false}
-                />
-                <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: "var(--muted)" }} />
-                <Bar dataKey="facebook" name="Facebook" fill="#1877F2" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="instagram" name="Instagram" fill="#E1306C" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <div data-r10n-analytics-chart>
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={data.chartData} barSize={12} margin={{ top: 8, right: 4, bottom: 0, left: -16 }}>
+                  <CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                    tickLine={false}
+                    axisLine={false}
+                    width={24}
+                    allowDecimals={false}
+                  />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: "var(--muted)" }} />
+                  <Bar dataKey="facebook" name="Facebook" fill="var(--r10n-chart-fb, #1877F2)" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="instagram" name="Instagram" fill="var(--r10n-chart-ig, #E1306C)" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           )}
           {/* Legend */}
           {hasData && (
-            <div className="flex items-center gap-4 mt-2">
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span className="w-2.5 h-2.5 rounded-sm bg-[#1877F2] shrink-0" />
+            <div data-r10n-analytics-legend className="flex items-center gap-4 mt-2">
+              <span data-r10n-analytics-legend-item className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span
+                  data-r10n-analytics-swatch
+                  data-series="fb"
+                  className="w-2.5 h-2.5 rounded-sm shrink-0"
+                  style={{ backgroundColor: "var(--r10n-chart-fb, #1877F2)" }}
+                />
                 Facebook
               </span>
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span className="w-2.5 h-2.5 rounded-sm bg-[#E1306C] shrink-0" />
+              <span data-r10n-analytics-legend-item className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span
+                  data-r10n-analytics-swatch
+                  data-series="ig"
+                  className="w-2.5 h-2.5 rounded-sm shrink-0"
+                  style={{ backgroundColor: "var(--r10n-chart-ig, #E1306C)" }}
+                />
                 Instagram
               </span>
             </div>
@@ -491,26 +524,28 @@ function CommentLeadsSection({ period }: { period: Period }) {
         </div>
 
         {/* Top keywords */}
-        <div className="bg-card border border-border rounded-[10px] p-5">
+        <div data-r10n-analytics-card className="bg-card border border-border rounded-[10px] p-5">
           <h3
+            data-r10n-analytics-chart-title
             className="text-sm font-semibold text-foreground mb-4"
             style={{ fontFamily: "var(--font-heading)" }}
           >
             Top trigger words
           </h3>
           {data.topKeywords.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No data yet.</p>
+            <p data-r10n-analytics-empty className="text-xs text-muted-foreground">No data yet.</p>
           ) : (
             <div className="space-y-0">
               {data.topKeywords.map(({ keyword, count }) => (
                 <div
                   key={keyword}
+                  data-r10n-analytics-row
                   className="flex items-center justify-between py-2 border-b border-border last:border-0"
                 >
-                  <span className="text-sm text-muted-foreground font-mono truncate pr-2">
+                  <span data-r10n-analytics-keyword className="text-sm text-muted-foreground font-mono truncate pr-2">
                     {keyword}
                   </span>
-                  <span className="text-sm font-semibold text-foreground shrink-0">{count}</span>
+                  <span data-r10n-analytics-row-value className="text-sm font-semibold text-foreground shrink-0">{count}</span>
                 </div>
               ))}
             </div>
@@ -541,15 +576,17 @@ export function AnalyticsClient() {
 
   const allDemosSent = tasks.filter((t) => t.bucket === "DEMO_SENT").length;
 
+  // Under r10n these map to the obsidian/steel/lime ramp via inline var fallbacks;
+  // default theme keeps the original navy/sand/green literals.
   const donutSegments = [
-    { label: "In Progress", value: stats.inProgress, color: "#0F3A5C" },
-    { label: "Waiting to Send", value: stats.waitingToSend, color: "#D4A574" },
-    { label: "Demo Sent", value: allDemosSent, color: "#2D5E3F" },
+    { label: "In Progress", value: stats.inProgress, color: "var(--r10n-chart-segment-1, #0F3A5C)" },
+    { label: "Waiting to Send", value: stats.waitingToSend, color: "var(--r10n-chart-segment-2, #D4A574)" },
+    { label: "Demo Sent", value: allDemosSent, color: "var(--r10n-chart-segment-3, #2D5E3F)" },
   ].filter((s) => s.value > 0);
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
+      <div data-r10n-analytics-loading className="flex items-center justify-center h-64 text-muted-foreground text-sm">
         <RefreshCw className="w-4 h-4 animate-spin mr-2" />
         Loading analytics…
       </div>
@@ -560,11 +597,13 @@ export function AnalyticsClient() {
     <div className="space-y-6">
 
       {/* 1 — Period selector */}
-      <div className="flex items-center gap-1 bg-muted rounded-lg p-1 w-fit">
+      <div data-r10n-analytics-periods className="flex items-center gap-1 bg-muted rounded-lg p-1 w-fit">
         {PERIODS.map(({ key, label }) => (
           <button
             key={key}
             onClick={() => setPeriod(key)}
+            data-r10n-analytics-period
+            data-active={period === key ? "true" : "false"}
             className={cn(
               "px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
               period === key
@@ -620,61 +659,66 @@ export function AnalyticsClient() {
       </div>
 
       {/* 3 — Full-width gradient area chart */}
-      <div className="bg-card border border-border rounded-[10px] p-5">
+      <div data-r10n-analytics-card className="bg-card border border-border rounded-[10px] p-5">
         <h3
+          data-r10n-analytics-chart-title
           className="text-sm font-semibold text-foreground mb-4"
           style={{ fontFamily: "var(--font-heading)" }}
         >
           Demo volume over time
         </h3>
-        <ResponsiveContainer width="100%" height={200}>
-          <AreaChart data={stats.barData} margin={{ top: 8, right: 4, bottom: 0, left: -16 }}>
-            <defs>
-              <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#0F3A5C" stopOpacity={0.12} />
-                <stop offset="100%" stopColor="#0F3A5C" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid
-              vertical={false}
-              stroke="var(--border)"
-              strokeDasharray="3 3"
-            />
-            <XAxis
-              dataKey="label"
-              tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
-              tickLine={false}
-              axisLine={false}
-              interval={Math.max(0, Math.floor(stats.barData.length / 7) - 1)}
-            />
-            <YAxis
-              tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
-              tickLine={false}
-              axisLine={false}
-              width={28}
-              allowDecimals={false}
-            />
-            <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ stroke: "var(--border)" }} />
-            <Area
-              type="monotone"
-              dataKey="count"
-              name="Demos requested"
-              stroke="var(--primary)"
-              strokeWidth={2}
-              fill="url(#areaGradient)"
-              dot={false}
-              activeDot={{ r: 4, fill: "#0F3A5C", strokeWidth: 0 }}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
+        <div data-r10n-analytics-chart>
+          <ResponsiveContainer width="100%" height={200}>
+            <AreaChart data={stats.barData} margin={{ top: 8, right: 4, bottom: 0, left: -16 }}>
+              <defs>
+                {/* The line is the single accent: lime under r10n, navy by default. */}
+                <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--r10n-chart-line, #0F3A5C)" stopOpacity={0.12} />
+                  <stop offset="100%" stopColor="var(--r10n-chart-line, #0F3A5C)" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid
+                vertical={false}
+                stroke="var(--border)"
+                strokeDasharray="3 3"
+              />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                tickLine={false}
+                axisLine={false}
+                interval={Math.max(0, Math.floor(stats.barData.length / 7) - 1)}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                tickLine={false}
+                axisLine={false}
+                width={28}
+                allowDecimals={false}
+              />
+              <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ stroke: "var(--border)" }} />
+              <Area
+                type="monotone"
+                dataKey="count"
+                name="Demos requested"
+                stroke="var(--r10n-chart-line, var(--primary))"
+                strokeWidth={2}
+                fill="url(#areaGradient)"
+                dot={false}
+                activeDot={{ r: 4, fill: "var(--r10n-chart-line, #0F3A5C)", strokeWidth: 0 }}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
       </div>
 
       {/* 4 — Donut + Pipeline summary */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
         {/* Left — Animated donut */}
-        <div className="bg-card border border-border rounded-[10px] p-5">
+        <div data-r10n-analytics-card data-r10n-analytics-donut className="bg-card border border-border rounded-[10px] p-5">
           <h3
+            data-r10n-analytics-chart-title
             className="text-sm font-semibold text-foreground mb-4"
             style={{ fontFamily: "var(--font-heading)" }}
           >
@@ -683,13 +727,14 @@ export function AnalyticsClient() {
           {donutSegments.length > 0 ? (
             <DonutChart segments={donutSegments} />
           ) : (
-            <p className="text-xs text-muted-foreground">No data yet.</p>
+            <p data-r10n-analytics-empty className="text-xs text-muted-foreground">No data yet.</p>
           )}
         </div>
 
         {/* Right — Pipeline summary table */}
-        <div className="bg-card border border-border rounded-[10px] p-5">
+        <div data-r10n-analytics-card className="bg-card border border-border rounded-[10px] p-5">
           <h3
+            data-r10n-analytics-chart-title
             className="text-sm font-semibold text-foreground mb-4"
             style={{ fontFamily: "var(--font-heading)" }}
           >
@@ -709,10 +754,11 @@ export function AnalyticsClient() {
             ].map(({ label, value, color }) => (
               <div
                 key={label}
+                data-r10n-analytics-row
                 className="flex items-center justify-between py-2 border-b border-border last:border-0"
               >
-                <span className="text-sm text-muted-foreground">{label}</span>
-                <span className={cn("text-sm font-semibold text-foreground", color)}>
+                <span data-r10n-analytics-row-label className="text-sm text-muted-foreground">{label}</span>
+                <span data-r10n-analytics-row-value className={cn("text-sm font-semibold text-foreground", color)}>
                   {value}
                 </span>
               </div>
@@ -725,54 +771,65 @@ export function AnalyticsClient() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
         {/* Left — Day of week bar chart */}
-        <div className="bg-card border border-border rounded-[10px] p-5 flex flex-col">
+        <div data-r10n-analytics-card className="bg-card border border-border rounded-[10px] p-5 flex flex-col">
           <h3
+            data-r10n-analytics-chart-title
             className="text-sm font-semibold text-foreground mb-1 shrink-0"
             style={{ fontFamily: "var(--font-heading)" }}
           >
             Demos by day of week
             {stats.peakDay.count > 0 && (
-              <span className="ml-2 text-xs font-normal text-muted-foreground">
+              <span data-r10n-analytics-peak className="ml-2 text-xs font-normal text-muted-foreground">
                 — peak: {stats.peakDay.day} ({stats.peakDay.count})
               </span>
             )}
           </h3>
-          <ResponsiveContainer width="100%" className="flex-1 min-h-0" height="100%"
-          >
-            <BarChart
-              data={stats.dayOfWeek}
-              barSize={32}
-              margin={{ top: 16, right: 0, bottom: 0, left: 0 }}
-            >
-              <XAxis
-                dataKey="day"
-                tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-                tickLine={false}
-                axisLine={false}
-                height={28}
-              />
-              <YAxis hide allowDecimals={false} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: "var(--muted)" }} />
-              <Bar dataKey="count" name="Demos" radius={[4, 4, 0, 0]}>
-                <LabelList
-                  dataKey="count"
-                  position="top"
-                  style={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+          <div data-r10n-analytics-chart className="flex-1 min-h-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={stats.dayOfWeek}
+                barSize={32}
+                margin={{ top: 16, right: 0, bottom: 0, left: 0 }}
+              >
+                <XAxis
+                  dataKey="day"
+                  tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                  tickLine={false}
+                  axisLine={false}
+                  height={28}
                 />
-                {stats.dayOfWeek.map((entry, i) => (
-                  <Cell
-                    key={i}
-                    fill="var(--primary)"
-                    opacity={
-                      entry.count === 0 ? 0.12
-                      : entry.day === stats.peakDay.day ? 1
-                      : 0.55
-                    }
+                <YAxis hide allowDecimals={false} />
+                <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: "var(--muted)" }} />
+                <Bar dataKey="count" name="Demos" radius={[4, 4, 0, 0]}>
+                  <LabelList
+                    dataKey="count"
+                    position="top"
+                    style={{ fontSize: 11, fill: "var(--muted-foreground)" }}
                   />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+                  {/* Default: navy bars dimmed by opacity, peak full. Under r10n the
+                      peak bar claims the lime accent while the rest stay obsidian. */}
+                  {stats.dayOfWeek.map((entry, i) => {
+                    const isPeak = entry.day === stats.peakDay.day && entry.count > 0;
+                    return (
+                      <Cell
+                        key={i}
+                        fill={
+                          isPeak
+                            ? "var(--r10n-chart-bar-peak, var(--primary))"
+                            : "var(--r10n-chart-bar, var(--primary))"
+                        }
+                        opacity={
+                          entry.count === 0 ? 0.12
+                          : isPeak ? 1
+                          : 0.55
+                        }
+                      />
+                    );
+                  })}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
 
         {/* Right — Marketing efficiency (live Meta Ads data) */}
@@ -784,7 +841,7 @@ export function AnalyticsClient() {
       </div>
 
       {/* 6 — Comment leads section */}
-      <div className="border-t border-border pt-6">
+      <div data-r10n-analytics-divider className="border-t border-border pt-6">
         <CommentLeadsSection period={period} />
       </div>
     </div>

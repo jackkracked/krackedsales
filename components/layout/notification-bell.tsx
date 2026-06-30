@@ -107,6 +107,7 @@ export function NotificationBell() {
       <button
         onClick={handleOpen}
         title="Notifications"
+        data-r10n-bell
         className={cn(
           "relative flex items-center justify-center w-7 h-7 rounded-md transition-colors",
           open

@@ -82,6 +82,8 @@ function Pill({ active, onClick, children }: { active: boolean; onClick: () => v
       type="button"
       aria-pressed={active}
       onClick={onClick}
+      data-r10n-fpill
+      data-active={active ? "true" : "false"}
       className={cn(
         "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[9px] text-xs font-medium ring-1 transition-all duration-150",
         active
@@ -100,6 +102,8 @@ function StagePill({ active, label, onClick }: { active: boolean; label: string;
       type="button"
       aria-pressed={active}
       onClick={onClick}
+      data-r10n-fpill
+      data-active={active ? "true" : "false"}
       className={cn(
         "px-3 py-1.5 rounded-[9px] text-xs font-medium transition-all duration-150",
         active
@@ -120,6 +124,8 @@ function Tri({ value, onChange, disabled }: { value: TriState; onChange: (v: Tri
         disabled={disabled}
         aria-pressed={value === "yes"}
         onClick={() => onChange(value === "yes" ? null : "yes")}
+        data-r10n-tri
+        data-state={value === "yes" ? "yes" : "off"}
         className={cn(
           "px-3.5 py-1.5 rounded-[9px] text-xs font-semibold ring-1 transition-all duration-150 disabled:cursor-not-allowed",
           value === "yes"
@@ -134,6 +140,8 @@ function Tri({ value, onChange, disabled }: { value: TriState; onChange: (v: Tri
         disabled={disabled}
         aria-pressed={value === "no"}
         onClick={() => onChange(value === "no" ? null : "no")}
+        data-r10n-tri
+        data-state={value === "no" ? "no" : "off"}
         className={cn(
           "px-3.5 py-1.5 rounded-[9px] text-xs font-semibold ring-1 transition-all duration-150 disabled:cursor-not-allowed",
           value === "no"
@@ -149,8 +157,8 @@ function Tri({ value, onChange, disabled }: { value: TriState; onChange: (v: Tri
 
 function Group({ label, full, children }: { label: string; full?: boolean; children: React.ReactNode }) {
   return (
-    <div className={cn("rounded-[14px] bg-[#FBFAF8] ring-1 ring-border/60 p-3.5", full && "sm:col-span-2")}>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/80 mb-2.5">{label}</p>
+    <div data-r10n-fgroup className={cn("rounded-[14px] bg-[#FBFAF8] ring-1 ring-border/60 p-3.5", full && "sm:col-span-2")}>
+      <p data-r10n-fgroup-label className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/80 mb-2.5">{label}</p>
       <div className="flex flex-wrap gap-1.5 items-center">{children}</div>
     </div>
   );
@@ -232,20 +240,21 @@ export function FilterSheet({
         role="dialog"
         aria-modal="true"
         aria-label="Filter contacts"
+        data-r10n-fsheet
         className="fixed right-0 top-0 h-full w-full sm:w-[640px] z-50 bg-background border-l border-border shadow-2xl flex flex-col animate-slide-in-right"
       >
         {/* Hero header */}
-        <div className="px-5 py-5 border-b border-border bg-primary/[0.04] shrink-0">
+        <div data-r10n-fsheet-hero className="px-5 py-5 border-b border-border bg-primary/[0.04] shrink-0">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-[11px] bg-primary/10 flex items-center justify-center">
+              <div data-r10n-fsheet-glyph className="w-9 h-9 rounded-[11px] bg-primary/10 flex items-center justify-center">
                 <SlidersHorizontal className="w-4 h-4 text-primary" />
               </div>
-              <h2 className="text-sm font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>
+              <h2 data-r10n-fsheet-title className="text-sm font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>
                 Filters
               </h2>
               {active > 0 && (
-                <span className="text-[11px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full tabular-nums">
+                <span data-r10n-fsheet-activepill className="text-[11px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full tabular-nums">
                   {active} active
                 </span>
               )}
@@ -261,12 +270,13 @@ export function FilterSheet({
           </div>
           <div className="mt-3 flex items-baseline gap-2">
             <span
+              data-r10n-fsheet-count
               className={cn("text-[2.75rem] leading-none font-bold text-primary tabular-nums transition-opacity", loading && "opacity-40")}
               style={{ fontFamily: "var(--font-heading)" }}
             >
               {displayCount.toLocaleString()}
             </span>
-            <span className="text-sm text-muted-foreground">
+            <span data-r10n-fsheet-countsub className="text-sm text-muted-foreground">
               {baselineCount > 0 ? `of ${baselineCount.toLocaleString()} contacts match` : "contacts match"}
             </span>
           </div>
@@ -343,6 +353,8 @@ export function FilterSheet({
                       type="button"
                       aria-pressed={on}
                       onClick={() => toggle("rep", r.value)}
+                      data-r10n-fpill
+                      data-active={on ? "true" : "false"}
                       className={cn(
                         "inline-flex items-center gap-1.5 pl-1 pr-3 py-1 rounded-full text-xs font-medium ring-1 transition-all duration-150",
                         on
@@ -376,6 +388,7 @@ export function FilterSheet({
                   onChange={(e) => setCustomUrgency(e.target.value)}
                   placeholder="7"
                   aria-label="Custom days since last contact"
+                  data-r10n-finput
                   className="w-11 px-1.5 py-1 rounded-[7px] ring-1 ring-border bg-card text-center tabular-nums text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
                 />
                 d+
@@ -391,6 +404,7 @@ export function FilterSheet({
                   onChange={(e) => setDaysInStage(e.target.value)}
                   placeholder="7"
                   aria-label="Days in current stage"
+                  data-r10n-finput
                   className="w-11 px-1.5 py-1 rounded-[7px] ring-1 ring-border bg-card text-center tabular-nums text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
                 />
                 days
@@ -420,7 +434,7 @@ export function FilterSheet({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-5 py-4 border-t border-border bg-card shrink-0">
+        <div data-r10n-fsheet-footer className="flex items-center justify-between px-5 py-4 border-t border-border bg-card shrink-0">
           <button
             type="button"
             onClick={onClear}
@@ -433,6 +447,7 @@ export function FilterSheet({
           <button
             type="button"
             onClick={onClose}
+            data-r10n-fsheet-done
             className="px-4 py-2 rounded-[10px] bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
           >
             Done

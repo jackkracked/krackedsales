@@ -497,6 +497,11 @@ export const calls = pgTable("calls", {
   fathomSummary: text("fathom_summary"),                      // markdown AI summary from Fathom
   fathomSyncedAt: timestamp("fathom_synced_at"),              // when this call was last synced from Fathom
   fathomShareUrl: text("fathom_share_url"),                   // link to view recording in Fathom
+  // Twilio dialer-specific
+  twilioCallSid: text("twilio_call_sid"),                     // Twilio Call SID — dedup key for in-app dialer calls
+  campaignId: uuid("campaign_id"),                            // dialer campaign this call belongs to (null = manual/other)
+  recordingUrl: text("recording_url"),                        // stored recording (Vercel Blob) for dialer calls
+  source: text("source").default("ghl"),                     // "ghl" | "twilio"
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -700,7 +705,8 @@ export const bookingAutomationRules = pgTable("booking_automation_rules", {
  */
 export const callDispositions = pgTable("call_dispositions", {
   id: uuid("id").primaryKey().defaultRandom(),
-  calendarEventId: text("calendar_event_id").notNull().unique(), // GHL event ID, dedup key
+  calendarEventId: text("calendar_event_id").unique(), // GHL event ID, dedup key (null for dialer calls)
+  callId: uuid("call_id"),            // dialer calls disposition against a calls.id instead of a calendar event
   contactId: text("contact_id"),      // GHL contact ID (used to push notes)
   contactName: text("contact_name"),  // snapshot for display/reporting
   repEmail: text("rep_email"),        // which rep owned this event
@@ -757,6 +763,31 @@ export const dialerCampaignContacts = pgTable("dialer_campaign_contacts", {
   uniqContact: uniqueIndex("dialer_campaign_contacts_campaign_contact_key").on(t.campaignId, t.contactId),
   queueIdx: index("dialer_campaign_contacts_queue_idx").on(t.campaignId, t.status, t.position),
 }));
+
+/** Twilio connection (single row). The API Key secret is stored ENCRYPTED at rest
+ *  (lib/dialer/crypto). SIDs + the caller number are identifiers, not secrets. */
+export const dialerSettings = pgTable("dialer_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  twilioAccountSid: text("twilio_account_sid"),
+  twilioApiKeySid: text("twilio_api_key_sid"),
+  twilioApiKeySecret: text("twilio_api_key_secret"), // encrypted
+  twimlAppSid: text("twiml_app_sid"),
+  callerId: text("caller_id"),                       // the shared business number (E.164)
+  voicemailGreetingUrl: text("voicemail_greeting_url"),
+  updatedBy: uuid("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/** The number pool. One shared number for v1; per-rep numbers later (assignedRep). */
+export const twilioNumbers = pgTable("twilio_numbers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  phoneNumber: text("phone_number").notNull().unique(),
+  twilioSid: text("twilio_sid"),
+  label: text("label"),
+  assignedRepUserId: uuid("assigned_rep_user_id").references(() => users.id),
+  isShared: boolean("is_shared").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
 
 /**
  * AI-generated call preparation briefs — cached per calendar event.

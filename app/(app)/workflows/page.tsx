@@ -68,18 +68,19 @@ export default function WorkflowsPage() {
   });
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div data-r10n-wf-list-page="" className="h-full overflow-y-auto">
       <div className="max-w-4xl mx-auto px-6 py-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Workflows</h1>
+            <h1 data-r10n-wf-page-title="" className="text-2xl font-bold tracking-tight">Workflows</h1>
             <p className="text-sm text-muted-foreground mt-1">
               Automate your sales process with visual workflows
             </p>
           </div>
           <button
             onClick={() => setCreating(true)}
+            data-r10n-wf-primary-btn=""
             className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:bg-primary/90 transition-colors"
           >
             <Plus className="w-4 h-4" />
@@ -89,9 +90,9 @@ export default function WorkflowsPage() {
 
         {/* Create modal */}
         {creating && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="bg-background border border-border rounded-xl p-6 w-full max-w-md shadow-2xl">
-              <h2 className="text-lg font-bold mb-4">New Workflow</h2>
+          <div data-r10n-wf-modal-overlay="" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div data-r10n-wf-modal="" className="bg-background border border-border rounded-xl p-6 w-full max-w-md shadow-2xl">
+              <h2 data-r10n-wf-modal-title="" className="text-lg font-bold mb-4">New Workflow</h2>
               <input
                 autoFocus
                 value={newName}
@@ -113,6 +114,7 @@ export default function WorkflowsPage() {
                 <button
                   disabled={!newName.trim() || createMutation.isPending}
                   onClick={() => newName.trim() && createMutation.mutate(newName.trim())}
+                  data-r10n-wf-primary-btn=""
                   className="px-4 py-2 rounded-lg text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
                 >
                   {createMutation.isPending ? "Creating..." : "Create"}
@@ -140,11 +142,15 @@ export default function WorkflowsPage() {
             {workflows.map((wf) => (
               <div
                 key={wf.id}
+                data-r10n-wf-row=""
                 className="flex items-center gap-4 p-4 bg-card border border-border rounded-xl hover:border-primary/30 transition-colors cursor-pointer group"
                 onClick={() => router.push(`/workflows/${wf.id}`)}
               >
                 {/* Status dot */}
-                <div className={cn(
+                <div
+                  data-r10n-wf-statusdot=""
+                  data-enabled={wf.enabled ? "true" : "false"}
+                  className={cn(
                   "w-2 h-2 rounded-full shrink-0",
                   wf.enabled ? "bg-green-500" : "bg-muted-foreground/30"
                 )} />
@@ -170,6 +176,8 @@ export default function WorkflowsPage() {
                       e.stopPropagation();
                       toggleMutation.mutate({ id: wf.id, enabled: !wf.enabled });
                     }}
+                    data-r10n-wf-toggle=""
+                    data-enabled={wf.enabled ? "true" : "false"}
                     className={cn(
                       "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
                       wf.enabled ? "bg-green-500" : "bg-muted"

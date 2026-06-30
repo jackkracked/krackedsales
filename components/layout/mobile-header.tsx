@@ -52,17 +52,20 @@ export function MobileHeader() {
     <>
       {/* Top bar */}
       <header
+        data-r10n-topbar
         className="lg:hidden flex items-center justify-between h-14 px-4 border-b border-border shrink-0"
         style={{ backgroundColor: "var(--sidebar)" }}
       >
         <button
           onClick={() => setSidebarOpen(true)}
+          data-r10n-topbar-btn
           className="p-2 -ml-1 rounded-md text-muted-foreground hover:text-foreground transition-colors"
           aria-label="Open menu"
         >
           <Menu className="w-5 h-5" />
         </button>
         <span
+          data-r10n-topbar-title
           className="text-sm font-semibold text-foreground"
           style={{ fontFamily: "var(--font-heading)" }}
         >
@@ -80,11 +83,13 @@ export function MobileHeader() {
             onClick={() => setSidebarOpen(false)}
           />
           <nav
+            data-r10n-sidebar
             className="relative z-10 flex flex-col w-64 h-full shadow-xl"
             style={{ backgroundColor: "var(--sidebar)" }}
           >
             <div className="flex items-center justify-between h-14 px-4 border-b border-border">
               <span
+                data-r10n-wordmark
                 className="text-base font-bold text-primary"
                 style={{ fontFamily: "var(--font-heading)" }}
               >
@@ -106,6 +111,8 @@ export function MobileHeader() {
                     key={href}
                     href={href}
                     onClick={() => setSidebarOpen(false)}
+                    data-r10n-navitem
+                    data-active={isActive ? "true" : undefined}
                     className={cn(
                       "flex items-center gap-3 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors",
                       isActive
@@ -123,6 +130,7 @@ export function MobileHeader() {
             <div className="px-3 py-3 border-t border-border">
               <button
                 onClick={handleLogout}
+                data-r10n-logout
                 className="flex items-center gap-2.5 px-2.5 py-2 w-full rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-border/60 transition-colors"
               >
                 <LogOut className="w-4 h-4" />

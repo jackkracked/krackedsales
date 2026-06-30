@@ -4,6 +4,13 @@ import { cn } from "@/lib/utils/cn";
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from "recharts";
 import { Pencil, Settings2, SlidersHorizontal, TrendingUp, TrendingDown } from "lucide-react";
 import { useState } from "react";
+import { paceForWindow, type CadenceTargets, type Cadence } from "@/lib/kpi/pacing";
+
+/** The reporting window a cell is showing (YYYY-MM-DD; end exclusive) — drives pacing. */
+export interface DateWindow {
+  start: string;
+  end: string;
+}
 
 // ─── Value formatting ─────────────────────────────────────────────────────────
 
@@ -54,10 +61,18 @@ export interface MetricDef {
  * An admin-set goal for a metric.
  *   direction "higher" → ABOVE target is GOOD (revenue, leads, MRR).
  *   direction "lower"  → BELOW target is GOOD (costs, churn, CPL, ad spend).
+ *
+ * `target` is the legacy single value, kept equal to the monthly target for back-compat.
+ * The cadence slots drive pace-adjusted badges; any may be null (the engine derives a
+ * run-rate from whichever cadence IS set).
  */
 export interface MetricTarget {
   target: number;
   direction: "higher" | "lower";
+  daily?: number | null;
+  weekly?: number | null;
+  monthly?: number | null;
+  anchor?: Cadence;
 }
 
 interface MetricCellProps {
@@ -85,9 +100,15 @@ interface MetricCellProps {
   onConfigure?: () => void;
   /**
    * An admin-set goal. When present and the cell has a numeric value, a small
-   * direction-aware over/under badge renders under the value.
+   * direction-aware pace badge + hairline meter render under the value.
    */
   target?: MetricTarget;
+  /**
+   * The window this cell is reporting on. When provided, the badge paces the target
+   * to the days elapsed (honest on-track for partial/rolling windows). Without it the
+   * badge falls back to a plain value-vs-monthly comparison.
+   */
+  window?: DateWindow;
 }
 
 // ─── Sparkline ────────────────────────────────────────────────────────────────
@@ -107,14 +128,20 @@ function MiniSparkline({ data, positive, unit }: { data: SparkPoint[]; positive?
   // Unique gradient ID per instance to avoid conflicts
   const gradId = `spark-${positive ? "g" : "r"}-${Math.random().toString(36).slice(2, 6)}`;
 
+  // Under r10n, --r10n-spark-stroke / --r10n-spark-fill are set on the wrapper
+  // (lime for positive, steel otherwise) and these vars resolve to them; in the
+  // default theme the vars are unset so the JS-computed `color` is used as-is.
+  const strokeColor = `var(--r10n-spark-stroke, ${color})`;
+  const fillColor = `var(--r10n-spark-fill, ${color})`;
+
   return (
-    <div className="h-[28px] w-full">
+    <div className="h-[28px] w-full" data-r10n-spark data-r10n-spark-positive={positive === false ? "false" : "true"}>
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={chartData} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
           <defs>
             <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity={0.15} />
-              <stop offset="100%" stopColor={color} stopOpacity={0} />
+              <stop offset="0%" stopColor={fillColor} stopOpacity={0.15} />
+              <stop offset="100%" stopColor={fillColor} stopOpacity={0} />
             </linearGradient>
           </defs>
           <Tooltip
@@ -132,7 +159,7 @@ function MiniSparkline({ data, positive, unit }: { data: SparkPoint[]; positive?
           <Area
             type="monotone"
             dataKey="value"
-            stroke={color}
+            stroke={strokeColor}
             strokeWidth={1.5}
             fill={`url(#${gradId})`}
             dot={false}
@@ -158,6 +185,7 @@ export function MetricCell({
   configured,
   onConfigure,
   target,
+  window,
 }: MetricCellProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
@@ -218,6 +246,7 @@ export function MetricCell({
 
   return (
     <div
+      data-r10n-metric
       className={cn(
         "group relative py-3.5 px-4 min-w-0",
         onClick && "cursor-pointer hover:bg-muted/30 transition-colors duration-100",
@@ -243,7 +272,7 @@ export function MetricCell({
 
       {/* Label row */}
       <div className="flex items-center gap-1.5 mb-1">
-        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider leading-none truncate">
+        <p data-r10n-metric-label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider leading-none truncate">
           {def.label}
         </p>
         {status === "stale" && (
@@ -282,6 +311,7 @@ export function MetricCell({
         </div>
       ) : (
         <p
+          data-r10n-metric-value
           className={cn("text-lg font-bold leading-none tabular-nums", accentColor)}
           style={{ fontFamily: "var(--font-heading)" }}
         >
@@ -289,10 +319,10 @@ export function MetricCell({
         </p>
       )}
 
-      {/* Target over/under badge — direction-aware, only with a numeric value */}
+      {/* Pace badge + hairline meter — direction-aware, only with a numeric value */}
       {!editing && target && typeof value === "number" && Number.isFinite(value) && (
         <div className="mt-1.5">
-          <TargetBadge value={value} target={target} unit={def.unit} />
+          <PaceBadge value={value} target={target} unit={def.unit} window={window} />
         </div>
       )}
 
@@ -311,41 +341,108 @@ export function MetricCell({
   );
 }
 
-// ─── Target over/under badge ──────────────────────────────────────────────────
+// ─── Pace badge + hairline meter ──────────────────────────────────────────────
 
 /**
- * A small, direction-aware chip showing how the value compares to its target.
+ * The honest on-track read for the window the cell is showing. Instead of comparing
+ * the value to one absolute target (which reads "-97%" on Today), it compares to a
+ * PACE TARGET — the right cadence target scaled to the days elapsed (see lib/kpi/pacing).
  *
- *   deltaPct = (value − target) / target × 100
+ * Renders two stacked things:
+ *   ① a hairline meter — fill = value ÷ pace target, with a gold tick at the pace line
+ *      (100%). Past the tick = ahead of pace; colour carries good/bad by direction.
+ *   ② a chip — arrow + "{pct} ahead/behind pace" (or "above/below target" for whole
+ *      periods), with a faint "{pace} of {full}" caption.
  *
- * Good-vs-bad is decided by `direction`, NOT by the sign of the delta:
- *   direction "higher" → above target (deltaPct > 0) is GOOD.
- *   direction "lower"  → below target (deltaPct < 0) is GOOD.
- *
- * Worked examples (confirmed):
- *   • Cash $42k vs $30k target, higher → +40% above  → GREEN  "40% above target"
- *   • Ad Spend $6.7k vs $5k target, lower → +34% above → RED   "34% above target"
- *   • Expenses under a target (lower)                  → GREEN "x% below target"
- *
- * A near-zero delta (|deltaPct| < ON_TARGET_PCT) reads as a neutral "On target".
- * target === 0 can't yield a percentage, so it shows a neutral "vs 0 target".
+ * Good-vs-bad is decided by `direction`, never by the sign of the delta.
  */
 
-const ON_TARGET_PCT = 2; // within ±2% of target reads as "on target"
+type PaceTone = "good" | "bad" | "neutral";
 
-function TargetBadge({
+const METER_MAX = 1.25; // track spans 0–125% of pace, so "ahead" has room past the tick
+
+function clamp01Max(n: number): number {
+  return Math.max(0, Math.min(METER_MAX, n));
+}
+
+function toCadenceTargets(t: MetricTarget): CadenceTargets {
+  return {
+    daily: t.daily ?? null,
+    weekly: t.weekly ?? null,
+    monthly: t.monthly ?? t.target ?? null,
+  };
+}
+
+const CADENCE_WORD: Record<Cadence, string> = { daily: "day", weekly: "week", monthly: "month" };
+
+function pctLabel(absPct: number): string {
+  return `${absPct < 10 ? absPct.toFixed(1) : Math.round(absPct)}%`;
+}
+
+function PaceMeter({ ratio, tone }: { ratio: number; tone: PaceTone }) {
+  const markLeft = (1 / METER_MAX) * 100; // the pace line (100% of pace) inside the track
+  const fillWidth = (clamp01Max(ratio) / METER_MAX) * 100;
+  const fillColor =
+    tone === "good" ? "bg-success" : tone === "bad" ? "bg-destructive" : "bg-gold";
+  return (
+    <div
+      data-r10n-pace-meter
+      data-tone={tone}
+      className="relative h-1 w-full max-w-[150px] rounded-full bg-border/55 overflow-hidden"
+      aria-hidden
+    >
+      <div
+        data-r10n-pace-fill
+        className={cn(
+          "absolute inset-y-0 left-0 transition-[width] duration-500 ease-out motion-reduce:transition-none",
+          fillColor,
+        )}
+        style={{ width: `${fillWidth}%` }}
+      />
+      {/* Pace line — the gold target tick the fill is measured against. */}
+      <div
+        data-r10n-pace-tick
+        className="absolute inset-y-0 w-px bg-foreground/45"
+        style={{ left: `${markLeft}%` }}
+      />
+    </div>
+  );
+}
+
+function PaceBadge({
   value,
   target,
   unit,
+  window,
 }: {
   value: number;
   target: MetricTarget;
   unit: MetricUnit;
+  window?: DateWindow;
 }) {
-  const targetLabel = `Target ${fmtValue(target.target, unit)}`;
+  const targets = toCadenceTargets(target);
+  const pace = window
+    ? paceForWindow({ value, direction: target.direction, targets, window })
+    : null;
 
-  // Guard: a 0 target has no meaningful percentage — show a calm neutral chip.
-  if (target.target === 0) {
+  // No window (or an empty range) → fall back to the plain value-vs-monthly chip.
+  if (!pace) {
+    return (
+      <AbsoluteBadge value={value} target={target.target} direction={target.direction} unit={unit} />
+    );
+  }
+
+  // Window entirely in the future — nothing to judge yet.
+  if (pace.periodKind === "upcoming") {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-muted/60 text-[10px] font-semibold text-muted-foreground">
+        Hasn&apos;t started
+      </span>
+    );
+  }
+
+  // No usable positive target → calm neutral chip.
+  if (pace.zeroTarget) {
     return (
       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-muted/60 text-[10px] font-semibold text-muted-foreground">
         <span className="tabular-nums">vs 0 target</span>
@@ -353,11 +450,87 @@ function TargetBadge({
     );
   }
 
-  const deltaPct = ((value - target.target) / target.target) * 100;
-  const absPct = Math.abs(deltaPct);
-  const isAbove = deltaPct > 0; // strictly above target
+  const wholePeriod =
+    !pace.prorated &&
+    (pace.periodKind === "day" || pace.periodKind === "week" || pace.periodKind === "month");
+  const refWord = wholePeriod ? "target" : "pace";
+  const tone: PaceTone = pace.neutral ? "neutral" : pace.isGood ? "good" : "bad";
 
-  // Roughly on target → neutral, no good/bad judgement.
+  // Caption: "{pace} of {full}" for partial windows, "Target {full}" for whole periods.
+  const caption = wholePeriod
+    ? `Target ${fmtValue(pace.fullPeriodTarget, unit)}`
+    : `${fmtValue(pace.expected, unit)} of ${fmtValue(pace.fullPeriodTarget, unit)}`;
+
+  // Rich tooltip — the full pacing story, kept out of the dense visible row.
+  const title = pace.neutral
+    ? `On ${refWord} for the ${CADENCE_WORD[pace.cadence]} · ${fmtValue(value, unit)} vs ${fmtValue(
+        pace.expected,
+        unit,
+      )} ${refWord}${pace.prorated ? ` · ${pace.elapsedDays} of ${pace.periodDays} days` : ""}`
+    : `${pctLabel(Math.abs(pace.deltaPct))} ${pace.isAbove ? "above" : "below"} ${refWord} · ${fmtValue(
+        value,
+        unit,
+      )} vs ${fmtValue(pace.expected, unit)}${
+        pace.prorated ? ` · ${pace.elapsedDays} of ${pace.periodDays} days` : ""
+      }`;
+
+  return (
+    <div className="space-y-1" title={title}>
+      <PaceMeter ratio={pace.ratio} tone={tone} />
+      {pace.neutral ? (
+        <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-muted-foreground">
+          <span className="h-1 w-1 rounded-full bg-gold shrink-0" aria-hidden />
+          On {refWord}
+          <span className="font-normal text-muted-foreground/75 tabular-nums">· {caption}</span>
+        </span>
+      ) : (
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 text-[10px] font-semibold",
+            tone === "good" ? "text-success" : "text-destructive",
+          )}
+        >
+          {pace.isAbove ? (
+            <TrendingUp className="w-2.5 h-2.5 shrink-0" aria-hidden />
+          ) : (
+            <TrendingDown className="w-2.5 h-2.5 shrink-0" aria-hidden />
+          )}
+          <span className="tabular-nums">
+            {pctLabel(Math.abs(pace.deltaPct))} {pace.isAbove ? "above" : "below"} {refWord}
+          </span>
+          <span className="font-normal text-muted-foreground/75 tabular-nums">· {caption}</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ─── Absolute fallback (no window) — the pre-pacing value-vs-monthly chip ─────────
+
+const ON_TARGET_PCT = 2;
+
+function AbsoluteBadge({
+  value,
+  target,
+  direction,
+  unit,
+}: {
+  value: number;
+  target: number;
+  direction: "higher" | "lower";
+  unit: MetricUnit;
+}) {
+  const targetLabel = `Target ${fmtValue(target, unit)}`;
+  if (target === 0) {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-muted/60 text-[10px] font-semibold text-muted-foreground">
+        <span className="tabular-nums">vs 0 target</span>
+      </span>
+    );
+  }
+  const deltaPct = ((value - target) / target) * 100;
+  const absPct = Math.abs(deltaPct);
+  const isAbove = deltaPct > 0;
   if (absPct < ON_TARGET_PCT) {
     return (
       <span
@@ -369,28 +542,20 @@ function TargetBadge({
       </span>
     );
   }
-
-  // Direction-aware verdict: is the current side of target the GOOD side?
-  const isGood = target.direction === "higher" ? isAbove : !isAbove;
-
-  // The arrow follows the VALUE's position vs target (up = above, down = below),
-  // independent of good/bad — colour carries the good/bad meaning.
+  const isGood = direction === "higher" ? isAbove : !isAbove;
   const Arrow = isAbove ? TrendingUp : TrendingDown;
-  const positionWord = isAbove ? "above" : "below";
-  const pctText = `${absPct < 10 ? absPct.toFixed(1) : Math.round(absPct)}%`;
-
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold",
-        isGood
-          ? "bg-success-subtle text-success"
-          : "bg-destructive/10 text-destructive",
+        isGood ? "bg-success-subtle text-success" : "bg-destructive/10 text-destructive",
       )}
       title={targetLabel}
     >
       <Arrow className="w-2.5 h-2.5 shrink-0" aria-hidden />
-      <span className="tabular-nums">{pctText} {positionWord} target</span>
+      <span className="tabular-nums">
+        {pctLabel(absPct)} {isAbove ? "above" : "below"} target
+      </span>
       <span className="font-normal text-muted-foreground/70">· {targetLabel}</span>
     </span>
   );

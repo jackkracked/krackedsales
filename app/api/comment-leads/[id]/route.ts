@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { commentLeads } from "@/lib/db/schema";
+import { socialLeads } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +22,7 @@ export async function PATCH(
   try {
     const client = await db();
     const updated = await client
-      .update(commentLeads)
+      .update(socialLeads)
       .set({
         ...(name !== undefined && { name }),
         ...(email !== undefined && { email }),
@@ -30,7 +30,7 @@ export async function PATCH(
         ...(website !== undefined && { website }),
         ...(notes !== undefined && { notes }),
       })
-      .where(eq(commentLeads.id, id))
+      .where(eq(socialLeads.id, id))
       .returning();
 
     if (!updated.length) {

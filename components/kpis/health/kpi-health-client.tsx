@@ -81,10 +81,10 @@ const HEALTH_SECTIONS: HealthSection[] = [
   },
 ];
 
-function LegendDot({ color, label }: { color: string; label: string }) {
+function LegendDot({ color, label, tone }: { color: string; label: string; tone?: string }) {
   return (
     <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-      <span className={cn("inline-block h-2 w-2 rounded-full", color)} />
+      <span data-r10n-health-legend-dot data-tone={tone} className={cn("inline-block h-2 w-2 rounded-full", color)} />
       {label}
     </span>
   );
@@ -139,6 +139,7 @@ export function KpiHealthClient() {
               Back to KPIs
             </Link>
             <h1
+              data-r10n-kpi-page-title
               className="text-2xl font-bold tracking-tight text-foreground"
               style={{ fontFamily: "var(--font-heading)" }}
             >
@@ -150,6 +151,7 @@ export function KpiHealthClient() {
           </div>
 
           <button
+            data-r10n-health-btn
             onClick={checkAll}
             disabled={checkingAll || isLoading}
             className={cn(
@@ -172,10 +174,10 @@ export function KpiHealthClient() {
             </span>
           </div>
           <div className="flex items-center gap-4">
-            <LegendDot color="bg-emerald-500" label="Healthy" />
-            <LegendDot color="bg-amber-500" label="Stale" />
-            <LegendDot color="bg-red-500" label="Error" />
-            <LegendDot color="bg-blue-500" label="Override" />
+            <LegendDot color="bg-emerald-500" label="Healthy" tone="healthy" />
+            <LegendDot color="bg-amber-500" label="Stale" tone="stale" />
+            <LegendDot color="bg-red-500" label="Error" tone="error" />
+            <LegendDot color="bg-blue-500" label="Override" tone="override" />
           </div>
         </div>
 
@@ -203,8 +205,9 @@ export function KpiHealthClient() {
             <div key={section.title} className="mb-6">
               {/* Section header */}
               <div className="flex items-center gap-3 mb-3 px-1">
-                <div className="w-0.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: section.accent }} />
+                <div data-r10n-section-accent className="w-0.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: `var(--r10n-section-accent, ${section.accent})` }} />
                 <h3
+                  data-r10n-section-title
                   className="text-[11px] font-bold uppercase tracking-widest text-foreground/70 shrink-0"
                   style={{ fontFamily: "var(--font-heading)" }}
                 >
@@ -230,8 +233,8 @@ export function KpiHealthClient() {
         {!isLoading && ungrouped.length > 0 && (
           <div className="mb-6">
             <div className="flex items-center gap-3 mb-3 px-1">
-              <div className="w-0.5 h-3.5 rounded-full shrink-0 bg-muted-foreground/30" />
-              <h3 className="text-[11px] font-bold uppercase tracking-widest text-foreground/70 shrink-0" style={{ fontFamily: "var(--font-heading)" }}>
+              <div data-r10n-section-accent className="w-0.5 h-3.5 rounded-full shrink-0 bg-muted-foreground/30" />
+              <h3 data-r10n-section-title className="text-[11px] font-bold uppercase tracking-widest text-foreground/70 shrink-0" style={{ fontFamily: "var(--font-heading)" }}>
                 Other
               </h3>
               <div className="flex-1 h-px bg-border/60" />

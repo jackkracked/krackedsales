@@ -68,21 +68,26 @@ export function DemoTaskModal({ task, onClose }: DemoTaskModalProps) {
         <div
           className="bg-card border border-border rounded-[12px] w-full max-w-sm shadow-xl"
           onClick={(e) => e.stopPropagation()}
+          data-r10n-demo-modal
         >
           {/* Header */}
-          <div className="flex items-start justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-start justify-between px-5 py-4 border-b border-border" data-r10n-demo-modal-header>
             <div className="flex-1 min-w-0 pr-3">
-              <p className="text-sm font-semibold text-foreground leading-snug">{task.name}</p>
-              <span className={cn(
-                "inline-flex items-center mt-1.5 px-2 py-0.5 rounded-full text-xs font-medium",
-                badge.className
-              )}>
+              <p className="text-sm font-semibold text-foreground leading-snug" data-r10n-demo-modal-title>{task.name}</p>
+              <span
+                className={cn(
+                  "inline-flex items-center mt-1.5 px-2 py-0.5 rounded-full text-xs font-medium",
+                  badge.className
+                )}
+                data-r10n-demo-stagebadge
+              >
                 {badge.label}
               </span>
             </div>
             <button
               onClick={onClose}
               className="shrink-0 p-1 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              data-r10n-demo-modal-close
             >
               <X className="w-4 h-4" />
             </button>
@@ -142,7 +147,7 @@ export function DemoTaskModal({ task, onClose }: DemoTaskModalProps) {
 
             {/* Linked opportunity */}
             <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5" data-r10n-demo-section-title>
                 <TrendingUp className="w-3.5 h-3.5" />
                 Linked Opportunity
               </p>

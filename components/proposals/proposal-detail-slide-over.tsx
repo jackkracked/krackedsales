@@ -130,7 +130,10 @@ function InstalmentBadge({ status }: { status: string }) {
     overdue: "bg-amber-50 text-amber-700",
   };
   return (
-    <span className={cn(
+    <span
+      data-r10n-status-pill
+      data-status={status}
+      className={cn(
       "inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-semibold uppercase tracking-wide",
       styles[status] ?? "bg-muted text-muted-foreground"
     )}>
@@ -166,14 +169,15 @@ function InstalmentTable({ proposal, onUpdate }: { proposal: Proposal; onUpdate:
   const paidCount = localInstalments.filter((i) => i.status === "paid").length;
 
   return (
-    <div className="bg-muted/30 rounded-[8px] overflow-hidden border border-border/60">
+    <div data-r10n-proposal-subtable className="bg-muted/30 rounded-[8px] overflow-hidden border border-border/60">
       {paidCount > 0 && (
-        <div className="px-3 py-2 bg-orange-50 border-b border-orange-100 flex items-center gap-2">
-          <span className="text-[11px] font-semibold text-orange-700">
+        <div data-r10n-proposal-progress className="px-3 py-2 bg-orange-50 border-b border-orange-100 flex items-center gap-2">
+          <span data-r10n-proposal-progress-label className="text-[11px] font-semibold text-orange-700">
             {paidCount} of {localInstalments.length} instalment{localInstalments.length !== 1 ? "s" : ""} paid
           </span>
-          <div className="flex-1 h-1 bg-orange-200 rounded-full overflow-hidden">
+          <div data-r10n-proposal-progress-track className="flex-1 h-1 bg-orange-200 rounded-full overflow-hidden">
             <div
+              data-r10n-proposal-progress-bar
               className="h-full bg-orange-500 rounded-full transition-all"
               style={{ width: `${(paidCount / localInstalments.length) * 100}%` }}
             />
@@ -183,10 +187,10 @@ function InstalmentTable({ proposal, onUpdate }: { proposal: Proposal; onUpdate:
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border/60">
-            <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">#</th>
-            <th className="text-right px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Amount</th>
-            <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Due</th>
-            <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
+            <th data-r10n-th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">#</th>
+            <th data-r10n-th className="text-right px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Amount</th>
+            <th data-r10n-th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Due</th>
+            <th data-r10n-th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
             {canMarkPaid && <th className="px-3 py-2" />}
           </tr>
         </thead>
@@ -195,11 +199,11 @@ function InstalmentTable({ proposal, onUpdate }: { proposal: Proposal; onUpdate:
             .sort((a, b) => a.instalmentNumber - b.instalmentNumber)
             .map((inst) => (
               <tr key={inst.id} className="border-b border-border/40 last:border-0">
-                <td className="px-3 py-2 text-muted-foreground text-xs">{inst.instalmentNumber}</td>
-                <td className="px-3 py-2 text-right tabular-nums font-medium text-foreground/80 text-xs">
+                <td data-r10n-proposal-subtable-cell className="px-3 py-2 text-muted-foreground text-xs">{inst.instalmentNumber}</td>
+                <td data-r10n-proposal-subtable-amount className="px-3 py-2 text-right tabular-nums font-medium text-foreground/80 text-xs">
                   {fmtAmount(inst.amount, proposal.currency)}
                 </td>
-                <td className="px-3 py-2 text-muted-foreground text-xs tabular-nums">
+                <td data-r10n-proposal-subtable-cell className="px-3 py-2 text-muted-foreground text-xs tabular-nums">
                   {fmtCalendarDate(inst.dueDate)}
                 </td>
                 <td className="px-3 py-2">
@@ -210,6 +214,8 @@ function InstalmentTable({ proposal, onUpdate }: { proposal: Proposal; onUpdate:
                     <button
                       onClick={() => togglePaid(inst)}
                       disabled={loadingId === inst.id}
+                      data-r10n-proposal-markpaid
+                      data-paid={inst.status === "paid"}
                       className={cn(
                         "text-[10px] font-semibold px-2 py-0.5 rounded-[4px] transition-colors disabled:opacity-50",
                         inst.status === "paid"
@@ -376,13 +382,14 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
       />
 
       {/* Panel */}
-      <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[440px] bg-card border-l border-border shadow-xl flex flex-col">
+      <div data-r10n-proposal-panel className="fixed inset-y-0 right-0 z-50 w-full sm:w-[440px] bg-card border-l border-border shadow-xl flex flex-col">
         {/* Header */}
         <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-border shrink-0">
           <div className="min-w-0 pr-3">
             <div className="flex items-center gap-2 flex-wrap">
               <ProposalStatusBadge status={proposal.status} />
               <span
+                data-r10n-proposal-type
                 className={cn(
                   "inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-semibold uppercase tracking-wide",
                   proposal.type === "management"
@@ -394,16 +401,18 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
               </span>
             </div>
             <h2
+              data-r10n-proposal-panel-name
               className="mt-2 text-base font-semibold text-foreground truncate"
               style={{ fontFamily: "var(--font-heading)" }}
             >
               {proposal.contactName}
             </h2>
             {proposal.contactEmail && (
-              <p className="text-xs text-muted-foreground">{proposal.contactEmail}</p>
+              <p data-r10n-proposal-panel-email className="text-xs text-muted-foreground">{proposal.contactEmail}</p>
             )}
             <a
               href={`/pipeline?contact=${proposal.ghlContactId}`}
+              data-r10n-proposal-opplink
               className="inline-flex items-center gap-1 mt-1 text-[11px] text-primary/70 hover:text-primary transition-colors"
             >
               <ExternalLink className="w-3 h-3" />
@@ -426,28 +435,29 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
             const disc = discountInfo(terms);
             const isMgmt = proposal.type === "management";
             return (
-              <div className="text-center py-4 px-4 bg-muted/30 rounded-[10px]">
+              <div data-r10n-proposal-hero className="text-center py-4 px-4 bg-muted/30 rounded-[10px]">
                 {disc && (
-                  <p className="text-sm text-muted-foreground/60 line-through tabular-nums">
+                  <p data-r10n-proposal-hero-strike className="text-sm text-muted-foreground/60 line-through tabular-nums">
                     {fmtAmount(disc.listAmount, proposal.currency)}
                   </p>
                 )}
                 <p
+                  data-r10n-proposal-hero-amount
                   className="text-3xl font-bold text-foreground"
                   style={{ fontFamily: "var(--font-heading)" }}
                 >
                   {fmtAmount(proposal.totalAmount, proposal.currency)}
                 </p>
                 {disc && (
-                  <p className="text-xs font-semibold text-green-700 mt-0.5">
+                  <p data-r10n-proposal-discount className="text-xs font-semibold text-green-700 mt-0.5">
                     {disc.pct}% off · saves {fmtAmount(disc.saved, proposal.currency)}
                   </p>
                 )}
                 {isMgmt && (
-                  <p className="text-xs text-muted-foreground mt-1.5 leading-snug">{clientSentence(terms)}</p>
+                  <p data-r10n-proposal-hero-meta className="text-xs text-muted-foreground mt-1.5 leading-snug">{clientSentence(terms)}</p>
                 )}
                 {proposal.paymentStructure === "instalment" && totalCount > 0 && (
-                  <p className="text-xs text-muted-foreground mt-1">
+                  <p data-r10n-proposal-hero-meta className="text-xs text-muted-foreground mt-1">
                     {paidCount}/{totalCount} instalments paid
                   </p>
                 )}
@@ -456,16 +466,16 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
           })()}
 
           {/* Timeline dates */}
-          <div className="grid grid-cols-3 gap-px bg-border rounded-[8px] overflow-hidden">
+          <div data-r10n-proposal-timeline className="grid grid-cols-3 gap-px bg-border rounded-[8px] overflow-hidden">
             {[
               { label: "Created", date: proposal.createdAt, icon: Clock },
               { label: "Sent", date: proposal.sentAt, icon: Send },
               { label: "Signed", date: proposal.signedAt, icon: Check },
             ].map(({ label, date, icon: Icon }) => (
-              <div key={label} className="bg-card px-3 py-2.5 text-center">
-                <Icon className="w-3 h-3 text-muted-foreground mx-auto mb-1" />
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">{label}</p>
-                <p className="text-xs font-medium text-foreground mt-0.5">
+              <div key={label} data-r10n-proposal-timeline-cell className="bg-card px-3 py-2.5 text-center">
+                <Icon data-r10n-proposal-timeline-icon className="w-3 h-3 text-muted-foreground mx-auto mb-1" />
+                <p data-r10n-proposal-timeline-label className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">{label}</p>
+                <p data-r10n-proposal-timeline-date className="text-xs font-medium text-foreground mt-0.5">
                   {fmtDate(date, tz) ?? <span className="text-muted-foreground/50">—</span>}
                 </p>
               </div>
@@ -475,7 +485,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
           {/* Service description */}
           {proposal.serviceDescription && (
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Service</p>
+              <p data-r10n-proposal-section className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Service</p>
               <ScopeDisplay text={proposal.serviceDescription} />
             </div>
           )}
@@ -483,7 +493,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
           {/* Instalment table */}
           {proposal.paymentStructure === "instalment" && proposal.instalments.length > 0 && (
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+              <p data-r10n-proposal-section className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                 Instalments
               </p>
               <InstalmentTable proposal={proposal} onUpdate={() => queryClient.invalidateQueries({ queryKey: ["proposals"] })} />
@@ -493,11 +503,11 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
           {/* Subscription details */}
           {proposal.paymentStructure === "subscription" && (
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+              <p data-r10n-proposal-section className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                 Billing
               </p>
-              <div className="flex items-center gap-2 px-3 py-2.5 bg-muted/30 rounded-[8px] border border-border/60">
-                <Repeat className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              <div data-r10n-proposal-tile className="flex items-center gap-2 px-3 py-2.5 bg-muted/30 rounded-[8px] border border-border/60">
+                <Repeat data-r10n-proposal-tile-icon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                 <span className="text-sm text-foreground/80">
                   {fmtAmount(proposal.totalAmount, proposal.currency)} every{" "}
                   {proposal.billingIntervalCount && proposal.billingIntervalCount > 1
@@ -523,17 +533,18 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
 
             return (
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                <p data-r10n-proposal-section className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                   Deposits
                 </p>
-                <div className="bg-muted/30 rounded-[8px] overflow-hidden border border-border/60">
+                <div data-r10n-proposal-subtable className="bg-muted/30 rounded-[8px] overflow-hidden border border-border/60">
                   {/* Progress header */}
-                  <div className="px-3 py-2 bg-indigo-50 border-b border-indigo-100 flex items-center gap-2">
-                    <span className="text-[11px] font-semibold text-indigo-700">
+                  <div data-r10n-proposal-progress data-tone="deposit" className="px-3 py-2 bg-indigo-50 border-b border-indigo-100 flex items-center gap-2">
+                    <span data-r10n-proposal-progress-label className="text-[11px] font-semibold text-indigo-700">
                       {paidDeposits} of {totalDeposits} deposit{totalDeposits !== 1 ? "s" : ""} paid — {fmtAmount(depositsPaid, proposal.currency)} / {fmtAmount(depositTotal, proposal.currency)}
                     </span>
-                    <div className="flex-1 h-1 bg-indigo-200 rounded-full overflow-hidden">
+                    <div data-r10n-proposal-progress-track className="flex-1 h-1 bg-indigo-200 rounded-full overflow-hidden">
                       <div
+                        data-r10n-proposal-progress-bar
                         className="h-full bg-indigo-500 rounded-full transition-all"
                         style={{ width: `${totalDeposits > 0 ? (paidDeposits / totalDeposits) * 100 : 0}%` }}
                       />
@@ -544,10 +555,10 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border/60">
-                        <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">#</th>
-                        <th className="text-right px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Amount</th>
-                        <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Due</th>
-                        <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
+                        <th data-r10n-th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">#</th>
+                        <th data-r10n-th className="text-right px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Amount</th>
+                        <th data-r10n-th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Due</th>
+                        <th data-r10n-th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
                         <th className="px-3 py-2" />
                       </tr>
                     </thead>
@@ -556,11 +567,11 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                         .sort((a, b) => a.instalmentNumber - b.instalmentNumber)
                         .map((inst) => (
                           <tr key={inst.id} className="border-b border-border/40 last:border-0">
-                            <td className="px-3 py-2 text-muted-foreground text-xs">{inst.instalmentNumber}</td>
-                            <td className="px-3 py-2 text-right tabular-nums font-medium text-foreground/80 text-xs">
+                            <td data-r10n-proposal-subtable-cell className="px-3 py-2 text-muted-foreground text-xs">{inst.instalmentNumber}</td>
+                            <td data-r10n-proposal-subtable-amount className="px-3 py-2 text-right tabular-nums font-medium text-foreground/80 text-xs">
                               {fmtAmount(inst.amount, proposal.currency)}
                             </td>
-                            <td className="px-3 py-2 text-muted-foreground text-xs tabular-nums">
+                            <td data-r10n-proposal-subtable-cell className="px-3 py-2 text-muted-foreground text-xs tabular-nums">
                               {fmtCalendarDate(inst.dueDate)}
                             </td>
                             <td className="px-3 py-2">
@@ -572,6 +583,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                                   href={inst.stripeHostedUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
+                                  data-r10n-proposal-paylink
                                   className="text-[10px] font-semibold text-primary hover:text-primary/80 transition-colors"
                                 >
                                   Pay Link
@@ -600,9 +612,9 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
 
           {/* Expiry */}
           {proposal.expiresAt && !["paid", "void"].includes(proposal.status) && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200/50 rounded-[7px]">
-              <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-              <span className="text-xs text-amber-700 font-medium">
+            <div data-r10n-proposal-expiry className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200/50 rounded-[7px]">
+              <Clock data-r10n-proposal-expiry-icon className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+              <span data-r10n-proposal-expiry-text className="text-xs text-amber-700 font-medium">
                 Expires {fmtCalendarDate(proposal.expiresAt)}
               </span>
             </div>
@@ -611,16 +623,17 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
           {/* Stripe link */}
           {proposal.stripeHostedUrl && (
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+              <p data-r10n-proposal-section className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
                 Payment Link
               </p>
               <a
                 href={proposal.stripeHostedUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                data-r10n-proposal-tile
                 className="flex items-center gap-2 px-3 py-2.5 bg-muted/30 border border-border/60 rounded-[8px] hover:bg-muted/50 transition-colors group"
               >
-                <CreditCard className="w-3.5 h-3.5 text-muted-foreground" />
+                <CreditCard data-r10n-proposal-tile-icon className="w-3.5 h-3.5 text-muted-foreground" />
                 <span className="text-xs text-foreground/80 font-medium flex-1 truncate">
                   Stripe Invoice
                 </span>
@@ -632,15 +645,16 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
           {/* Public link */}
           {["sent", "signed"].includes(proposal.status) && (
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+              <p data-r10n-proposal-section className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
                 Client Link
               </p>
-              <div className="flex items-center gap-2 px-3 py-2 bg-muted/30 border border-border/60 rounded-[8px]">
-                <span className="text-xs text-muted-foreground font-mono flex-1 truncate">
+              <div data-r10n-proposal-tile className="flex items-center gap-2 px-3 py-2 bg-muted/30 border border-border/60 rounded-[8px]">
+                <span data-r10n-proposal-token className="text-xs text-muted-foreground font-mono flex-1 truncate">
                   /p/{proposal.token.slice(0, 12)}…
                 </span>
                 <button
                   onClick={copyLink}
+                  data-r10n-proposal-copy
                   className="flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors shrink-0"
                 >
                   {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
@@ -661,7 +675,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
           {/* Notes */}
           {proposal.notes && (
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Notes</p>
+              <p data-r10n-proposal-section className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Notes</p>
               <p className="text-sm text-foreground/70 leading-relaxed whitespace-pre-wrap">{proposal.notes}</p>
             </div>
           )}
@@ -675,6 +689,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
               href={`/p/${proposal.token}?preview=1`}
               target="_blank"
               rel="noopener noreferrer"
+              data-r10n-proposal-cta="ghost"
               className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
             >
               <Eye className="w-3.5 h-3.5" />
@@ -684,6 +699,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
               href={publicUrl}
               target="_blank"
               rel="noopener noreferrer"
+              data-r10n-proposal-cta="ghost"
               className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
             >
               <ExternalLink className="w-3.5 h-3.5" />
@@ -700,6 +716,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
               >
                 <button
                   onClick={() => { setSendEmail(proposal.contactEmail ?? ""); setSendStep("confirm"); }}
+                  data-r10n-proposal-cta="primary"
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground text-sm font-medium rounded-[8px] hover:bg-primary/90 transition-colors"
                 >
                   <Send className="w-3.5 h-3.5" />
@@ -724,13 +741,14 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                     />
                   </div>
                   {sendMutation.isError && (
-                    <p className="text-[11px] text-red-600 px-1">
+                    <p data-r10n-proposal-error className="text-[11px] text-red-600 px-1">
                       {(sendMutation.error as Error)?.message ?? "Send failed"}
                     </p>
                   )}
                   <div className="flex gap-2">
                     <button
                       onClick={() => { setSendStep("idle"); sendMutation.reset(); }}
+                      data-r10n-proposal-cta="ghost"
                       className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
                     >
                       Cancel
@@ -738,6 +756,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                     <button
                       onClick={() => sendMutation.mutate(sendEmail.trim() !== proposal.contactEmail ? sendEmail.trim() : undefined)}
                       disabled={sendMutation.isPending || !sendEmail.trim()}
+                      data-r10n-proposal-cta="primary"
                       className="flex-[2] flex items-center justify-center gap-2 px-3 py-2 bg-primary text-primary-foreground text-xs font-medium rounded-[7px] hover:bg-primary/90 transition-colors disabled:opacity-60"
                     >
                       <Send className="w-3 h-3" />
@@ -754,6 +773,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
               href={proposal.stripeHostedUrl}
               target="_blank"
               rel="noopener noreferrer"
+              data-r10n-proposal-cta="pay"
               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white text-sm font-medium rounded-[8px] hover:bg-green-700 transition-colors"
             >
               <CreditCard className="w-3.5 h-3.5" />
@@ -763,20 +783,21 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
 
           {proposal.status === "sent" && (
             <div className="space-y-2">
-              <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+              <div data-r10n-proposal-wait className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
                 <Clock className="w-3.5 h-3.5" />
                 Waiting for client signature
               </div>
               {emailWarning && (
-                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-[6px] px-3 py-2 leading-snug">
+                <p data-r10n-proposal-emailwarn className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-[6px] px-3 py-2 leading-snug">
                   ⚠️ {emailWarning}
                 </p>
               )}
               {resendSuccess ? (
-                <p className="text-center text-[11px] text-green-600 font-medium py-1">Email sent ✓</p>
+                <p data-r10n-proposal-resend-ok className="text-center text-[11px] text-green-600 font-medium py-1">Email sent ✓</p>
               ) : resendStep === "idle" ? (
                 <button
                   onClick={() => { setResendEmail(proposal.contactEmail ?? ""); setResendStep("confirm"); }}
+                  data-r10n-proposal-cta="ghost"
                   className="w-full flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
                 >
                   <Mail className="w-3.5 h-3.5" />
@@ -798,13 +819,14 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                     />
                   </div>
                   {resendEmailMutation.isError && (
-                    <p className="text-[11px] text-red-600 px-1">
+                    <p data-r10n-proposal-error className="text-[11px] text-red-600 px-1">
                       {(resendEmailMutation.error as Error)?.message}
                     </p>
                   )}
                   <div className="flex gap-2">
                     <button
                       onClick={() => { setResendStep("idle"); resendEmailMutation.reset(); }}
+                      data-r10n-proposal-cta="ghost"
                       className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
                     >
                       Cancel
@@ -812,6 +834,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                     <button
                       onClick={() => resendEmailMutation.mutate(resendEmail.trim())}
                       disabled={resendEmailMutation.isPending || !resendEmail.trim()}
+                      data-r10n-proposal-cta="primary"
                       className="flex-[2] flex items-center justify-center gap-2 px-3 py-2 bg-primary text-primary-foreground text-xs font-medium rounded-[7px] hover:bg-primary/90 transition-colors disabled:opacity-60"
                     >
                       <Send className="w-3 h-3" />
@@ -824,7 +847,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
           )}
 
           {proposal.status === "paid" && (
-            <div className="flex items-center justify-center gap-1.5 text-xs text-green-600 font-medium">
+            <div data-r10n-proposal-paid-confirm className="flex items-center justify-center gap-1.5 text-xs text-green-600 font-medium">
               <Check className="w-3.5 h-3.5" />
               {fmtDate(proposal.paidAt, tz) ? `Paid on ${fmtDate(proposal.paidAt, tz)}` : "Paid in full"}
             </div>
@@ -836,24 +859,26 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
               {depositOverrideStep === "idle" ? (
                 <button
                   onClick={() => setDepositOverrideStep("confirm")}
+                  data-r10n-proposal-cta="positive-soft"
                   className="w-full flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium text-indigo-700 border border-indigo-200 bg-indigo-50 rounded-[7px] hover:bg-indigo-100 transition-colors"
                 >
                   <Check className="w-3.5 h-3.5" />
                   Mark Deposits as Paid
                 </button>
               ) : (
-                <div className="space-y-2 p-3 bg-indigo-50/50 border border-indigo-200 rounded-[8px]">
-                  <p className="text-xs text-indigo-700 font-medium text-center">
+                <div data-r10n-proposal-promptbox="deposit" className="space-y-2 p-3 bg-indigo-50/50 border border-indigo-200 rounded-[8px]">
+                  <p data-r10n-proposal-prompt-text className="text-xs text-indigo-700 font-medium text-center">
                     Mark all deposits as paid and start the subscription?
                   </p>
                   {depositOverrideMutation.isError && (
-                    <p className="text-[11px] text-red-600 px-1">
+                    <p data-r10n-proposal-error className="text-[11px] text-red-600 px-1">
                       {(depositOverrideMutation.error as Error)?.message}
                     </p>
                   )}
                   <div className="flex gap-2">
                     <button
                       onClick={() => { setDepositOverrideStep("idle"); depositOverrideMutation.reset(); }}
+                      data-r10n-proposal-cta="ghost"
                       className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
                     >
                       Cancel
@@ -861,6 +886,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                     <button
                       onClick={() => depositOverrideMutation.mutate()}
                       disabled={depositOverrideMutation.isPending}
+                      data-r10n-proposal-cta="positive"
                       className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 text-white text-xs font-medium rounded-[7px] hover:bg-indigo-700 transition-colors disabled:opacity-60"
                     >
                       <Check className="w-3 h-3" />
@@ -881,6 +907,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
               >
                 <button
                   onClick={() => setMarkPaidStep("confirm")}
+                  data-r10n-proposal-cta="positive-soft"
                   className="w-full flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-[7px] hover:bg-emerald-100 transition-colors"
                 >
                   <Check className="w-3.5 h-3.5" />
@@ -901,13 +928,14 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                     className="w-full h-8 rounded-[7px] border border-border bg-card px-2.5 text-xs text-foreground tabular-nums focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                   {markPaidMutation.isError && (
-                    <p className="text-[11px] text-red-600 px-1">
+                    <p data-r10n-proposal-error className="text-[11px] text-red-600 px-1">
                       {(markPaidMutation.error as Error)?.message ?? "Failed"}
                     </p>
                   )}
                   <div className="flex gap-2">
                     <button
                       onClick={() => { setMarkPaidStep("idle"); markPaidMutation.reset(); }}
+                      data-r10n-proposal-cta="ghost"
                       className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
                     >
                       Cancel
@@ -915,6 +943,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                     <button
                       onClick={() => markPaidMutation.mutate(markPaidDate)}
                       disabled={markPaidMutation.isPending || !markPaidDate}
+                      data-r10n-proposal-cta="positive"
                       className="flex-[2] flex items-center justify-center gap-2 px-3 py-2 bg-emerald-600 text-white text-xs font-medium rounded-[7px] hover:bg-emerald-700 transition-colors disabled:opacity-60"
                     >
                       <Check className="w-3 h-3" />
@@ -932,13 +961,14 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
               {markLostStep === "idle" ? (
                 <button
                   onClick={() => setMarkLostStep("confirm")}
+                  data-r10n-proposal-cta="lost-soft"
                   className="w-full flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium text-amber-700 border border-amber-200 bg-amber-50 rounded-[7px] hover:bg-amber-100 transition-colors"
                 >
                   <Ban className="w-3.5 h-3.5" />
                   Mark as Lost
                 </button>
               ) : (
-                <div className="space-y-2 p-3 bg-amber-50/60 border border-amber-200 rounded-[8px]">
+                <div data-r10n-proposal-promptbox="lost" className="space-y-2 p-3 bg-amber-50/60 border border-amber-200 rounded-[8px]">
                   <p className="text-[10px] text-muted-foreground px-0.5">
                     Why was it lost? (required). This also voids any unpaid invoices.
                   </p>
@@ -950,11 +980,12 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                     className="w-full rounded-[7px] border border-border bg-card px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                   />
                   {lostMutation.isError && (
-                    <p className="text-[11px] text-red-600 px-1">{(lostMutation.error as Error)?.message}</p>
+                    <p data-r10n-proposal-error className="text-[11px] text-red-600 px-1">{(lostMutation.error as Error)?.message}</p>
                   )}
                   <div className="flex gap-2">
                     <button
                       onClick={() => { setMarkLostStep("idle"); lostMutation.reset(); }}
+                      data-r10n-proposal-cta="ghost"
                       className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
                     >
                       Cancel
@@ -962,6 +993,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                     <button
                       onClick={() => lostMutation.mutate(lostReason.trim())}
                       disabled={lostMutation.isPending || lostReason.trim().length === 0}
+                      data-r10n-proposal-cta="lost"
                       className="flex-[2] flex items-center justify-center gap-2 px-3 py-2 bg-amber-600 text-white text-xs font-medium rounded-[7px] hover:bg-amber-700 transition-colors disabled:opacity-60"
                     >
                       <Ban className="w-3 h-3" />
@@ -1020,6 +1052,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
             <a
               href={`/api/proposals/${proposal.id}/pdf`}
               download
+              data-r10n-proposal-cta="ghost"
               className="w-full flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
             >
               <Download className="w-3.5 h-3.5" />

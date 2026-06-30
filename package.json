@@ -37,6 +37,7 @@
     "@tiptap/extension-underline": "^3.22.5",
     "@tiptap/react": "^3.22.5",
     "@tiptap/starter-kit": "^3.22.5",
+    "@twilio/voice-sdk": "^2.18.3",
     "@vercel/blob": "^2.4.0",
     "@vercel/functions": "^3.4.4",
     "@xyflow/react": "^12.10.2",
@@ -63,6 +64,7 @@
     "sonner": "^2.0.7",
     "stripe": "^22.1.1",
     "tailwind-merge": "^3.5.0",
+    "twilio": "^6.0.2",
     "ws": "^8.20.0",
     "zustand": "^5.0.12"
   },

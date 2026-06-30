@@ -18,6 +18,8 @@ export function ProposalStatusBadge({ status }: { status: string }) {
   const s = status as ProposalStatus;
   return (
     <span
+      data-r10n-status-pill
+      data-status={s}
       className={cn(
         "inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-semibold uppercase tracking-wide",
         BADGE_STYLES[s] ?? "bg-muted text-muted-foreground"

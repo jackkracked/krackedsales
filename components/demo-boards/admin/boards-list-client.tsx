@@ -109,12 +109,12 @@ export function BoardsListClient() {
   };
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden" data-r10n-board-surface>
       {/* Header */}
-      <div className="shrink-0 border-b border-border px-6 pb-4 pt-6">
+      <div className="shrink-0 border-b border-border px-6 pb-4 pt-6" data-r10n-board-header>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="font-heading text-2xl font-semibold tracking-tight text-foreground">Boards</h1>
+            <h1 className="font-heading text-2xl font-semibold tracking-tight text-foreground" data-r10n-board-title>Boards</h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Every demo board, from first design to booked call.
             </p>
@@ -130,13 +130,16 @@ export function BoardsListClient() {
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search client, rep, or ref…"
               className="w-full rounded-[10px] border border-border bg-background py-2 pl-9 pr-3 text-sm text-foreground outline-none transition-colors focus:border-primary"
+              data-r10n-board-search
             />
           </div>
-          <div className="flex items-center gap-1 rounded-[10px] bg-muted p-0.5">
+          <div className="flex items-center gap-1 rounded-[10px] bg-muted p-0.5" data-r10n-board-filters>
             {FILTERS.map((f) => (
               <button
                 key={f.key}
                 onClick={() => setFilter(f.key)}
+                data-r10n-board-filter
+                data-active={filter === f.key ? "true" : "false"}
                 className={`rounded-[8px] px-3 py-1.5 text-[13px] font-medium transition-colors ${
                   filter === f.key ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                 }`}
@@ -159,7 +162,7 @@ export function BoardsListClient() {
         ) : rows.length === 0 ? (
           <EmptyState hasAny={all.length > 0} />
         ) : (
-          <table className="w-full border-separate border-spacing-y-1.5">
+          <table className="w-full border-separate border-spacing-y-1.5" data-r10n-board-table>
             <thead>
               <tr className="text-left text-[12px] font-medium uppercase tracking-wider text-muted-foreground">
                 <Th onClick={() => toggleSort("contactName")} active={sort === "contactName"}>Client</Th>
@@ -179,13 +182,14 @@ export function BoardsListClient() {
                   <tr
                     key={b.id}
                     onClick={() => router.push(`/boards/${b.id}`)}
+                    data-r10n-board-row
                     className="cursor-pointer rounded-[12px] [&>td]:border-y [&>td]:border-border [&>td]:bg-card [&>td]:transition-colors hover:[&>td]:bg-muted/50 [&>td:first-child]:rounded-l-[12px] [&>td:first-child]:border-l [&>td:last-child]:rounded-r-[12px] [&>td:last-child]:border-r"
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <Avatar name={b.contactName} size={36} />
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-foreground">{b.contactName}</p>
+                          <p className="truncate text-sm font-medium text-foreground" data-r10n-board-name>{b.contactName}</p>
                           <p className="truncate text-xs text-muted-foreground">
                             {b.title || b.referenceCode}
                           </p>
@@ -204,7 +208,11 @@ export function BoardsListClient() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${stage.cls}`}>
+                      <span
+                        data-r10n-status-pill
+                        data-status={b.status}
+                        className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${stage.cls}`}
+                      >
                         {stage.label}
                       </span>
                     </td>
@@ -240,7 +248,7 @@ function Th({
   className?: string;
 }) {
   return (
-    <th className={`px-4 pb-1 font-medium ${className}`}>
+    <th className={`px-4 pb-1 font-medium ${className}`} data-r10n-th>
       {onClick ? (
         <button
           onClick={onClick}
@@ -264,18 +272,23 @@ function FunnelStrip({ funnel }: { funnel: { total: number; sent: number; opened
     { label: "Booked", value: funnel.booked, win: true },
   ];
   return (
-    <div className="flex items-stretch gap-2">
+    <div className="flex items-stretch gap-2" data-r10n-board-funnel>
       {items.map((it) => (
         <div
           key={it.label}
+          data-r10n-board-stat
+          data-win={it.win ? "true" : "false"}
           className={`min-w-[68px] rounded-[12px] border px-3 py-2 ${
             it.win ? "border-success/30 bg-success-subtle" : "border-border bg-card"
           }`}
         >
-          <p className={`font-heading text-xl font-semibold tabular-nums ${it.win ? "text-success" : "text-foreground"}`}>
+          <p
+            data-r10n-board-stat-value
+            className={`font-heading text-xl font-semibold tabular-nums ${it.win ? "text-success" : "text-foreground"}`}
+          >
             {it.value}
           </p>
-          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{it.label}</p>
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground" data-r10n-board-stat-label>{it.label}</p>
         </div>
       ))}
     </div>
@@ -284,11 +297,11 @@ function FunnelStrip({ funnel }: { funnel: { total: number; sent: number; opened
 
 function EmptyState({ hasAny }: { hasAny: boolean }) {
   return (
-    <div className="flex flex-col items-center justify-center py-20 text-center">
-      <div className="mb-4 grid h-14 w-14 place-items-center rounded-full bg-muted text-muted-foreground">
+    <div className="flex flex-col items-center justify-center py-20 text-center" data-r10n-board-empty>
+      <div className="mb-4 grid h-14 w-14 place-items-center rounded-full bg-muted text-muted-foreground" data-r10n-board-empty-icon>
         <LayoutGrid className="h-6 w-6" />
       </div>
-      <p className="font-heading text-lg font-semibold text-foreground">
+      <p className="font-heading text-lg font-semibold text-foreground" data-r10n-board-empty-title>
         {hasAny ? "No boards match" : "No boards yet"}
       </p>
       <p className="mt-1 max-w-sm text-sm text-muted-foreground">

@@ -258,7 +258,7 @@ export default function WorkflowCanvasPage({
   }
 
   return (
-    <div className="h-full flex flex-col bg-muted/40">
+    <div data-r10n-wf-editor="" className="h-full flex flex-col bg-muted/40">
       {/* Top bar row */}
       <div className="shrink-0 px-4 pt-3 pb-0 pointer-events-none relative flex items-center justify-center">
 
@@ -266,6 +266,7 @@ export default function WorkflowCanvasPage({
         {mode === "editor" && libraryCollapsed && (
           <button
             onClick={() => setLibraryCollapsed(false)}
+            data-r10n-wf-fab=""
             className="absolute left-4 w-9 h-9 rounded-full bg-card border border-border shadow-sm flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary transition-colors pointer-events-auto"
             title="Add node"
           >
@@ -274,7 +275,7 @@ export default function WorkflowCanvasPage({
         )}
 
         {/* Centered floating bar */}
-        <div className="flex items-center gap-3 px-4 py-2 bg-card border border-border rounded-[12px] shadow-sm pointer-events-auto max-w-fit">
+        <div data-r10n-wf-bar="" className="flex items-center gap-3 px-4 py-2 bg-card border border-border rounded-[12px] shadow-sm pointer-events-auto max-w-fit">
         <Link
           href="/workflows"
           className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-border/50 transition-colors"
@@ -292,7 +293,7 @@ export default function WorkflowCanvasPage({
         />
 
         {/* Editor / Executions pill toggle */}
-        <div className="flex items-center bg-muted rounded-lg p-0.5 gap-0.5">
+        <div data-r10n-wf-modetoggle="" className="flex items-center bg-muted rounded-lg p-0.5 gap-0.5">
           {(["editor", "executions"] as const).map((m) => (
             <button
               key={m}
@@ -300,6 +301,8 @@ export default function WorkflowCanvasPage({
                 setMode(m);
                 if (m === "editor") setSelectedNodeId(null);
               }}
+              data-r10n-wf-modebtn=""
+              data-active={mode === m ? "true" : undefined}
               className={cn(
                 "px-3 py-1 rounded-md text-xs font-semibold transition-colors",
                 mode === m
@@ -316,6 +319,8 @@ export default function WorkflowCanvasPage({
         {mode === "editor" && (
           <button
             onClick={isListening ? stopListening : startListening}
+            data-r10n-wf-listenbtn=""
+            data-listening={isListening ? "true" : undefined}
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors",
               isListening
@@ -333,6 +338,8 @@ export default function WorkflowCanvasPage({
         <button
           onClick={save}
           disabled={saving}
+          data-r10n-wf-savebtn=""
+          data-state={saved ? "saved" : isDirty ? "dirty" : "clean"}
           className={cn(
             "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors",
             saved
@@ -350,6 +357,7 @@ export default function WorkflowCanvasPage({
         <button
           onClick={handleRun}
           disabled={running}
+          data-r10n-wf-runbtn=""
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
         >
           {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
@@ -358,10 +366,12 @@ export default function WorkflowCanvasPage({
         </div>
 
         {/* Enable toggle — top right, in line with bar */}
-        <div className="absolute right-4 flex items-center gap-2 px-3 py-2 bg-card border border-border rounded-[12px] shadow-sm pointer-events-auto">
-          <span className="text-xs text-muted-foreground">{enabled ? "Enabled" : "Disabled"}</span>
+        <div data-r10n-wf-enablebar="" className="absolute right-4 flex items-center gap-2 px-3 py-2 bg-card border border-border rounded-[12px] shadow-sm pointer-events-auto">
+          <span data-r10n-wf-enablelabel="" className="text-xs text-muted-foreground">{enabled ? "Enabled" : "Disabled"}</span>
           <button
             onClick={() => { setEnabled(!enabled); setIsDirty(true); }}
+            data-r10n-wf-toggle=""
+            data-enabled={enabled ? "true" : "false"}
             className={cn(
               "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
               enabled ? "bg-green-500" : "bg-muted"

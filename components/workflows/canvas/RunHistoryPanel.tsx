@@ -88,11 +88,11 @@ export function RunHistoryPanel({ workflowId, onClose }: RunHistoryPanelProps) {
   }
 
   return (
-    <div className="w-80 h-full flex flex-col border-l border-border bg-card shrink-0">
+    <div data-r10n-wf-runhistory="" className="w-80 h-full flex flex-col border-l border-border bg-card shrink-0">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+          <p data-r10n-wf-runlist-title="" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
             Run History
           </p>
           {runs.length > 0 && (
@@ -187,7 +187,7 @@ export function RunHistoryPanel({ workflowId, onClose }: RunHistoryPanelProps) {
                                       {log.nodeName ?? log.nodeType}
                                     </p>
                                     {log.error && (
-                                      <p className="text-[10px] text-red-500 truncate mt-0.5">{log.error}</p>
+                                      <p data-r10n-wf-error-text="" className="text-[10px] text-red-500 truncate mt-0.5">{log.error}</p>
                                     )}
                                   </div>
                                   <div className="text-right shrink-0">
@@ -209,7 +209,7 @@ export function RunHistoryPanel({ workflowId, onClose }: RunHistoryPanelProps) {
                                 {logExpanded && (
                                   <div className="px-4 pb-3 space-y-2">
                                     {log.error && (
-                                      <div className="p-2 bg-red-500/10 rounded text-[10px] font-mono text-red-500 break-all">
+                                      <div data-r10n-wf-error="" className="p-2 bg-red-500/10 rounded text-[10px] font-mono text-red-500 break-all">
                                         {log.error}
                                       </div>
                                     )}

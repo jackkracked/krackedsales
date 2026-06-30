@@ -45,8 +45,8 @@ export function ReplyComposer({ conversationId, contactId, defaultChannelType = 
   const canSend = !!draft.trim() && !sendMessage.isPending;
 
   return (
-    <div className="border-t border-border bg-card px-4 py-3 shrink-0">
-      <div className="rounded-[14px] border border-border bg-background transition-all focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/15 focus-within:shadow-[0_4px_16px_-10px_rgba(15,58,92,0.35)]">
+    <div data-r10n-composer className="border-t border-border bg-card px-4 py-3 shrink-0">
+      <div data-r10n-composer-field className="rounded-[14px] border border-border bg-background transition-all focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/15 focus-within:shadow-[0_4px_16px_-10px_rgba(15,58,92,0.35)]">
         <textarea
           value={draft}
           onChange={(e) => setReplyDraft(conversationId, e.target.value)}
@@ -57,10 +57,11 @@ export function ReplyComposer({ conversationId, contactId, defaultChannelType = 
         />
         <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5 pt-1">
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-muted-foreground">Via</span>
+            <span data-r10n-composer-via className="text-[11px] text-muted-foreground">Via</span>
             <select
               value={channelType}
               onChange={(e) => setChannelType(e.target.value)}
+              data-r10n-composer-select
               className="text-[11px] font-medium text-foreground bg-muted/70 rounded-[7px] pl-2 pr-1.5 py-1 border-0 outline-none cursor-pointer hover:bg-muted transition-colors"
             >
               {Object.entries(CHANNEL_TYPE_LABELS).map(([v, label]) => (
@@ -69,10 +70,12 @@ export function ReplyComposer({ conversationId, contactId, defaultChannelType = 
             </select>
           </div>
           <div className="flex items-center gap-2.5">
-            <span className="text-[10px] text-muted-foreground/55 tabular-nums">⌘↵</span>
+            <span data-r10n-composer-kbd className="text-[10px] text-muted-foreground/55 tabular-nums">⌘↵</span>
             <button
               onClick={handleSend}
               disabled={!canSend}
+              data-r10n-composer-send
+              data-can-send={canSend}
               className={cn(
                 "flex items-center gap-1.5 pl-3 pr-3.5 py-1.5 rounded-[9px] text-sm font-semibold transition-all active:scale-[0.97]",
                 canSend

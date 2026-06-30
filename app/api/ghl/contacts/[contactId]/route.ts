@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ghl } from "@/lib/ghl/client";
+import { deriveWebsite } from "@/lib/ghl/qualification";
 
 export const dynamic = "force-dynamic";
 
-// GHL custom field ID for eCommerce website URL (from lead form qualification)
+// GHL custom field ID for eCommerce website URL (legacy lead-form field).
+// Still written on PATCH so a manually-saved website reads back from the same place.
 export const WEBSITE_CUSTOM_FIELD_ID = "te2hH1PWliUW8R18epQn";
 
 interface GHLContactV2 {
@@ -38,6 +40,19 @@ export async function PATCH(
 
   try {
     await ghl.put(`/contacts/${contactId}`, payload);
+    // GHL READS website from a custom field (see GET → websiteRaw), not the top-level field
+    // written above. Write that custom field too, so a saved website is read back correctly
+    // (keeps the inbox "already on file" check accurate). Isolated try/catch so a custom-field
+    // hiccup can never fail the email/phone save.
+    if (website) {
+      try {
+        await ghl.put(`/contacts/${contactId}`, {
+          customFields: [{ id: WEBSITE_CUSTOM_FIELD_ID, value: website }],
+        });
+      } catch (e) {
+        console.error("[PATCH /api/ghl/contacts/[id]] website custom-field write failed:", e);
+      }
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -59,10 +74,14 @@ export async function GET(
 
     // Handle both v2 "customFields" (plural) and v1 "customField" (singular)
     const fields = contact.customFields ?? contact.customField ?? [];
+    // Legacy raw value (kept for the inbox "already on file" check).
     const websiteRaw =
       fields.find((f) => f.id === WEBSITE_CUSTOM_FIELD_ID)?.value ?? null;
+    // Resolved, form-agnostic website: standard field → legacy CF → any URL-ish CF.
+    // (Note fallback happens client-side where notes are already fetched.)
+    const website = deriveWebsite(contact);
 
-    return NextResponse.json({ contact, websiteRaw });
+    return NextResponse.json({ contact, website, websiteRaw });
   } catch (err) {
     console.error("[GET /api/ghl/contacts/[id]]", err);
     return NextResponse.json({ contact: null, websiteRaw: null }, { status: 500 });

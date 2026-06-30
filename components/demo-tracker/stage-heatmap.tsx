@@ -94,8 +94,8 @@ export function StageHeatmap({ tasks, range }: StageHeatmapProps) {
   }, [tasks, dbAvgMap, stageTargets]);
 
   return (
-    <div className="shrink-0">
-      <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-2">
+    <div className="shrink-0" data-r10n-demo-heatmap>
+      <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-2" data-r10n-demo-section-title>
         Avg time per stage — demos sent in period
       </p>
       <div className="flex flex-wrap gap-2">
@@ -111,6 +111,7 @@ export function StageHeatmap({ tasks, range }: StageHeatmapProps) {
                   ? `Historical avg across ${dbCount} demos`
                   : "Estimated from current tasks"
               }
+              data-r10n-demo-heat={heat ?? "none"}
               className={cn(
                 "flex items-center gap-2.5 px-3 py-2 rounded-lg bg-card border border-border",
                 heat === "green" && "border-emerald-500",
@@ -119,20 +120,23 @@ export function StageHeatmap({ tasks, range }: StageHeatmapProps) {
                 heat === null    && "border-border opacity-50",
               )}
             >
-              <span className="text-xs font-medium text-foreground">{label}</span>
+              <span className="text-xs font-medium text-foreground" data-r10n-demo-heat-label>{label}</span>
 
-              <span className={cn(
-                "text-sm font-bold tabular-nums",
-                heat === "green" && "text-emerald-600",
-                heat === "amber" && "text-amber-500",
-                heat === "red"   && "text-red-500",
-                heat === null    && "text-muted-foreground",
-              )}>
+              <span
+                className={cn(
+                  "text-sm font-bold tabular-nums",
+                  heat === "green" && "text-emerald-600",
+                  heat === "amber" && "text-amber-500",
+                  heat === "red"   && "text-red-500",
+                  heat === null    && "text-muted-foreground",
+                )}
+                data-r10n-demo-heat-value
+              >
                 {avgDays !== null ? `${avgDays.toFixed(1)}d` : "—"}
               </span>
 
               {count > 0 && (
-                <span className="text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
+                <span className="text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full" data-r10n-demo-heat-count>
                   {count}
                 </span>
               )}

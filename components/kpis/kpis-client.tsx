@@ -7,7 +7,7 @@ import { RefreshCw, Shield, Settings2, Plus, X, ChevronDown, ChevronRight } from
 import { cn } from "@/lib/utils/cn";
 import { format, startOfMonth, addMonths } from "date-fns";
 import { MetricSection } from "./metric-section";
-import { MetricCell, fmtCurrency, fmtNumber, type MetricDef, type MetricTarget, fmtValue } from "./metric-cell";
+import { MetricCell, fmtCurrency, fmtNumber, type MetricDef, type MetricTarget, type DateWindow, fmtValue } from "./metric-cell";
 import { KpiDetailSheet } from "./KpiDetailSheet";
 import { KpiConfigurator } from "./kpi-configurator";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
@@ -351,10 +351,10 @@ export function KpisClient() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-0.5">
+            <p data-r10n-kpi-eyebrow className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-0.5">
               Kracked Retention
             </p>
-            <h1 className="text-2xl font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>
+            <h1 data-r10n-kpi-page-title className="text-2xl font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>
               KPIs
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
@@ -364,6 +364,7 @@ export function KpisClient() {
 
           <div className="flex items-center gap-2 shrink-0">
             <Link
+              data-r10n-health-btn
               href="/kpis/health"
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:text-foreground hover:border-foreground/30 transition-colors"
             >
@@ -371,6 +372,7 @@ export function KpisClient() {
               Health
             </Link>
             <button
+              data-r10n-health-btn
               onClick={() => setSettingsOpen(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:text-foreground hover:border-foreground/30 transition-colors"
             >
@@ -378,6 +380,7 @@ export function KpisClient() {
               Edit
             </button>
             <button
+              data-r10n-health-btn
               onClick={syncStripe}
               disabled={syncState === "running"}
               className={cn(
@@ -405,7 +408,7 @@ export function KpisClient() {
 
         {/* Sync feedback */}
         {syncState !== "idle" && (
-          <div className={cn(
+          <div data-r10n-kpi-sync data-state={syncState} className={cn(
             "mb-4 px-3 py-2 rounded-[7px] text-xs font-medium",
             syncState === "running" && "bg-muted text-muted-foreground",
             syncState === "done" && "bg-accent-green/10 text-accent-green",
@@ -427,6 +430,7 @@ export function KpisClient() {
           isAdmin={isAdmin}
           configuredKeys={configuredKeys}
           targets={targets}
+          window={dateRange}
           onConfigure={setConfigureKey}
         />
 
@@ -440,6 +444,7 @@ export function KpisClient() {
           isAdmin={isAdmin}
           configuredKeys={configuredKeys}
           targets={targets}
+          window={dateRange}
           onConfigure={setConfigureKey}
         />
 
@@ -454,6 +459,7 @@ export function KpisClient() {
           isAdmin={isAdmin}
           configuredKeys={configuredKeys}
           targets={targets}
+          window={dateRange}
           onConfigure={setConfigureKey}
         />
 
@@ -467,6 +473,7 @@ export function KpisClient() {
           isAdmin={isAdmin}
           configuredKeys={configuredKeys}
           targets={targets}
+          window={dateRange}
           onConfigure={setConfigureKey}
         />
 
@@ -485,9 +492,10 @@ export function KpisClient() {
         ))}
 
         {funnels.length === 0 && !funnelsQuery.isLoading && (
-          <div className="mb-6 border border-dashed border-border rounded-[10px] py-8 flex flex-col items-center gap-2">
+          <div data-r10n-kpi-empty className="mb-6 border border-dashed border-border rounded-[10px] py-8 flex flex-col items-center gap-2">
             <p className="text-sm text-muted-foreground">No offer funnels configured</p>
             <button
+              data-r10n-kpi-link
               onClick={() => setSettingsOpen(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
             >
@@ -553,6 +561,7 @@ function KpiSection({
   configuredKeys,
   targets,
   onConfigure,
+  window,
 }: {
   title: string;
   metrics: MetricDef[];
@@ -565,6 +574,7 @@ function KpiSection({
   configuredKeys: Set<string>;
   targets: Record<string, MetricTarget>;
   onConfigure: (key: string) => void;
+  window?: DateWindow;
 }) {
   // Non-admins (or no metrics) → the standard section, no configure affordances.
   if (!isAdmin) {
@@ -577,6 +587,7 @@ function KpiSection({
         accent={accent}
         onMetricClick={onMetricClick}
         onManualSave={onManualSave}
+        window={window}
       />
     );
   }
@@ -585,8 +596,9 @@ function KpiSection({
     <section className="mb-6">
       {/* Section header — mirrors MetricSection */}
       <div className="flex items-center gap-3 mb-2 px-1">
-        <div className="w-0.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: accent ?? "oklch(0.45 0.03 250)" }} />
+        <div data-r10n-section-accent className="w-0.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: `var(--r10n-section-accent, ${accent ?? "oklch(0.45 0.03 250)"})` }} />
         <h3
+          data-r10n-section-title
           className="text-[11px] font-bold uppercase tracking-widest text-foreground/70 shrink-0"
           style={{ fontFamily: "var(--font-heading)" }}
         >
@@ -595,7 +607,7 @@ function KpiSection({
         <div className="flex-1 h-px bg-border/60" />
       </div>
 
-      <div className="bg-card border border-border rounded-[10px] overflow-hidden">
+      <div data-r10n-card className="bg-card border border-border rounded-[10px] overflow-hidden">
         {loading ? (
           <div className="grid grid-cols-3 sm:grid-cols-5 divide-x divide-y divide-border/40">
             {Array.from({ length: metrics.length || 5 }).map((_, i) => (
@@ -614,6 +626,7 @@ function KpiSection({
             configuredKeys={configuredKeys}
             targets={targets}
             onConfigure={onConfigure}
+            window={window}
           />
         )}
       </div>
@@ -630,6 +643,7 @@ function ConfigurableRows({
   configuredKeys,
   targets,
   onConfigure,
+  window,
 }: {
   metrics: MetricDef[];
   values: Record<string, MetricValue | undefined>;
@@ -638,6 +652,7 @@ function ConfigurableRows({
   configuredKeys: Set<string>;
   targets: Record<string, MetricTarget>;
   onConfigure: (key: string) => void;
+  window?: DateWindow;
 }) {
   const cells = metrics.map((def) => {
     const mv = values[def.key];
@@ -650,6 +665,7 @@ function ConfigurableRows({
         sub={mv?.sub}
         status={mv?.status}
         target={targets[def.key]}
+        window={window}
         onClick={onMetricClick ? () => onMetricClick(def.key) : undefined}
         onManualSave={def.manual && onManualSave ? (v) => onManualSave(def.key, v) : undefined}
         configurable
@@ -669,7 +685,7 @@ function ConfigurableRows({
   }
 
   return (
-    <div>
+    <div data-r10n-metric-rows>
       {slices.map((rowCells, ri) => (
         <div key={ri} className={cn("flex divide-x divide-border/40", ri > 0 && "border-t border-border/40")}>
           {rowCells.map((c, ci) => (
@@ -723,17 +739,17 @@ function FunnelSection({
         onClick={() => setCollapsed(!collapsed)}
         className="flex items-center gap-3 mb-2 px-1 w-full text-left"
       >
-        <div className="w-0.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: SECTION_ACCENTS.offer }} />
-        <h3 className="text-[11px] font-bold uppercase tracking-widest text-foreground/70 shrink-0" style={{ fontFamily: "var(--font-heading)" }}>
+        <div data-r10n-section-accent className="w-0.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: `var(--r10n-section-accent, ${SECTION_ACCENTS.offer})` }} />
+        <h3 data-r10n-section-title className="text-[11px] font-bold uppercase tracking-widest text-foreground/70 shrink-0" style={{ fontFamily: "var(--font-heading)" }}>
           Offer Metrics
         </h3>
-        <span className="text-[11px] text-muted-foreground font-medium">{funnel.name}</span>
+        <span data-r10n-funnel-name className="text-[11px] text-muted-foreground font-medium">{funnel.name}</span>
         <div className="flex-1 h-px bg-border/60" />
         {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
       </button>
 
       {!collapsed && (
-        <div className="bg-card border border-border rounded-[10px] overflow-hidden">
+        <div data-r10n-card className="bg-card border border-border rounded-[10px] overflow-hidden">
           {isLoading ? (
             <div className="grid grid-cols-3 sm:grid-cols-5 divide-x divide-y divide-border/40">
               {Array.from({ length: 10 }).map((_, i) => (
@@ -748,13 +764,14 @@ function FunnelSection({
               {FUNNEL_GROUPS.map((group, gi) => (
                 <div key={group.label} className={gi > 0 ? "border-t border-border/40" : ""}>
                   {/* Sub-group label */}
-                  <div className="px-4 py-1.5 bg-muted/20">
-                    <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-muted-foreground/60">
+                  <div data-r10n-funnel-band className="px-4 py-1.5 bg-muted/20">
+                    <p data-r10n-funnel-band-label className="text-[9px] font-bold uppercase tracking-[0.15em] text-muted-foreground/60">
                       {group.label}
                     </p>
                   </div>
                   {/* Metrics in this group — equal-width cells filling the row */}
                   <div
+                    data-r10n-metric-rows
                     className="grid divide-x divide-border/40"
                     style={{ gridTemplateColumns: `repeat(${group.metrics.length}, 1fr)` }}
                   >
@@ -771,6 +788,7 @@ function FunnelSection({
                           // An offer-scoped target (set via this card's gear) wins;
                           // otherwise fall back to a global target for the base key.
                           target={targets[nsKey] ?? targets[def.key]}
+                          window={dateRange}
                           // Configured metrics drill into the engine rows (the exact
                           // appointments/records); unconfigured use the legacy catalog.
                           onClick={() => onMetricClick(isConfigured ? nsKey : def.key)}
@@ -868,9 +886,9 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   return (
     <>
       <div className="fixed inset-0 z-40 bg-foreground/10 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[400px] bg-card border-l border-border shadow-xl flex flex-col">
+      <div data-r10n-kpi-drawer className="fixed inset-y-0 right-0 z-50 w-full sm:w-[400px] bg-card border-l border-border shadow-xl flex flex-col">
         <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-border shrink-0">
-          <h2 className="text-sm font-semibold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>
+          <h2 data-r10n-kpi-drawer-title className="text-sm font-semibold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>
             KPI Settings
           </h2>
           <button onClick={onClose} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
@@ -880,7 +898,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 
         <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-3">Offer Funnels</p>
+            <p data-r10n-kpi-drawer-label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-3">Offer Funnels</p>
 
             {/* Existing funnels */}
             {funnels.map((f) => (
@@ -897,25 +915,25 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
                 {(f.pipelineIds as string[]).length > 0 ? (
                   <div className="flex flex-wrap gap-1 mt-1.5">
                     {(f.pipelineIds as string[]).map((pid) => (
-                      <span key={pid} className="inline-flex items-center px-2 py-0.5 rounded-[5px] bg-primary/8 text-[10px] font-medium text-primary">
+                      <span key={pid} data-r10n-kpi-tag className="inline-flex items-center px-2 py-0.5 rounded-[5px] bg-primary/8 text-[10px] font-medium text-primary">
                         {pipelineNameById(pid)}
                       </span>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-[10px] text-amber-600 mt-0.5">No pipelines assigned</p>
+                  <p data-r10n-kpi-warn className="text-[10px] text-amber-600 mt-0.5">No pipelines assigned</p>
                 )}
               </div>
             ))}
 
             {/* Add new funnel */}
             <div className="mt-4 space-y-2.5">
-              <p className="text-[10px] font-semibold text-foreground uppercase tracking-wide">New Funnel</p>
+              <p data-r10n-kpi-drawer-label className="text-[10px] font-semibold text-foreground uppercase tracking-wide">New Funnel</p>
 
-              <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Funnel name (e.g. Free Design Funnel)"
+              <input data-r10n-kpi-input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Funnel name (e.g. Free Design Funnel)"
                 className="w-full px-3 py-2 text-sm bg-background border border-border rounded-[7px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
 
-              <input type="text" value={newFilter} onChange={(e) => setNewFilter(e.target.value)} placeholder="Campaign filter (e.g. FDF)"
+              <input data-r10n-kpi-input type="text" value={newFilter} onChange={(e) => setNewFilter(e.target.value)} placeholder="Campaign filter (e.g. FDF)"
                 className="w-full px-3 py-2 text-sm bg-background border border-border rounded-[7px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
 
               {/* Pipeline multi-select */}
@@ -933,6 +951,8 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
                         <button
                           key={p.id}
                           type="button"
+                          data-r10n-kpi-option
+                          data-selected={selected}
                           onClick={() => togglePipeline(p.id)}
                           className={cn(
                             "w-full text-left px-2.5 py-1.5 rounded-[5px] text-xs font-medium transition-colors",
@@ -942,7 +962,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
                           )}
                         >
                           <span className="flex items-center gap-2">
-                            <span className={cn(
+                            <span data-r10n-kpi-check data-selected={selected} className={cn(
                               "w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-colors",
                               selected ? "bg-primary border-primary" : "border-border"
                             )}>
@@ -967,6 +987,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
               </div>
 
               <button onClick={createFunnel} disabled={!newName.trim() || creating}
+                data-r10n-kpi-primary-btn
                 className={cn("w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded-[7px] transition-colors",
                   newName.trim() && !creating ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground cursor-not-allowed")}>
                 <Plus className="w-3.5 h-3.5" />
@@ -976,9 +997,9 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
           </div>
 
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-2">Expenses</p>
+            <p data-r10n-kpi-drawer-label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-2">Expenses</p>
             <p className="text-xs text-muted-foreground mb-2">Manual expenses feed into Total Expenses and Net P/L.</p>
-            <Link href="/settings" className="text-xs font-medium text-primary hover:text-primary/80 transition-colors">
+            <Link href="/settings" data-r10n-kpi-link className="text-xs font-medium text-primary hover:text-primary/80 transition-colors">
               Manage in Settings
             </Link>
           </div>

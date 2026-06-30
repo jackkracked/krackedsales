@@ -29,6 +29,8 @@ import { useStageHistoryStore } from "@/store/stage-history-store";
 import type { GHLOpportunity, GHLPipeline } from "@/lib/ghl/types";
 import { cn } from "@/lib/utils/cn";
 import { toast } from "sonner";
+import { PhoneCall } from "lucide-react";
+import { AddToDialer } from "@/components/dialer/add-to-dialer";
 
 type OppTab = "overview" | "qualification" | "notes";
 type LeadTab = "overview" | "comment" | "notes" | "messages";
@@ -84,7 +86,7 @@ function SortableCard({
 function KanbanColumn({
   stage,
   opportunities,
-  commentLeads,
+  socialLeads,
   unreadContactIds,
   selectedIds,
   repMap,
@@ -95,10 +97,11 @@ function KanbanColumn({
   onToggleSelect,
   onSelectAll,
   isOver,
+  isFirst,
 }: {
   stage: GHLPipeline["stages"][0];
   opportunities: GHLOpportunity[];
-  commentLeads?: CommentLead[];
+  socialLeads?: CommentLead[];
   unreadContactIds: Set<string>;
   selectedIds: Set<string>;
   repMap: Map<string, string>;
@@ -109,29 +112,32 @@ function KanbanColumn({
   onToggleSelect: (id: string) => void;
   onSelectAll: () => void;
   isOver: boolean;
+  isFirst?: boolean;
 }) {
   const { setNodeRef } = useDroppable({ id: stage.id });
 
   // Merge and sort all cards by date descending
   const allCards = [
     ...opportunities.map(o => ({ type: "opp" as const, id: o.id, date: new Date(o.createdAt).getTime(), item: o })),
-    ...(commentLeads ?? []).map(l => ({ type: "lead" as const, id: `cl-${l.id}`, date: new Date(l.createdAt).getTime(), item: l })),
+    ...(socialLeads ?? []).map(l => ({ type: "lead" as const, id: `cl-${l.id}`, date: new Date(l.createdAt).getTime(), item: l })),
   ].sort((a, b) => b.date - a.date);
 
   return (
-    <div className="flex flex-col min-w-[300px] flex-1 h-full">
-      <div className="h-9 flex items-center gap-2 px-1 shrink-0 sticky top-0 z-10 bg-background">
+    <div data-r10n-column className="flex flex-col min-w-[300px] flex-1 h-full">
+      <div data-r10n-column-header className="h-9 flex items-center gap-2 px-1 shrink-0 sticky top-0 z-10 bg-background">
         <span
+          data-r10n-column-title
           className="text-sm font-semibold text-foreground truncate min-w-0 flex-1"
           title={stage.name}
         >
           {stage.name}
         </span>
-        <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
-          {opportunities.length + (commentLeads?.length ?? 0)}
+        <span data-r10n-column-count data-r10n-column-first={isFirst ? "true" : undefined} className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+          {opportunities.length + (socialLeads?.length ?? 0)}
         </span>
         {opportunities.length > 0 && (
           <button
+            data-r10n-column-selectall
             onClick={onSelectAll}
             className="text-[11px] text-muted-foreground hover:text-foreground transition-colors shrink-0"
           >
@@ -144,11 +150,12 @@ function KanbanColumn({
 
       <div
         ref={setNodeRef}
+        data-r10n-column-body
         className={cn(
           "flex flex-col gap-2 flex-1 rounded-[10px] p-2 mt-2 overflow-y-auto transition-colors duration-150",
           isOver ? "ring-2 ring-primary/40 bg-primary/5" : ""
         )}
-        style={{ backgroundColor: isOver ? undefined : "var(--sidebar)" }}
+        style={{ backgroundColor: isOver ? undefined : "var(--r10n-column-bg, var(--sidebar))" }}
       >
         <SortableContext
           items={opportunities.map((o) => o.id)}
@@ -177,8 +184,8 @@ function KanbanColumn({
           )}
         </SortableContext>
 
-        {opportunities.length === 0 && !commentLeads?.length && (
-          <div className={cn(
+        {opportunities.length === 0 && !socialLeads?.length && (
+          <div data-r10n-column-empty className={cn(
             "flex-1 flex items-center justify-center text-xs py-8 rounded-[8px] border-2 border-dashed transition-colors",
             isOver
               ? "border-primary/40 text-primary"
@@ -199,13 +206,13 @@ function KanbanColumn({
 interface KanbanBoardProps {
   pipeline: GHLPipeline;
   opportunities: GHLOpportunity[];
-  commentLeads?: CommentLead[];
+  socialLeads?: CommentLead[];
   unreadContactIds?: Set<string>;
   repMap?: Map<string, string>;
   autoOpenContactId?: string;
 }
 
-export function KanbanBoard({ pipeline, opportunities, commentLeads = [], unreadContactIds = new Set(), repMap = new Map(), autoOpenContactId }: KanbanBoardProps) {
+export function KanbanBoard({ pipeline, opportunities, socialLeads = [], unreadContactIds = new Set(), repMap = new Map(), autoOpenContactId }: KanbanBoardProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [selectedOpp, setSelectedOpp] = useState<GHLOpportunity | null>(null);
@@ -381,7 +388,7 @@ export function KanbanBoard({ pipeline, opportunities, commentLeads = [], unread
                 key={stage.id}
                 stage={stage}
                 opportunities={opportunitiesByStage(stage.id)}
-                commentLeads={stageIndex === 0 ? commentLeads : undefined}
+                socialLeads={stageIndex === 0 ? socialLeads : undefined}
                 unreadContactIds={unreadContactIds}
                 selectedIds={selectedOppIds}
                 repMap={repMap}
@@ -392,6 +399,7 @@ export function KanbanBoard({ pipeline, opportunities, commentLeads = [], unread
                 onCommentLeadClick={(lead) => openCommentLead(lead, "overview")}
                 onCommentLeadMessageClick={(lead) => openCommentLead(lead, "messages")}
                 isOver={isOver}
+                isFirst={stageIndex === 0}
               />
             );
           })}
@@ -408,10 +416,22 @@ export function KanbanBoard({ pipeline, opportunities, commentLeads = [], unread
 
       {/* Selection bar */}
       {selectedOppIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2.5 bg-card border border-border rounded-[10px] shadow-lg pointer-events-auto">
-          <span className="text-sm font-medium text-foreground tabular-nums">
+        <div data-r10n-selectionbar className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2.5 bg-card border border-border rounded-[10px] shadow-lg pointer-events-auto">
+          <span data-r10n-selectionbar-count className="text-sm font-medium text-foreground tabular-nums">
             {selectedOppIds.size} selected
           </span>
+          <div className="w-px h-4 bg-border" />
+          <AddToDialer
+            contacts={opportunities
+              .filter((o) => selectedOppIds.has(o.id) && o.contact?.id)
+              .map((o) => ({ contactId: o.contact!.id, contactName: o.contact!.name, phone: o.contact!.phone }))}
+            onDone={() => setSelectedOppIds(new Set())}
+            trigger={
+              <button className="flex items-center gap-1.5 text-xs font-medium text-foreground hover:text-primary transition-colors">
+                <PhoneCall className="w-3.5 h-3.5" /> Add to Power Dialer
+              </button>
+            }
+          />
           <div className="w-px h-4 bg-border" />
           <button
             onClick={() => setSelectedOppIds(new Set())}

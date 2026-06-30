@@ -7,7 +7,7 @@ import {
   Search, X, ChevronUp, ChevronDown, Download, Tag, RefreshCw,
   MessageCircle, ExternalLink, Users, SlidersHorizontal, Plus,
   ChevronLeft, ChevronRight, Check, Mail, Phone, Ban,
-  FileText, ClipboardCheck, Layers,
+  FileText, ClipboardCheck, Layers, Zap, Send, PhoneCall,
 } from "lucide-react";
 import { relativeTime, formatDate } from "@/lib/utils/date";
 import { Avatar } from "@/components/ui/avatar";
@@ -25,6 +25,10 @@ import {
   countActive,
 } from "@/lib/contacts/filters";
 import type { UnifiedContact } from "@/lib/contacts/types";
+import { stageClass, stageStatus, r10nStageColor } from "@/lib/contacts/stage-colors";
+import { PLATFORM_BADGE, RESPONSE_CONFIG } from "@/lib/contacts/configs";
+import { ChangeStageModal } from "./change-stage-modal";
+import { AddToDialer } from "@/components/dialer/add-to-dialer";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,30 +57,8 @@ const PRESET_TABS: PresetTab[] = [
 ];
 
 // ─── Design constants ─────────────────────────────────────────────────────────
-
-const PLATFORM_BADGE: Record<string, { label: string; className: string }> = {
-  lead_form:  { label: "Meta",    className: "bg-[#0F3A5C]/10 text-[#0F3A5C]" },
-  facebook:   { label: "FB",      className: "bg-blue-50 text-blue-700" },
-  instagram:  { label: "IG",      className: "bg-pink-50 text-pink-700" },
-  tiktok:     { label: "TikTok",  className: "bg-slate-100 text-slate-700" },
-};
-
-const STAGE_COLORS: Record<string, string> = {
-  "New Lead":           "bg-blue-50 text-blue-700 border-blue-200",
-  "Initial Contact Made": "bg-amber-50 text-amber-700 border-amber-200",
-  "Intro Call (Booked)": "bg-violet-50 text-violet-700 border-violet-200",
-  "Demo In Progress":   "bg-indigo-50 text-indigo-700 border-indigo-200",
-  "Demo Sent":          "bg-emerald-50 text-emerald-700 border-emerald-200",
-  "Proposal Sent":      "bg-teal-50 text-teal-700 border-teal-200",
-  "Closed (Won)":       "bg-green-50 text-green-700 border-green-200",
-  "Not Qualified":      "bg-muted text-muted-foreground border-border",
-};
-
-const RESPONSE_CONFIG: Record<string, { label: string; className: string }> = {
-  awaiting_reply: { label: "Awaiting reply", className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  no_response:    { label: "No response",    className: "bg-red-50 text-red-600 border-red-200" },
-  replied:        { label: "Replied",         className: "bg-muted text-muted-foreground border-border" },
-};
+// PLATFORM_BADGE + RESPONSE_CONFIG now live in lib/contacts/configs.ts (shared with
+// the contact modal header).
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -85,7 +67,7 @@ function SortHeader({ label, sortKey, currentSort, currentOrder, onSort }: {
 }) {
   const active = currentSort === sortKey;
   return (
-    <button onClick={() => onSort(sortKey)} className={cn("flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest transition-colors", active ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
+    <button onClick={() => onSort(sortKey)} data-r10n-th data-active={active ? "true" : "false"} className={cn("flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest transition-colors", active ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
       {label}
       <span className="flex flex-col -space-y-0.5">
         <ChevronUp  className={cn("w-2.5 h-2.5 -mb-0.5", active && currentOrder === "asc"  ? "text-primary" : "text-border/70")} />
@@ -108,7 +90,7 @@ function SkeletonRow({ i }: { i: number }) {
           </div>
         </div>
       </td>
-      {Array.from({ length: 8 }).map((_, j) => (
+      {Array.from({ length: 9 }).map((_, j) => (
         <td key={j} className="px-3 py-2"><div className="h-2.5 w-12 rounded-full bg-muted animate-pulse" /></td>
       ))}
     </tr>
@@ -130,6 +112,8 @@ export function ContactsClient() {
   const [openContact, setOpenContact]         = useState<UnifiedContact | null>(null);
   const [auditContact, setAuditContact]       = useState<UnifiedContact | null>(null);
   const [demoContact, setDemoContact]         = useState<UnifiedContact | null>(null);
+  const [stageContact, setStageContact]       = useState<UnifiedContact | null>(null);
+  const [stageBar, setStageBar]               = useState<Array<[string, number]>>([]);
   const [openContactTab, setOpenContactTab]   = useState<"timeline" | undefined>(undefined);
   const [smartLists, setSmartLists]           = useState<SmartList[]>([]);
   const [activeListId, setActiveListId]       = useState<string | null>(null);
@@ -279,6 +263,23 @@ export function ContactsClient() {
     if (action === "demo") setDemoContact(contact);
   }
 
+  // Clicking a stage summary pill filters the whole list to that pipeline stage.
+  function toggleStage(stageName: string) {
+    setFilters((f) => ({ ...f, stageName: f.stageName === stageName ? null : stageName }));
+    setActiveListId(null); setActivePreset("");
+  }
+
+  // Stage moved — optimistically recolor the pill, then reconcile from the server.
+  function handleStageMoved(uid: string, newStageId: string, newStageName: string) {
+    queryClient.setQueryData<{ contacts: UnifiedContact[]; total: number }>(
+      ["contacts", params.toString()],
+      (old) => old
+        ? { ...old, contacts: old.contacts.map((c) => c.uid === uid ? { ...c, stage: newStageName, stageId: newStageId, daysInCurrentStage: 0 } : c) }
+        : old
+    );
+    queryClient.invalidateQueries({ queryKey: ["contacts"] });
+  }
+
   // Stage summary counts
   const stageCounts = new Map<string, number>();
   for (const c of contacts) {
@@ -286,8 +287,17 @@ export function ContactsClient() {
     stageCounts.set(s, (stageCounts.get(s) ?? 0) + 1);
   }
 
+  // Keep a stable set of stage pills (captured when not stage-filtered) so you can
+  // switch between stages even after clicking one.
+  useEffect(() => {
+    if (filters.stageName || isLoading) return;
+    const m = new Map<string, number>();
+    for (const c of contacts) { const s = c.stage ?? "Unknown"; m.set(s, (m.get(s) ?? 0) + 1); }
+    if (m.size) setStageBar([...m.entries()].sort((a, b) => b[1] - a[1]));
+  }, [contacts, filters.stageName, isLoading]);
+
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-2.5">
+    <div data-r10n-contacts className="flex flex-col flex-1 min-h-0 gap-2.5">
 
       {/* ── Toolbar ── */}
       <div className="flex items-center gap-2.5 flex-wrap shrink-0">
@@ -295,6 +305,7 @@ export function ContactsClient() {
           <Search className="absolute left-2.5 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
           <input
             ref={searchRef}
+            data-r10n-search
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search contacts…"
@@ -308,6 +319,8 @@ export function ContactsClient() {
 
         <button
           onClick={() => setShowFilterSheet(true)}
+          data-r10n-filtersbtn
+          data-active={showFilterSheet || activeFilterCount > 0 ? "true" : "false"}
           className={cn(
             "flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium rounded-[8px] border transition-colors",
             showFilterSheet || activeFilterCount > 0
@@ -318,47 +331,59 @@ export function ContactsClient() {
           <SlidersHorizontal className="w-3.5 h-3.5" />
           Filters
           {activeFilterCount > 0 && (
-            <span className="ml-0.5 px-1.5 py-px text-[9px] font-bold bg-primary text-white rounded-full leading-tight">{activeFilterCount}</span>
+            <span data-r10n-filterscount className="ml-0.5 px-1.5 py-px text-[9px] font-bold bg-primary text-white rounded-full leading-tight">{activeFilterCount}</span>
           )}
         </button>
 
         {activeFilterCount > 0 && (
-          <button onClick={clearAll} className="text-xs text-muted-foreground hover:text-foreground transition-colors px-1">Clear all</button>
+          <button onClick={clearAll} data-r10n-clearall className="text-xs text-muted-foreground hover:text-foreground transition-colors px-1">Clear all</button>
         )}
 
         <div className="ml-auto flex items-center gap-2">
           {isFetching && !isLoading && (
-            <span className="text-xs text-muted-foreground flex items-center gap-1.5">
+            <span data-r10n-syncing className="text-xs text-muted-foreground flex items-center gap-1.5">
               <RefreshCw className="w-3 h-3 animate-spin" /> Syncing
             </span>
           )}
           {selected.size > 0 && (
-            <div className="flex items-center gap-1.5 pl-2 border-l border-border">
-              <span className="text-xs text-muted-foreground tabular-nums font-medium">{selected.size} selected</span>
-              <button onClick={exportCSV} className="flex items-center gap-1 px-2 py-1 text-xs font-medium border border-border rounded-[6px] hover:bg-muted transition-colors">
+            <div data-r10n-selectionbar className="flex items-center gap-1.5 pl-2 border-l border-border">
+              <span data-r10n-selectionbar-count className="text-xs text-muted-foreground tabular-nums font-medium">{selected.size} selected</span>
+              <button onClick={exportCSV} data-r10n-toolbtn className="flex items-center gap-1 px-2 py-1 text-xs font-medium border border-border rounded-[6px] hover:bg-muted transition-colors">
                 <Download className="w-3 h-3" /> Export
               </button>
-              <button className="flex items-center gap-1 px-2 py-1 text-xs font-medium border border-border rounded-[6px] hover:bg-muted transition-colors">
+              <button data-r10n-toolbtn className="flex items-center gap-1 px-2 py-1 text-xs font-medium border border-border rounded-[6px] hover:bg-muted transition-colors">
                 <Tag className="w-3 h-3" /> Tag
               </button>
-              <button className="flex items-center gap-1 px-2 py-1 text-xs font-medium border border-border rounded-[6px] hover:bg-muted transition-colors">
+              <button data-r10n-toolbtn className="flex items-center gap-1 px-2 py-1 text-xs font-medium border border-border rounded-[6px] hover:bg-muted transition-colors">
                 <Users className="w-3 h-3" /> Assign Rep
               </button>
+              <AddToDialer
+                contacts={contacts
+                  .filter((c) => selected.has(c.uid) && c.ghlContactId)
+                  .map((c) => ({ contactId: c.ghlContactId!, contactName: c.name, phone: c.phone }))}
+                onDone={() => setSelected(new Set())}
+                trigger={
+                  <button data-r10n-toolbtn className="flex items-center gap-1 px-2 py-1 text-xs font-medium border border-border rounded-[6px] hover:bg-muted transition-colors">
+                    <PhoneCall className="w-3 h-3" /> Add to Power Dialer
+                  </button>
+                }
+              />
               <button onClick={() => setSelected(new Set())} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
           )}
-          <button onClick={exportCSV} className="flex items-center gap-1 px-2 py-1 text-xs font-medium border border-border rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+          <button onClick={exportCSV} data-r10n-toolbtn className="flex items-center gap-1 px-2 py-1 text-xs font-medium border border-border rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
             <Download className="w-3 h-3" /> CSV
           </button>
           <button
             onClick={() => setShowCreateModal(true)}
+            data-r10n-addlead
             className="flex items-center gap-1 bg-primary text-primary-foreground rounded-[8px] px-3 py-1.5 text-sm font-medium hover:bg-primary/90 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" /> Add Contact
           </button>
-          <span className="text-sm font-medium text-foreground tabular-nums">
+          <span data-r10n-totalcount className="text-sm font-medium text-foreground tabular-nums">
             {isLoading ? "—" : total.toLocaleString()}
             <span className="text-muted-foreground font-normal"> contacts</span>
           </span>
@@ -371,6 +396,8 @@ export function ContactsClient() {
           <button
             key={tab.id}
             onClick={() => applyPreset(tab)}
+            data-r10n-presettab
+            data-active={activePreset === tab.id && activeListId === null ? "true" : "false"}
             className={cn(
               "px-3 py-1 text-xs font-medium rounded-[6px] transition-colors whitespace-nowrap",
               activePreset === tab.id && activeListId === null
@@ -388,6 +415,8 @@ export function ContactsClient() {
           <div key={list.id} className="flex items-center group">
             <button
               onClick={() => { setFilters(list.filters); setActiveListId(list.id); setActivePreset(""); }}
+              data-r10n-presettab
+              data-active={activeListId === list.id ? "true" : "false"}
               className={cn(
                 "px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap rounded-l-[6px]",
                 activeListId === list.id
@@ -411,36 +440,54 @@ export function ContactsClient() {
 
         {savingList ? (
           <div className="flex items-center gap-1 ml-1">
-            <input autoFocus value={listName} onChange={(e) => setListName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveList(); if (e.key === "Escape") setSavingList(false); }} placeholder="List name…" className="text-xs px-2 py-1 border border-primary/40 rounded-[5px] bg-card focus:outline-none w-24" />
+            <input autoFocus value={listName} onChange={(e) => setListName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveList(); if (e.key === "Escape") setSavingList(false); }} placeholder="List name…" data-r10n-search className="text-xs px-2 py-1 border border-primary/40 rounded-[5px] bg-card focus:outline-none w-24" />
             <button onClick={saveList} disabled={!listName.trim()} className="p-0.5 text-primary disabled:opacity-30"><Check className="w-3.5 h-3.5" /></button>
             <button onClick={() => setSavingList(false)} className="p-0.5 text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
           </div>
         ) : (
-          <button onClick={() => setSavingList(true)} disabled={activeFilterCount === 0} className="flex items-center gap-1 ml-1 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded-[6px] transition-colors whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed">
+          <button onClick={() => setSavingList(true)} disabled={activeFilterCount === 0} data-r10n-savelist className="flex items-center gap-1 ml-1 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded-[6px] transition-colors whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed">
             <Plus className="w-3 h-3" /> Save list
           </button>
         )}
       </div>
 
-      {/* ── Stage summary bar ── */}
-      {!isLoading && stageCounts.size > 0 && (
-        <div className="flex items-center gap-2 overflow-x-auto shrink-0">
-          {[...stageCounts.entries()].map(([stage, count]) => {
-            const stageClass = Object.entries(STAGE_COLORS).find(([k]) => stage.toLowerCase().includes(k.toLowerCase()))?.[1] ?? "bg-muted text-muted-foreground border-border";
+      {/* ── Stage summary bar — click a stage to filter the list to it ── */}
+      {(stageBar.length > 0 || stageCounts.size > 0) && (
+        <div data-r10n-stagebar className="flex items-center gap-2 overflow-x-auto shrink-0">
+          {(stageBar.length > 0 ? stageBar : [...stageCounts.entries()]).map(([stage, count]) => {
+            const active = filters.stageName === stage;
             return (
-              <span key={stage} className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border whitespace-nowrap", stageClass)}>
+              <button
+                key={stage}
+                onClick={() => toggleStage(stage)}
+                title={active ? "Clear stage filter" : `Filter to ${stage}`}
+                data-r10n-stage-pill
+                data-status={stageStatus(stage)}
+                data-active={active ? "true" : "false"}
+                style={{ "--r10n-stage": r10nStageColor(stage) } as Record<string, string>}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium border whitespace-nowrap transition-all cursor-pointer hover:brightness-[0.97]",
+                  stageClass(stage),
+                  active ? "ring-2 ring-primary/40 shadow-sm" : "opacity-90 hover:opacity-100"
+                )}
+              >
                 {stage}
-                <span className="tabular-nums font-bold">{count}</span>
-              </span>
+                <span data-r10n-stage-count className="tabular-nums font-bold">{count}</span>
+              </button>
             );
           })}
+          {filters.stageName && (
+            <button onClick={() => toggleStage(filters.stageName!)} data-r10n-clearall className="text-[10px] text-muted-foreground hover:text-foreground px-1 whitespace-nowrap">
+              Clear
+            </button>
+          )}
         </div>
       )}
 
       {/* ── Table ── */}
-      <div className="flex-1 min-h-0 overflow-auto rounded-[10px] border border-border bg-card">
+      <div data-r10n-table className="flex-1 min-h-0 overflow-auto rounded-[10px] border border-border bg-card">
         <table className="w-full border-collapse text-sm">
-          <thead className="sticky top-0 z-10 bg-card border-b border-border">
+          <thead data-r10n-table-head className="sticky top-0 z-10 bg-card border-b border-border">
             <tr>
               <th className="w-8 px-3 py-2 align-middle">
                 <input type="checkbox" checked={contacts.length > 0 && selected.size === contacts.length} onChange={toggleAll} className="rounded border-border" />
@@ -449,7 +496,7 @@ export function ContactsClient() {
                 <SortHeader label="Name" sortKey="name" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
               </th>
               <th className="px-3 py-2 text-left w-16 align-middle">
-                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Rep</span>
+                <span data-r10n-th className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Rep</span>
               </th>
               <th className="px-3 py-2 text-left w-16 align-middle">
                 <SortHeader label="Source" sortKey="source" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
@@ -458,22 +505,25 @@ export function ContactsClient() {
                 <SortHeader label="Stage" sortKey="stage" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
               </th>
               <th className="px-3 py-2 text-left w-20 align-middle">
-                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Status</span>
+                <span data-r10n-th className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Status</span>
               </th>
               <th className="px-3 py-2 text-center w-12 align-middle" title="Reachable channels">
-                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Ch</span>
+                <span data-r10n-th className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Ch</span>
               </th>
               <th className="px-3 py-2 text-center w-10 align-middle" title="Demo">
-                <Layers className="w-3 h-3 text-muted-foreground mx-auto" />
+                <Layers data-r10n-th-icon className="w-3 h-3 text-muted-foreground mx-auto" />
               </th>
               <th className="px-3 py-2 text-center w-10 align-middle" title="Proposal">
-                <FileText className="w-3 h-3 text-muted-foreground mx-auto" />
+                <FileText data-r10n-th-icon className="w-3 h-3 text-muted-foreground mx-auto" />
+              </th>
+              <th className="px-3 py-2 text-center w-16 align-middle" title="Active sequence — GHL automation or our follow-up queued">
+                <span data-r10n-th className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Seq</span>
               </th>
               <th className="px-3 py-2 text-left w-16 align-middle">
                 <SortHeader label="Touch" sortKey="daysSinceLastTouch" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
               </th>
               <th className="px-3 py-2 text-left w-14 align-middle">
-                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">In stage</span>
+                <span data-r10n-th className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">In stage</span>
               </th>
               <th className="px-3 py-2 text-left w-24 align-middle">
                 <SortHeader label="Added" sortKey="createdAt" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
@@ -486,10 +536,10 @@ export function ContactsClient() {
               : contacts.length === 0
               ? (
                 <tr>
-                  <td colSpan={12} className="py-16 text-center">
+                  <td colSpan={13} className="py-16 text-center">
                     <Users className="w-8 h-8 text-border mx-auto mb-2" />
-                    <p className="text-sm font-medium text-foreground mb-0.5">No contacts found</p>
-                    {(search || activeFilterCount > 0) && <p className="text-xs text-muted-foreground">Try adjusting your search or filters</p>}
+                    <p data-r10n-empty-title className="text-sm font-medium text-foreground mb-0.5">No contacts found</p>
+                    {(search || activeFilterCount > 0) && <p data-r10n-empty-sub className="text-xs text-muted-foreground">Try adjusting your search or filters</p>}
                   </td>
                 </tr>
               )
@@ -502,6 +552,7 @@ export function ContactsClient() {
                   onSelect={() => setSelected((prev) => { const n = new Set(prev); n.has(c.uid) ? n.delete(c.uid) : n.add(c.uid); return n; })}
                   onClick={() => { setOpenContactTab(undefined); setOpenContact(c); }}
                   onOpenMessages={() => { setOpenContactTab(undefined); setOpenContact(c); }}
+                  onOpenStage={() => setStageContact(c)}
                   handleQuickAction={handleQuickAction}
                 />
               ))
@@ -513,7 +564,7 @@ export function ContactsClient() {
       {/* ── Pagination ── */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between shrink-0 pt-0.5">
-          <span className="text-xs text-muted-foreground tabular-nums">
+          <span data-r10n-pagelabel className="text-xs text-muted-foreground tabular-nums">
             {((page - 1) * PAGE_SIZE + 1).toLocaleString()}–{Math.min(page * PAGE_SIZE, total).toLocaleString()} of {total.toLocaleString()}
           </span>
           <div className="flex items-center gap-1">
@@ -584,6 +635,15 @@ export function ContactsClient() {
             setShowCreateModal(false);
             queryClient.invalidateQueries({ queryKey: ["contacts"] });
           }}
+        />
+      )}
+
+      {stageContact && (
+        <ChangeStageModal
+          contact={stageContact}
+          pipelines={pipelines}
+          onClose={() => setStageContact(null)}
+          onMoved={(stageId, stageName) => handleStageMoved(stageContact.uid, stageId, stageName)}
         />
       )}
     </div>
@@ -666,12 +726,13 @@ function CreateContactModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
       <div
+        data-r10n-modal
         className="bg-card border border-border rounded-[12px] w-[480px] max-h-[85vh] overflow-y-auto p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-base font-semibold text-foreground">Create Contact</h2>
+          <h2 data-r10n-modal-title className="text-base font-semibold text-foreground">Create Contact</h2>
           <button onClick={onClose} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
             <X className="w-4 h-4" />
           </button>
@@ -757,7 +818,7 @@ function CreateContactModal({
 
           {/* Error */}
           {error && (
-            <p className="text-xs text-red-500 font-medium">{error}</p>
+            <p data-r10n-form-error className="text-xs text-red-500 font-medium">{error}</p>
           )}
 
           {/* Actions */}
@@ -768,6 +829,7 @@ function CreateContactModal({
             <button
               type="submit"
               disabled={submitting || !firstName.trim()}
+              data-r10n-modal-submit
               className="flex items-center gap-1.5 bg-primary text-primary-foreground rounded-[8px] px-4 py-1.5 text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {submitting ? (
@@ -788,18 +850,18 @@ function CreateContactModal({
 
 // ─── Row ──────────────────────────────────────────────────────────────────────
 
-function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMessages, handleQuickAction }: {
-  contact: UnifiedContact; repName: string | null; selected: boolean; onSelect: () => void; onClick: () => void; onOpenMessages: () => void; handleQuickAction: (action: string, contact: UnifiedContact) => void;
+function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMessages, onOpenStage, handleQuickAction }: {
+  contact: UnifiedContact; repName: string | null; selected: boolean; onSelect: () => void; onClick: () => void; onOpenMessages: () => void; onOpenStage: () => void; handleQuickAction: (action: string, contact: UnifiedContact) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const platform = c.platform ?? "lead_form";
   const badge = PLATFORM_BADGE[platform] ?? PLATFORM_BADGE.lead_form;
   const isStale = c.daysSinceLastTouch > 14;
+  const seqTooltip = [
+    c.autoSequence ? `In a GHL automation${c.autoSequenceAt ? ` · last automated msg ${relativeTime(c.autoSequenceAt)}` : ""}` : null,
+    c.followupScheduledAt ? `Our follow-up queued ${relativeTime(c.followupScheduledAt)}` : null,
+  ].filter(Boolean).join(" · ") || "Not in a sequence";
   const isMedium = c.daysSinceLastTouch > 6;
-
-  const stageClass = c.stage
-    ? Object.entries(STAGE_COLORS).find(([k]) => c.stage!.toLowerCase().includes(k.toLowerCase()))?.[1] ?? "bg-muted text-muted-foreground border-border"
-    : null;
 
   const responseConfig = c.responseStatus ? RESPONSE_CONFIG[c.responseStatus] : null;
 
@@ -809,6 +871,8 @@ function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMe
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={onClick}
+      data-r10n-table-row
+      data-selected={selected ? "true" : "false"}
       className={cn(
         "border-b border-border/30 cursor-pointer transition-colors duration-75",
         selected ? "bg-primary/[0.04]" : hovered ? "bg-muted/40" : "",
@@ -826,10 +890,10 @@ function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMe
           <Avatar name={c.name} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
-              <p className="text-sm font-medium text-foreground leading-tight truncate max-w-[180px]">{c.name}</p>
+              <p data-r10n-table-name className="text-sm font-medium text-foreground leading-tight truncate max-w-[180px]">{c.name}</p>
               {c.dnd && <span title="Do not contact"><Ban className="w-3 h-3 text-red-500 shrink-0" /></span>}
             </div>
-            {c.email && <p className="text-[11px] text-muted-foreground truncate max-w-[180px] leading-tight">{c.email}</p>}
+            {c.email && <p data-r10n-table-sub className="text-[11px] text-muted-foreground truncate max-w-[180px] leading-tight">{c.email}</p>}
           </div>
           {/* Hover actions */}
           <div className={cn("flex items-center gap-0.5 shrink-0 transition-opacity duration-75", hovered ? "opacity-100" : "opacity-0 pointer-events-none")}>
@@ -868,17 +932,34 @@ function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMe
 
       {/* Source */}
       <td className="px-3 py-1.5">
-        <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium", badge.className)}>
+        <span data-r10n-source-badge className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium", badge.className)}>
           {badge.label}
         </span>
       </td>
 
-      {/* Stage — color-coded pill */}
+      {/* Stage — color-coded pill; click to move when there's an opportunity */}
       <td className="px-3 py-1.5">
         {c.stage ? (
-          <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border truncate max-w-[120px]", stageClass)}>
-            {c.stage}
-          </span>
+          c.opportunityId ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); onOpenStage(); }}
+              title="Click to move stage"
+              data-r10n-stage-pill
+              data-status={stageStatus(c.stage)}
+              style={{ "--r10n-stage": r10nStageColor(c.stage) } as Record<string, string>}
+              className={cn(
+                "group/stage inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border max-w-[140px] cursor-pointer transition-all hover:brightness-[0.97] hover:ring-2 hover:ring-primary/20",
+                stageClass(c.stage)
+              )}
+            >
+              <span className="truncate">{c.stage}</span>
+              <ChevronDown className="w-2.5 h-2.5 opacity-0 group-hover/stage:opacity-60 transition-opacity shrink-0" />
+            </button>
+          ) : (
+            <span title="No opportunity to move" data-r10n-stage-pill data-status={stageStatus(c.stage)} style={{ "--r10n-stage": r10nStageColor(c.stage) } as Record<string, string>} className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border truncate max-w-[120px]", stageClass(c.stage))}>
+              {c.stage}
+            </span>
+          )
         ) : (
           <span className="text-muted-foreground/20 text-xs">—</span>
         )}
@@ -887,7 +968,7 @@ function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMe
       {/* Response status */}
       <td className="px-3 py-1.5">
         {responseConfig ? (
-          <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium border whitespace-nowrap", responseConfig.className)}>
+          <span data-r10n-status-pill data-status={c.responseStatus} className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium border whitespace-nowrap", responseConfig.className)}>
             {responseConfig.label}
           </span>
         ) : (
@@ -895,11 +976,11 @@ function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMe
         )}
       </td>
 
-      {/* Reachable channels */}
+      {/* Reachable channels (display only) */}
       <td className="px-3 py-1.5">
         <div className="flex items-center justify-center gap-1">
-          {c.reachableChannels?.includes("email") && <span title="Email"><Mail className="w-3 h-3 text-sky-500" /></span>}
-          {c.reachableChannels?.includes("sms") && <span title="SMS"><Phone className="w-3 h-3 text-emerald-500" /></span>}
+          {c.reachableChannels?.includes("email") && <span title="Email"><Mail data-r10n-channel-icon className="w-3 h-3 text-sky-500" /></span>}
+          {c.reachableChannels?.includes("sms") && <span title="SMS"><Phone data-r10n-channel-icon className="w-3 h-3 text-emerald-500" /></span>}
           {!c.reachableChannels?.length && <span className="text-muted-foreground/20 text-xs">—</span>}
         </div>
       </td>
@@ -907,7 +988,7 @@ function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMe
       {/* Demo */}
       <td className="px-3 py-1.5 text-center">
         {c.hasDemo ? (
-          <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" title="Demo sent" />
+          <span data-r10n-dot data-status="won" className="w-2 h-2 rounded-full bg-emerald-500 inline-block" title="Demo sent" />
         ) : (
           <span className="text-muted-foreground/20 text-xs">—</span>
         )}
@@ -916,7 +997,7 @@ function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMe
       {/* Proposal */}
       <td className="px-3 py-1.5 text-center">
         {c.hasProposal ? (
-          <span className={cn(
+          <span data-r10n-dot data-status={c.proposalStatus} className={cn(
             "w-2 h-2 rounded-full inline-block",
             c.proposalStatus === "paid" ? "bg-emerald-500" :
             c.proposalStatus === "signed" ? "bg-blue-500" :
@@ -928,9 +1009,21 @@ function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMe
         )}
       </td>
 
+      {/* Sequence — GHL automation (Zap) and/or our queued follow-up (Send) */}
+      <td className="px-3 py-1.5 text-center">
+        {c.autoSequence || c.followupScheduledAt ? (
+          <span className="inline-flex items-center justify-center gap-1" title={seqTooltip}>
+            {c.autoSequence && <Zap data-r10n-seq-icon data-kind="auto" className="w-3 h-3 text-amber-500" />}
+            {c.followupScheduledAt && <Send data-r10n-seq-icon data-kind="queued" className="w-3 h-3 text-primary" />}
+          </span>
+        ) : (
+          <span className="text-muted-foreground/20 text-xs">—</span>
+        )}
+      </td>
+
       {/* Last touch */}
       <td className="px-3 py-1.5">
-        <span className={cn(
+        <span data-r10n-touch data-tier={isStale ? "stale" : isMedium ? "medium" : "fresh"} className={cn(
           "text-xs font-medium tabular-nums",
           isStale   ? "text-rose-500" :
           isMedium  ? "text-amber-600" :
@@ -943,7 +1036,7 @@ function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMe
       {/* Days in stage */}
       <td className="px-3 py-1.5">
         {c.daysInCurrentStage != null ? (
-          <span className={cn(
+          <span data-r10n-instage data-tier={c.daysInCurrentStage > 30 ? "high" : c.daysInCurrentStage > 14 ? "medium" : "low"} className={cn(
             "text-xs tabular-nums",
             c.daysInCurrentStage > 30 ? "text-rose-500 font-medium" :
             c.daysInCurrentStage > 14 ? "text-amber-600" :
@@ -958,7 +1051,7 @@ function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMe
 
       {/* Added */}
       <td className="px-3 py-1.5">
-        <span className="text-xs text-muted-foreground" title={formatDate(c.createdAt)}>
+        <span data-r10n-table-cell-muted className="text-xs text-muted-foreground" title={formatDate(c.createdAt)}>
           {relativeTime(c.createdAt)}
         </span>
       </td>
@@ -970,7 +1063,7 @@ function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMe
 
 function PageBtn({ children, onClick, disabled, active }: { children: React.ReactNode; onClick: () => void; disabled?: boolean; active?: boolean; }) {
   return (
-    <button onClick={onClick} disabled={disabled} className={cn("min-w-[28px] h-7 px-1 text-xs rounded-md transition-colors", active ? "bg-primary text-white font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed")}>
+    <button onClick={onClick} disabled={disabled} data-r10n-pagebtn data-active={active ? "true" : "false"} className={cn("min-w-[28px] h-7 px-1 text-xs rounded-md transition-colors", active ? "bg-primary text-white font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed")}>
       {children}
     </button>
   );

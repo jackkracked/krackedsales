@@ -32,6 +32,9 @@ export interface UnifiedContact {
   dnd: boolean;
   responseStatus: "awaiting_reply" | "no_response" | "replied" | null;
   reachableChannels: string[]; // ["email", "sms", "instagram", etc.]
+  autoSequence: boolean;       // GHL automation sent the last outbound recently (≤14d)
+  autoSequenceAt: string | null;   // ISO of that last automated message (tooltip)
+  followupScheduledAt: string | null; // ISO of our next queued follow-up send (tooltip)
 }
 
 export interface TimelineEvent {

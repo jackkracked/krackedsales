@@ -152,11 +152,11 @@ export function ExecutionsView({ workflowId, nodes, edges }: ExecutionsViewProps
   }, []);
 
   return (
-    <div className="flex-1 flex min-h-0">
+    <div data-r10n-wf-exec="" className="flex-1 flex min-h-0">
       {/* ── Run list ──────────────────────────────────────────────── */}
-      <div className="w-60 h-full flex flex-col border-r border-border bg-card shrink-0">
+      <div data-r10n-wf-runlist="" className="w-60 h-full flex flex-col border-r border-border bg-card shrink-0">
         <div className="px-3 py-2.5 border-b border-border">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+          <p data-r10n-wf-runlist-title="" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
             Executions
           </p>
         </div>
@@ -178,6 +178,8 @@ export function ExecutionsView({ workflowId, nodes, edges }: ExecutionsViewProps
                 <button
                   key={run.id}
                   onClick={() => { setSelectedRunId(run.id); setSelectedNodeId(null); }}
+                  data-r10n-wf-runrow=""
+                  data-active={isActive ? "true" : undefined}
                   className={cn(
                     "flex items-start gap-2.5 w-full px-3 py-2.5 text-left border-b border-border/50 transition-colors",
                     isActive ? "bg-primary/10" : "hover:bg-border/30"
@@ -188,7 +190,7 @@ export function ExecutionsView({ workflowId, nodes, edges }: ExecutionsViewProps
                     <p className="text-[11px] font-semibold text-foreground">
                       {format(toZonedDate(new Date(run.startedAt), tz), "MMM d, HH:mm:ss")}
                     </p>
-                    <p className={cn(
+                    <p data-r10n-wf-runstatus="" data-status={run.status} className={cn(
                       "text-[10px] mt-0.5",
                       run.status === "success" && "text-emerald-500",
                       run.status === "error" && "text-red-500",
@@ -208,7 +210,7 @@ export function ExecutionsView({ workflowId, nodes, edges }: ExecutionsViewProps
       </div>
 
       {/* ── Execution canvas ──────────────────────────────────────── */}
-      <div className="flex-1 relative min-w-0">
+      <div data-r10n-wf-canvas="" className="flex-1 relative min-w-0">
         {!effectiveRunId ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <p className="text-sm text-muted-foreground">No executions yet</p>
@@ -245,7 +247,7 @@ export function ExecutionsView({ workflowId, nodes, edges }: ExecutionsViewProps
         {/* Run header overlay */}
         {runDetail && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-card border border-border rounded-lg shadow-sm">
+            <div data-r10n-wf-runheader="" className="flex items-center gap-2 px-3 py-1.5 bg-card border border-border rounded-lg shadow-sm">
               <StatusIcon status={runDetail.status} className="w-3 h-3" />
               <span className="text-[11px] font-semibold text-foreground">
                 {format(toZonedDate(new Date(runDetail.startedAt), tz), "MMM d · HH:mm:ss")}
@@ -287,13 +289,13 @@ function NodeDetailPanel({
   const [tab, setTab] = useState<"output" | "input">("output");
 
   return (
-    <div className="w-80 h-full flex flex-col border-l border-border bg-card shrink-0">
+    <div data-r10n-wf-detail="" className="w-80 h-full flex flex-col border-l border-border bg-card shrink-0">
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <StatusIcon status={log.status} className="w-4 h-4" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-foreground truncate">{nodeName}</p>
-          <p className={cn(
+          <p data-r10n-wf-runstatus="" data-status={log.status} className={cn(
             "text-[10px] font-medium mt-0.5",
             log.status === "success" && "text-emerald-500",
             log.status === "error" && "text-red-500",
@@ -315,6 +317,8 @@ function NodeDetailPanel({
           <button
             key={t}
             onClick={() => setTab(t)}
+            data-r10n-wf-tab=""
+            data-active={tab === t ? "true" : undefined}
             className={cn(
               "flex-1 py-2 text-[11px] font-semibold transition-colors",
               tab === t
@@ -329,9 +333,9 @@ function NodeDetailPanel({
 
       {/* Error banner */}
       {log.error && (
-        <div className="mx-3 mt-3 p-2.5 bg-red-500/10 border border-red-500/20 rounded-lg">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-red-500 mb-1">Error</p>
-          <p className="text-[11px] text-red-400 font-mono break-all">{log.error}</p>
+        <div data-r10n-wf-error="" className="mx-3 mt-3 p-2.5 bg-red-500/10 border border-red-500/20 rounded-lg">
+          <p data-r10n-wf-error-label="" className="text-[10px] font-bold uppercase tracking-widest text-red-500 mb-1">Error</p>
+          <p data-r10n-wf-error-text="" className="text-[11px] text-red-400 font-mono break-all">{log.error}</p>
         </div>
       )}
 
@@ -339,7 +343,7 @@ function NodeDetailPanel({
       <div className="flex-1 overflow-y-auto p-3">
         {tab === "output" && (
           log.outputData ? (
-            <pre className="text-[10px] bg-background border border-border rounded-lg p-3 font-mono text-foreground/80 overflow-x-auto whitespace-pre-wrap break-all">
+            <pre data-r10n-wf-json="" className="text-[10px] bg-background border border-border rounded-lg p-3 font-mono text-foreground/80 overflow-x-auto whitespace-pre-wrap break-all">
               {JSON.stringify(log.outputData, null, 2)}
             </pre>
           ) : (
@@ -348,7 +352,7 @@ function NodeDetailPanel({
         )}
         {tab === "input" && (
           log.inputData ? (
-            <pre className="text-[10px] bg-background border border-border rounded-lg p-3 font-mono text-foreground/80 overflow-x-auto whitespace-pre-wrap break-all">
+            <pre data-r10n-wf-json="" className="text-[10px] bg-background border border-border rounded-lg p-3 font-mono text-foreground/80 overflow-x-auto whitespace-pre-wrap break-all">
               {JSON.stringify(log.inputData, null, 2)}
             </pre>
           ) : (

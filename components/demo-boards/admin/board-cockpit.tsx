@@ -161,9 +161,9 @@ export function BoardCockpit({ boardId }: { boardId: string }) {
   const status = STATUS_META[board.status] ?? STATUS_META.awaiting_design;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" data-r10n-board-surface>
       {/* Header */}
-      <header className="shrink-0 border-b border-border px-6 py-4">
+      <header className="shrink-0 border-b border-border px-6 py-4" data-r10n-board-header>
         <div className="flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
             <Link
@@ -175,10 +175,14 @@ export function BoardCockpit({ boardId }: { boardId: string }) {
             </Link>
             <div className="min-w-0">
               <div className="flex items-center gap-2.5">
-                <h1 className="truncate font-heading text-lg font-semibold text-foreground">
+                <h1 className="truncate font-heading text-lg font-semibold text-foreground" data-r10n-board-name>
                   {board.contactName}
                 </h1>
-                <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${status.cls}`}>
+                <span
+                  data-r10n-status-pill
+                  data-status={board.status}
+                  className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${status.cls}`}
+                >
                   {status.label}
                 </span>
               </div>
@@ -193,6 +197,7 @@ export function BoardCockpit({ boardId }: { boardId: string }) {
             href={`${board.publicUrl}?preview=1`}
             target="_blank"
             rel="noreferrer"
+            data-r10n-board-btn
             className="inline-flex shrink-0 items-center gap-1.5 rounded-[10px] border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
           >
             <Eye className="h-4 w-4" /> Preview board
@@ -214,7 +219,7 @@ export function BoardCockpit({ boardId }: { boardId: string }) {
         </section>
 
         {/* Lifecycle + composer + timeline */}
-        <aside className="flex min-h-0 flex-col bg-sidebar">
+        <aside className="flex min-h-0 flex-col bg-sidebar" data-r10n-board-aside>
           <div className="shrink-0 space-y-4 p-5 pb-4">
             <ActionPanel board={board} hasDesign={!!current} onChanged={invalidate} />
             <BoardMeta board={board} />
@@ -318,9 +323,9 @@ function DesignArea({
     return (
       <div className="flex h-full flex-col">
         {input}
-        <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-2.5">
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-2.5" data-r10n-board-designbar>
           <p className="text-[13px] font-medium text-foreground">
-            Design <span className="text-muted-foreground">· v{current.version}</span>
+            Design <span className="text-muted-foreground" data-r10n-board-version>· v{current.version}</span>
             <span className="ml-2 text-[12px] font-normal text-muted-foreground">
               Drop a pin to leave a note
             </span>
@@ -487,12 +492,16 @@ function ActionPanel({
   const status = STATUS_META[board.status] ?? STATUS_META.awaiting_design;
 
   return (
-    <div className="rounded-[14px] border border-border bg-card p-4 shadow-[0_1px_2px_rgba(28,35,51,0.04)]">
+    <div className="rounded-[14px] border border-border bg-card p-4 shadow-[0_1px_2px_rgba(28,35,51,0.04)]" data-r10n-board-card>
       <div className="flex items-center justify-between gap-3">
-        <p className="font-heading text-[13px] font-semibold tracking-tight text-foreground">
+        <p className="font-heading text-[13px] font-semibold tracking-tight text-foreground" data-r10n-board-cardlabel>
           Lifecycle
         </p>
-        <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${status.cls}`}>
+        <span
+          data-r10n-status-pill
+          data-status={board.status}
+          className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${status.cls}`}
+        >
           {status.label}
         </span>
       </div>
@@ -502,6 +511,7 @@ function ActionPanel({
           <button
             onClick={() => setComposing(true)}
             disabled={!hasDesign}
+            data-r10n-board-primary
             className="flex w-full items-center justify-center gap-2 rounded-[10px] bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[0_10px_28px_-14px_rgba(15,58,92,0.7)] transition-[transform,opacity] hover:opacity-95 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100"
           >
             <Send className="h-4 w-4" />
@@ -510,6 +520,7 @@ function ActionPanel({
           <button
             onClick={() => review.mutate()}
             disabled={!hasDesign || review.isPending}
+            data-r10n-board-btn
             className="flex w-full items-center justify-center gap-2 rounded-[10px] border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
             {review.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
@@ -564,15 +575,15 @@ function BoardMeta({ board }: { board: BoardResp["board"] }) {
   ];
 
   return (
-    <div className="rounded-[14px] border border-border bg-card p-4 shadow-[0_1px_2px_rgba(28,35,51,0.04)]">
-      <p className="font-heading text-[13px] font-semibold tracking-tight text-foreground">
+    <div className="rounded-[14px] border border-border bg-card p-4 shadow-[0_1px_2px_rgba(28,35,51,0.04)]" data-r10n-board-card>
+      <p className="font-heading text-[13px] font-semibold tracking-tight text-foreground" data-r10n-board-cardlabel>
         Board details
       </p>
       <dl className="mt-3 space-y-2">
         {rows.map((r) => (
           <div key={r.label} className="flex items-baseline justify-between gap-4">
-            <dt className="text-xs text-muted-foreground">{r.label}</dt>
-            <dd className="truncate text-right text-[13px] font-medium text-foreground">
+            <dt className="text-xs text-muted-foreground" data-r10n-board-metalabel>{r.label}</dt>
+            <dd className="truncate text-right text-[13px] font-medium text-foreground" data-r10n-board-metavalue>
               {r.value}
             </dd>
           </div>
@@ -580,6 +591,7 @@ function BoardMeta({ board }: { board: BoardResp["board"] }) {
       </dl>
       <button
         onClick={copyLink}
+        data-r10n-board-btn
         className="mt-3.5 flex w-full items-center justify-center gap-2 rounded-[10px] border border-border bg-background px-3 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-muted"
       >
         {copied ? (
@@ -629,12 +641,13 @@ function SendComposer({
   });
 
   return (
-    <div className="mt-3 space-y-3">
+    <div className="mt-3 space-y-3" data-r10n-board-composer>
       <div>
-        <label className="text-xs font-medium text-muted-foreground">Channel</label>
+        <label className="text-xs font-medium text-muted-foreground" data-r10n-board-fieldlabel>Channel</label>
         <select
           value={channel}
           onChange={(e) => setChannel(e.target.value)}
+          data-r10n-board-input
           className="mt-1 w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
         >
           {CHANNELS.map((c) => (
@@ -646,20 +659,22 @@ function SendComposer({
       </div>
       {channel === "email" && (
         <div>
-          <label className="text-xs font-medium text-muted-foreground">Subject</label>
+          <label className="text-xs font-medium text-muted-foreground" data-r10n-board-fieldlabel>Subject</label>
           <input
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
+            data-r10n-board-input
             className="mt-1 w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
           />
         </div>
       )}
       <div>
-        <label className="text-xs font-medium text-muted-foreground">Message</label>
+        <label className="text-xs font-medium text-muted-foreground" data-r10n-board-fieldlabel>Message</label>
         <textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           rows={4}
+          data-r10n-board-input
           className="mt-1 w-full resize-none rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
         />
         <p className="mt-1 text-xs text-muted-foreground">The board link is added automatically.</p>
@@ -668,6 +683,7 @@ function SendComposer({
       <div className="flex gap-2">
         <button
           onClick={onCancel}
+          data-r10n-board-btn
           className="flex-1 rounded-[10px] border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
         >
           Cancel
@@ -675,6 +691,7 @@ function SendComposer({
         <button
           onClick={() => send.mutate()}
           disabled={send.isPending || !message.trim()}
+          data-r10n-board-primary
           className="flex flex-1 items-center justify-center gap-2 rounded-[10px] bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground transition-transform hover:opacity-95 active:scale-[0.98] disabled:opacity-50"
         >
           {send.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -740,14 +757,14 @@ function Timeline({ events }: { events: EventRow[] }) {
     .slice(0, 60);
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col border-t border-border">
+    <section className="flex min-h-0 flex-1 flex-col border-t border-border" data-r10n-board-timeline>
       <div className="flex shrink-0 items-center gap-2 px-5 pb-2.5 pt-4">
-        <Clock className="h-[15px] w-[15px] text-muted-foreground" />
-        <h2 className="font-heading text-[13px] font-semibold tracking-tight text-foreground">
+        <Clock className="h-[15px] w-[15px] text-muted-foreground" data-r10n-board-timelineicon />
+        <h2 className="font-heading text-[13px] font-semibold tracking-tight text-foreground" data-r10n-board-timelinetitle>
           Activity
         </h2>
         {filtered.length > 0 && (
-          <span className="ml-auto text-[11px] font-medium tabular-nums text-muted-foreground">
+          <span className="ml-auto text-[11px] font-medium tabular-nums text-muted-foreground" data-r10n-board-timelinecount>
             {filtered.length}
           </span>
         )}
@@ -783,15 +800,17 @@ function Timeline({ events }: { events: EventRow[] }) {
                   className="relative flex gap-3 pb-4 last:pb-0"
                 >
                   <span
+                    data-r10n-board-eventdot
+                    data-tone={meta.tone}
                     className={`relative z-10 mt-0.5 grid h-[23px] w-[23px] shrink-0 place-items-center rounded-full ring-4 ring-sidebar ${TONE_CLS[meta.tone]}`}
                   >
                     <Icon className="h-[13px] w-[13px]" />
                   </span>
                   <div className="min-w-0 pt-0.5">
-                    <p className="text-[13px] font-medium leading-snug text-foreground">
+                    <p className="text-[13px] font-medium leading-snug text-foreground" data-r10n-board-eventtitle>
                       {EVENT_LABEL[e.type] ?? e.type}
                     </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
+                    <p className="mt-0.5 text-xs text-muted-foreground" data-r10n-board-eventmeta>
                       {e.actor ? `${e.actor} · ` : ""}
                       {fmtWhen(e.createdAt)}
                     </p>

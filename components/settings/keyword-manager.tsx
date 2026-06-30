@@ -86,10 +86,11 @@ export function KeywordManager() {
   }
 
   return (
-    <div className="bg-card border border-border rounded-[10px] p-5 flex flex-col">
+    <div className="bg-card border border-border rounded-[10px] p-5 flex flex-col" data-r10n-settings-card>
       <h2
         className="text-sm font-semibold text-foreground mb-1"
         style={{ fontFamily: "var(--font-heading)" }}
+        data-r10n-settings-cardtitle
       >
         Keyword Lead Triggers
       </h2>
@@ -137,6 +138,8 @@ export function KeywordManager() {
                 title={kw.active ? "Deactivate" : "Activate"}
                 aria-label={kw.active ? "Deactivate keyword" : "Activate keyword"}
                 style={{ WebkitAppearance: "none" }}
+                data-r10n-settings-toggle
+                data-state={kw.active ? "on" : "off"}
                 className={cn(
                   "relative inline-flex items-center w-9 h-5 rounded-full transition-colors shrink-0 cursor-pointer border-0 p-0",
                   kw.active ? "bg-primary" : "bg-muted-foreground/30"

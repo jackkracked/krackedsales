@@ -43,40 +43,63 @@ function MetricCard({ label, value, sub, accent, sparkline }: MetricCardProps) {
   const hasChart = sparkline && sparkline.length >= 2;
   const chartData = hasChart ? sparkline.map((v) => ({ v })) : [];
 
+  // Unique gradient ID per card so the stop colours don't collide across the strip.
+  const gradId = useMemo(
+    () => `demo-spark-fill-${Math.random().toString(36).slice(2, 8)}`,
+    []
+  );
+
+  // Under r10n a wrapper sets --r10n-demo-spark-stroke / --r10n-demo-spark-fill
+  // (lime when accent, steel otherwise); these vars resolve to them. In the
+  // default theme the vars are unset so the original blue (#3b82f6) is used as-is.
+  const sparkStroke = `var(--r10n-demo-spark-stroke, #3b82f6)`;
+  const sparkFill = `var(--r10n-demo-spark-fill, #3b82f6)`;
+
   return (
-    <div className="bg-card border border-border rounded-xl p-4 flex flex-col gap-1 min-w-0">
-      <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate">
+    <div
+      className="bg-card border border-border rounded-xl p-4 flex flex-col gap-1 min-w-0"
+      data-r10n-demo-kpi
+      data-r10n-demo-accent={accent ? "true" : "false"}
+    >
+      <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate" data-r10n-demo-kpi-label>
         {label}
       </p>
 
       {/* Value row: number on left, chart on right (when sparkline present) */}
       <div className="flex items-end justify-between gap-2 min-h-[52px]">
         <div className="flex flex-col justify-end gap-1">
-          <p className={cn(
-            "text-2xl font-bold leading-none tabular-nums",
-            accent ? "text-primary" : "text-foreground"
-          )}>
+          <p
+            className={cn(
+              "text-2xl font-bold leading-none tabular-nums",
+              accent ? "text-primary" : "text-foreground"
+            )}
+            data-r10n-demo-kpi-value
+          >
             {value}
           </p>
           {sub && <div>{sub}</div>}
         </div>
 
         {hasChart && (
-          <div className="w-[45%] h-14 shrink-0">
+          <div
+            className="w-[45%] h-14 shrink-0"
+            data-r10n-demo-spark
+            data-r10n-demo-spark-accent={accent ? "true" : "false"}
+          >
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={chartData} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
                 <defs>
-                  <linearGradient id="demo-spark-fill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}    />
+                  <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor={sparkFill} stopOpacity={0.15} />
+                    <stop offset="95%" stopColor={sparkFill} stopOpacity={0}    />
                   </linearGradient>
                 </defs>
                 <Area
                   type="monotone"
                   dataKey="v"
-                  stroke="#3b82f6"
+                  stroke={sparkStroke}
                   strokeWidth={1.5}
-                  fill="url(#demo-spark-fill)"
+                  fill={`url(#${gradId})`}
                   dot={false}
                   isAnimationActive={false}
                 />
@@ -91,20 +114,25 @@ function MetricCard({ label, value, sub, accent, sparkline }: MetricCardProps) {
 
 // ─── Fulfillment breakdown bar ──────────────────────────────────────────────────
 
-interface Bucket { label: string; pct: number; color: string }
+interface Bucket { label: string; pct: number; color: string; key: string }
 
 function FulfillmentBar({ buckets }: { buckets: Bucket[] }) {
   return (
-    <div className="flex flex-col gap-1.5 mt-0.5">
+    <div className="flex flex-col gap-1.5 mt-0.5" data-r10n-demo-fulfillment>
       <div className="flex h-1.5 rounded-full overflow-hidden gap-px">
         {buckets.filter((b) => b.pct > 0).map((b) => (
-          <div key={b.label} className={cn("h-full", b.color)} style={{ width: `${b.pct}%` }} />
+          <div
+            key={b.label}
+            className={cn("h-full", b.color)}
+            style={{ width: `${b.pct}%` }}
+            data-r10n-demo-bucket={b.key}
+          />
         ))}
       </div>
       <div className="flex flex-wrap gap-x-2.5 gap-y-0.5">
         {buckets.map((b) => (
-          <span key={b.label} className="flex items-center gap-1 text-[10px] text-muted-foreground">
-            <span className={cn("w-1.5 h-1.5 rounded-sm shrink-0", b.color)} />
+          <span key={b.label} className="flex items-center gap-1 text-[10px] text-muted-foreground" data-r10n-demo-legend>
+            <span className={cn("w-1.5 h-1.5 rounded-sm shrink-0", b.color)} data-r10n-demo-bucket={b.key} />
             {b.label} {b.pct}%
           </span>
         ))}
@@ -230,15 +258,15 @@ export function DemoKpiStrip({ tasks, range, links = {} }: MetricsStripProps) {
 
   const breakdownBuckets: Bucket[] = stats.breakdown
     ? [
-        { label: "<3d",   pct: stats.breakdown.lt3,   color: "bg-emerald-500" },
-        { label: "3–7d",  pct: stats.breakdown.d3_7,  color: "bg-amber-400"  },
-        { label: "7–14d", pct: stats.breakdown.d7_14, color: "bg-orange-500" },
-        { label: "14d+",  pct: stats.breakdown.gt14,  color: "bg-destructive" },
+        { label: "<3d",   pct: stats.breakdown.lt3,   color: "bg-emerald-500",  key: "fast" },
+        { label: "3–7d",  pct: stats.breakdown.d3_7,  color: "bg-amber-400",    key: "mid"  },
+        { label: "7–14d", pct: stats.breakdown.d7_14, color: "bg-orange-500",   key: "slow" },
+        { label: "14d+",  pct: stats.breakdown.gt14,  color: "bg-destructive",  key: "late" },
       ]
     : [];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 shrink-0">
+    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 shrink-0" data-r10n-demo-kpi-strip>
 
       <MetricCard
         label="Demos Sent"

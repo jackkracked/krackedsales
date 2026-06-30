@@ -80,7 +80,7 @@ function InboxDrawer({ items, total, onReply, onClose }: InboxDrawerProps) {
             >
               Inbox
             </h3>
-            <span className="text-[10px] font-bold bg-destructive text-destructive-foreground px-2 py-0.5 rounded-full tabular-nums leading-none">
+            <span data-r10n-unread-badge className="text-[10px] font-bold bg-destructive text-destructive-foreground px-2 py-0.5 rounded-full tabular-nums leading-none">
               {total} unread
             </span>
           </div>
@@ -268,19 +268,20 @@ export function ConversationsStrip() {
 
   return (
     <>
-      <div className="bg-card border border-border rounded-[10px] p-5">
+      <div data-r10n-card className="bg-card border border-border rounded-[10px] p-5">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <MessageSquare className="w-4 h-4 text-muted-foreground" />
+            <MessageSquare data-r10n-section-icon className="w-4 h-4 text-muted-foreground" />
             <h3
+              data-r10n-section-title
               className="text-sm font-semibold text-foreground"
               style={{ fontFamily: "var(--font-heading)" }}
             >
               Conversations
             </h3>
             {items.length > 0 && (
-              <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+              <span data-r10n-count className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
                 {items.length} unread
               </span>
             )}
