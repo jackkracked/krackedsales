@@ -4,12 +4,20 @@ import { useEffect, useState } from "react";
 import { X, Check, ArrowRight, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { stageClass, r10nStageColor } from "@/lib/contacts/stage-colors";
-import type { UnifiedContact } from "@/lib/contacts/types";
 
 interface Pipeline {
   id: string;
   name: string;
   stages: Array<{ id: string; name: string }>;
+}
+
+/** The minimal shape ChangeStageModal needs (UnifiedContact satisfies it, and so does the dialer contact). */
+export interface StageChangeTarget {
+  name: string;
+  stage: string | null;
+  stageId: string | null;
+  pipelineId: string | null;
+  opportunityId: string | null;
 }
 
 /**
@@ -23,7 +31,7 @@ export function ChangeStageModal({
   onClose,
   onMoved,
 }: {
-  contact: UnifiedContact;
+  contact: StageChangeTarget;
   pipelines: Pipeline[];
   onClose: () => void;
   onMoved: (newStageId: string, newStageName: string) => void;

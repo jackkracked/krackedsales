@@ -18,6 +18,10 @@ export interface DialerContact {
   notes: { author: string; body: string; time: string }[];
   timeline: { label: string; time: string }[];
   lastCall?: { when: string; summary: string; sentiment: Sentiment; objection: string | null };
+  // Real pipeline context (from the dialer contact API) for moving the pipeline stage.
+  opportunityId?: string | null;
+  pipelineId?: string | null;
+  pipelineStageId?: string | null;
 }
 
 export interface DialerCampaign {

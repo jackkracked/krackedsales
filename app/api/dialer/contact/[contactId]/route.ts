@@ -38,13 +38,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ con
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { contactId } = await params;
 
-  const [contactRes, fieldMapRes, notesRes, lastCallRes, messagesRes] = await Promise.allSettled([
+  const [contactRes, fieldMapRes, notesRes, lastCallRes, messagesRes, oppRes] = await Promise.allSettled([
     ghl.get<{ contact: GHLContact }>(`/contacts/${contactId}`),
     getCustomFieldMap(),
     ghl.get<{ notes: Array<{ body?: string; userId?: string; dateAdded?: string; createdAt?: string }> }>(`/contacts/${contactId}/notes`),
     db().select().from(calls).leftJoin(callInsights, eq(callInsights.callId, calls.id))
       .where(eq(calls.contactId, contactId)).orderBy(desc(calls.startedAt)).limit(1),
     assembleMessages(contactId),
+    resolveOpportunity(contactId),
   ]);
 
   const contact = contactRes.status === "fulfilled" ? (contactRes.value.contact ?? {}) : {};
@@ -79,6 +80,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ con
 
   const tags = Array.isArray(contact.tags) ? contact.tags.slice(0, 6) : [];
   const timeline = contact.dateAdded ? [{ label: "Contact created", time: rel(contact.dateAdded) }] : [];
+  const opp = oppRes.status === "fulfilled" ? oppRes.value : { opportunityId: null, pipelineId: null, pipelineStageId: null };
 
   return NextResponse.json({
     contact: {
@@ -95,8 +97,27 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ con
       notes,
       timeline,
       lastCall,
+      // Real pipeline context for the in-cockpit / outcome stage change (null if no opportunity).
+      opportunityId: opp.opportunityId,
+      pipelineId: opp.pipelineId,
+      pipelineStageId: opp.pipelineStageId,
     },
   });
+}
+
+/** Resolve the contact's opportunity so the dialer can move its pipeline stage. */
+async function resolveOpportunity(contactId: string): Promise<{ opportunityId: string | null; pipelineId: string | null; pipelineStageId: string | null }> {
+  const empty = { opportunityId: null, pipelineId: null, pipelineStageId: null };
+  try {
+    const res = await ghl.get<{ opportunities?: Array<{ id?: string; pipelineId?: string; pipelineStageId?: string; contact?: { id?: string } }> }>(
+      `/opportunities/search?location_id=${locationId()}&contact_id=${contactId}&limit=5`,
+    );
+    const opp = res.opportunities?.find((o) => o.contact?.id === contactId) ?? res.opportunities?.[0] ?? null;
+    if (!opp) return empty;
+    return { opportunityId: opp.id ?? null, pipelineId: opp.pipelineId ?? null, pipelineStageId: opp.pipelineStageId ?? null };
+  } catch {
+    return empty;
+  }
 }
 
 interface DialerMessage {

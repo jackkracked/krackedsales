@@ -9,8 +9,11 @@ import { ContactCockpit } from "./contact-cockpit";
 import { DialDock, type CallState } from "./dial-dock";
 import { DialerOutcomeModal, type DialerOutcome } from "./dialer-outcome-modal";
 import { CampaignBuilder } from "./campaign-builder";
+import { ChangeStageModal } from "@/components/contacts/change-stage-modal";
 import { useDialer } from "@/providers/dialer-provider";
 import type { CampaignSummary, CampaignDetail, ClaimedContact, DialerContact, DialerCampaign } from "./mock-data";
+
+interface Pipeline { id: string; name: string; stages: Array<{ id: string; name: string }> }
 
 const digits = (p: string | null | undefined) => (p ?? "").replace(/[^\d+]/g, "");
 const mmss = (t: number) => `${Math.floor(t / 60).toString().padStart(2, "0")}:${(t % 60).toString().padStart(2, "0")}`;
@@ -59,6 +62,20 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
     staleTime: 60_000,
   });
   const cockpitContact = cockpitContactId ? cockpitQuery.data?.contact ?? null : null;
+
+  // Pipelines → the stages available for the loaded contact's pipeline (for the
+  // in-call + outcome "Move pipeline stage" flow; scoped to their own pipeline).
+  const pipelinesQuery = useQuery<{ pipelines: Pipeline[] }>({
+    queryKey: ["pipelines"],
+    queryFn: () => fetch("/api/ghl/pipelines").then((r) => (r.ok ? r.json() : { pipelines: [] })),
+    staleTime: 5 * 60_000,
+  });
+  const pipelines = pipelinesQuery.data?.pipelines ?? [];
+  const oppStages = cockpitContact?.pipelineId ? (pipelines.find((p) => p.id === cockpitContact.pipelineId)?.stages ?? []) : [];
+  const currentStageId = cockpitContact?.pipelineStageId ?? null;
+  const currentStageName = oppStages.find((s) => s.id === currentStageId)?.name ?? cockpitContact?.stage ?? null;
+  const canChangeStage = !!cockpitContact?.opportunityId && oppStages.length > 0;
+  const [stageModalOpen, setStageModalOpen] = useState(false);
 
   const dockState: CallState = dialer.callState === "connecting" ? "dialing" : dialer.callState === "open" ? "connected" : "idle";
   const attempt = running && claimed && detail ? { n: claimed.attempts + 1, max: detail.campaign.maxAttempts } : undefined;
@@ -131,9 +148,26 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
     void dialer.dial(number, { contactId: cockpitContactId ?? undefined, campaignContactId: campaignContactId ?? undefined, name });
   }
 
-  async function saveOutcome(o: DialerOutcome, notes: string) {
+  function moveStage(oppId: string, stageId: string, toStage: string, fromStage: string | null, reason: string, name: string) {
+    return fetch(`/api/ghl/opportunities/${oppId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pipelineStageId: stageId, stageName: toStage, fromStageName: fromStage, reason, opportunityName: name }),
+    }).then((r) => { if (!r.ok) throw new Error("move failed"); return qc.invalidateQueries({ queryKey: ["dialer-contact", cockpitContactId] }); });
+  }
+
+  async function saveOutcome(o: DialerOutcome, notes: string, stageId: string | null) {
     const oc = outcomeFor;
+    const oppId = cockpitContact?.opportunityId ?? null;
+    const toStage = stageId ? oppStages.find((s) => s.id === stageId)?.name ?? null : null;
     setOutcomeFor(null);
+
+    // Apply the pipeline-stage move first, using the mandatory note as the reason.
+    // Non-fatal: the outcome still saves, but the rep is told if the move didn't land.
+    if (stageId && oppId && toStage && stageId !== currentStageId) {
+      try { await moveStage(oppId, stageId, toStage, currentStageName, notes, oc?.name ?? "Contact"); }
+      catch { fireToast("Outcome saved, but the stage move failed"); }
+    }
+
     if (oc?.campaignContactId) {
       try {
         const data = await fetch(`/api/dialer/contacts/${oc.campaignContactId}/disposition`, {
@@ -208,6 +242,9 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
               onBack={backToCampaign}
               onSelectContact={previewContact}
               onToast={fireToast}
+              stageLabel={currentStageName}
+              canChangeStage={canChangeStage}
+              onChangeStage={() => setStageModalOpen(true)}
             />
           )}
         </div>
@@ -232,7 +269,22 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
       </aside>
 
       {outcomeFor && (
-        <DialerOutcomeModal contactName={outcomeFor.name} durationLabel={outcomeFor.duration > 0 ? mmss(outcomeFor.duration) : "Did not connect"} onSave={saveOutcome} />
+        <DialerOutcomeModal
+          contactName={outcomeFor.name}
+          durationLabel={outcomeFor.duration > 0 ? mmss(outcomeFor.duration) : "Did not connect"}
+          onSave={saveOutcome}
+          stages={oppStages}
+          currentStageId={currentStageId}
+          canMoveStage={canChangeStage}
+        />
+      )}
+      {stageModalOpen && cockpitContact?.opportunityId && (
+        <ChangeStageModal
+          contact={{ name: cockpitContact.name, stage: currentStageName, stageId: currentStageId, pipelineId: cockpitContact.pipelineId ?? null, opportunityId: cockpitContact.opportunityId }}
+          pipelines={pipelines}
+          onClose={() => setStageModalOpen(false)}
+          onMoved={() => { qc.invalidateQueries({ queryKey: ["dialer-contact", cockpitContactId] }); fireToast("Stage updated"); }}
+        />
       )}
       {builderOpen && (
         <CampaignBuilder isAdmin={isAdmin} currentUser={{ name: userName || "You", initials: (userName || "You").split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase() }} onClose={() => setBuilderOpen(false)} onCreate={createCampaign} />

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Mail, Phone, Play, MessageSquare, FileText, Activity, ListChecks, Sparkles, SkipForward, Users, Presentation, ListTodo, ClipboardCheck, Eye, ArrowLeft } from "lucide-react";
+import { Mail, Phone, Play, MessageSquare, FileText, Activity, ListChecks, Sparkles, SkipForward, Users, Presentation, ListTodo, ClipboardCheck, Eye, ArrowLeft, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { CreateTaskModal } from "@/components/shared/create-task-modal";
 import { CreateDemoModal } from "@/components/shared/create-demo-modal";
@@ -26,6 +26,9 @@ export function ContactCockpit({
   onBack,
   onSelectContact,
   onToast,
+  stageLabel,
+  canChangeStage,
+  onChangeStage,
 }: {
   contact: DialerContact | null;
   detail: CampaignDetail | null;
@@ -37,15 +40,19 @@ export function ContactCockpit({
   onBack: () => void;
   onSelectContact: (contactId: string) => void;
   onToast: (m: string) => void;
+  stageLabel?: string | null;
+  canChangeStage?: boolean;
+  onChangeStage?: () => void;
 }) {
   if (contactLoading && !contact) return <CockpitSkeleton />;
-  if (contact) return <LoadedContact key={contact.id} contact={contact} isPreview={isPreview} onSkip={onSkip} onBack={onBack} onToast={onToast} />;
+  if (contact) return <LoadedContact key={contact.id} contact={contact} isPreview={isPreview} onSkip={onSkip} onBack={onBack} onToast={onToast} stageLabel={stageLabel} canChangeStage={canChangeStage} onChangeStage={onChangeStage} />;
   if (detail && !running) return <CampaignOverview detail={detail} onStart={onStart} onSelectContact={onSelectContact} />;
   return <EmptyState hasCampaign={!!detail} />;
 }
 
 /* ── Loaded contact: everything, no navigating away ───────────────────────── */
-function LoadedContact({ contact, isPreview, onSkip, onBack, onToast }: { contact: DialerContact; isPreview: boolean; onSkip: () => void; onBack: () => void; onToast: (m: string) => void }) {
+function LoadedContact({ contact, isPreview, onSkip, onBack, onToast, stageLabel, canChangeStage, onChangeStage }: { contact: DialerContact; isPreview: boolean; onSkip: () => void; onBack: () => void; onToast: (m: string) => void; stageLabel?: string | null; canChangeStage?: boolean; onChangeStage?: () => void }) {
+  const stageText = stageLabel ?? contact.stage;
   const [activeModal, setActiveModal] = useState<"demo" | "task" | "audit" | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [addedNotes, setAddedNotes] = useState<{ author: string; body: string; time: string }[]>([]);
@@ -73,7 +80,13 @@ function LoadedContact({ contact, isPreview, onSkip, onBack, onToast }: { contac
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {isPreview && <span className="rounded-full bg-muted px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Preview</span>}
-            {contact.stage && <span className="rounded-full bg-info-subtle px-2.5 py-1 text-[11px] font-semibold text-info">{contact.stage}</span>}
+            {stageText && (canChangeStage && onChangeStage ? (
+              <button type="button" onClick={onChangeStage} title="Move pipeline stage" className="inline-flex items-center gap-1 rounded-full bg-info-subtle px-2.5 py-1 text-[11px] font-semibold text-info transition-all hover:brightness-95 active:scale-95">
+                {stageText} <ChevronDown className="h-3 w-3" />
+              </button>
+            ) : (
+              <span className="rounded-full bg-info-subtle px-2.5 py-1 text-[11px] font-semibold text-info">{stageText}</span>
+            ))}
             {isPreview ? (
               <button type="button" onClick={onBack} title="Back to campaign" className="flex items-center gap-1.5 rounded-[8px] border border-border/70 px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground hover:border-border">
                 <ArrowLeft className="h-3.5 w-3.5" /> Back
