@@ -45,7 +45,16 @@ export async function POST(req: NextRequest) {
       ).toString(),
       recordingStatusCallbackEvent: ["completed"],
     });
-    dial.number(To);
+    // Status callback on the dialed leg → tells us the final call status
+    // (completed / no-answer / busy / failed) so the row doesn't stay "in_progress".
+    dial.number(
+      {
+        statusCallback: new URL("/api/dialer/voice/status", req.nextUrl.origin).toString(),
+        statusCallbackEvent: ["completed"],
+        statusCallbackMethod: "POST",
+      },
+      To,
+    );
 
     // Best-effort: log the call row. Never let a DB error break the XML.
     try {
@@ -58,6 +67,7 @@ export async function POST(req: NextRequest) {
           status: "in_progress",
           twilioCallSid: CallSid ? String(CallSid) : "",
           contactId: contactId ? String(contactId) : null,
+          toNumber: To || null,
           startedAt: new Date(),
           repEmail: repEmail ? String(repEmail) : null,
         });

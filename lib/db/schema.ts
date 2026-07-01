@@ -500,6 +500,7 @@ export const calls = pgTable("calls", {
   // Twilio dialer-specific
   twilioCallSid: text("twilio_call_sid"),                     // Twilio Call SID — dedup key for in-app dialer calls
   campaignId: uuid("campaign_id"),                            // dialer campaign this call belongs to (null = manual/other)
+  toNumber: text("to_number"),                                // dialed number (dialer) — display + phone→contact match for manual dials
   recordingUrl: text("recording_url"),                        // stored recording (Vercel Blob) for dialer calls
   source: text("source").default("ghl"),                     // "ghl" | "twilio"
   createdAt: timestamp("created_at").defaultNow().notNull(),

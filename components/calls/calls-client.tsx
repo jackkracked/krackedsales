@@ -39,6 +39,8 @@ export interface Call {
   smartNotesUrl?: string;
   fathomRecordingId?: number | null;
   fathomShareUrl?: string | null;
+  dialedNumber?: string | null;
+  contactMatched?: boolean;
 }
 
 interface CallsData {
@@ -512,16 +514,23 @@ function CallRow({
       {/* Contact */}
       <td className="px-4 py-3">
         <div className="flex items-center gap-2.5 min-w-0">
-          <Avatar name={call.contactName ?? "Unknown"} size={30} />
-          <span
-            data-r10n-table-name={call.contactName ? "" : undefined}
-            className={cn(
-              "text-sm font-medium truncate max-w-[240px]",
-              call.contactName ? "text-foreground" : "text-muted-foreground/50"
+          <Avatar name={call.contactName || call.dialedNumber || "Unknown"} size={30} />
+          <div className="min-w-0">
+            <span
+              data-r10n-table-name={call.contactName ? "" : undefined}
+              className={cn(
+                "block text-sm font-medium truncate max-w-[240px]",
+                call.contactName ? "text-foreground" : "text-muted-foreground/50"
+              )}
+            >
+              {call.contactName || "Unknown"}
+            </span>
+            {call.callType === "dialer" && call.contactMatched === false && (
+              <span className="block text-[10.5px] text-muted-foreground/70 truncate max-w-[240px]">
+                {call.dialedNumber ? "no contact for this number" : "unknown number"}
+              </span>
             )}
-          >
-            {call.contactName ?? "Unknown"}
-          </span>
+          </div>
         </div>
       </td>
 

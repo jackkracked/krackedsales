@@ -239,12 +239,15 @@ export function CallDetailModal({ call, onClose }: { call: Call | null; onClose:
       <div data-r10n-modal data-r10n-call-modal className="relative z-10 flex w-full max-w-[1000px] max-h-[92vh] flex-col overflow-hidden rounded-[16px] bg-card shadow-2xl ring-1 ring-border" role="dialog" aria-modal="true">
         {/* Header */}
         <div data-r10n-modal-header className="flex items-center gap-3 border-b border-border bg-gradient-to-b from-muted/30 to-transparent px-5 py-4 shrink-0">
-          <Avatar name={call!.contactName ?? "Unknown"} size={40} />
+          <Avatar name={call!.contactName || call!.dialedNumber || "Unknown"} size={40} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <h2 data-r10n-modal-name className="text-[16px] font-semibold text-foreground truncate" style={{ fontFamily: "var(--font-heading)" }}>
-                {call!.contactName ?? "Unknown contact"}
+                {call!.contactName || "Unknown contact"}
               </h2>
+              {call!.callType === "dialer" && call!.contactMatched === false && (
+                <span className="text-[11px] text-muted-foreground/70">{call!.dialedNumber ? "no contact for this number" : "unknown number"}</span>
+              )}
               {insights?.sentimentLabel && (
                 <span
                   data-r10n-call-sentiment

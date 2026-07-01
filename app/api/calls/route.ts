@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, avg, count, desc, eq, gte, ilike, inArray, isNotNull, lte, sum } from "drizzle-orm";
+import { and, avg, count, desc, eq, gte, ilike, inArray, isNotNull, lte, sum, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { calls, users, callDispositions } from "@/lib/db/schema";
+import { calls, users, callDispositions, localContacts } from "@/lib/db/schema";
 import { ghl, locationId } from "@/lib/ghl/client";
 import type { GHLCalendarEvent } from "@/lib/ghl/types";
 
@@ -27,6 +27,9 @@ interface UnifiedCall {
   smartNotesUrl?: string;
   fathomRecordingId?: number | null;
   fathomShareUrl?: string | null;
+  // Dialer-only: the dialed number, and whether the name resolved to a real contact.
+  dialedNumber?: string | null;
+  contactMatched?: boolean;
 }
 
 // ─── GHL calendar event fetching (mirrors dashboard/calls logic) ─────────────
@@ -137,6 +140,31 @@ export async function GET(req: NextRequest) {
         .where(where)
         .orderBy(desc(calls.startedAt));
 
+      // ── Enrich dialer rows: resolve rep name (from repEmail) + contact name
+      //    (from contactId, else the dialed number matched against our contact
+      //    mirror). Every lookup is resilient — a failure just leaves the number. ──
+      const last10 = (p: string | null | undefined) => (p ?? "").replace(/\D/g, "").slice(-10);
+      const dialerRaw = rawRows.filter((r) => r.callType === "dialer");
+      const repEmails = [...new Set(dialerRaw.map((r) => r.repEmail).filter((e): e is string => !!e))];
+      const contactIds = [...new Set(dialerRaw.map((r) => r.contactId).filter((c): c is string => !!c))];
+      const numberDigits = [...new Set(dialerRaw.map((r) => last10(r.toNumber)).filter((d) => d.length >= 7))];
+
+      const [repRows, contactByIdRows, contactByPhoneRows] = await Promise.all([
+        repEmails.length
+          ? client.select({ email: users.email, name: users.name }).from(users).where(inArray(users.email, repEmails)).catch(() => [])
+          : Promise.resolve([] as { email: string; name: string }[]),
+        contactIds.length
+          ? client.select({ id: localContacts.id, fullName: localContacts.fullName }).from(localContacts).where(inArray(localContacts.id, contactIds)).catch(() => [])
+          : Promise.resolve([] as { id: string; fullName: string | null }[]),
+        numberDigits.length
+          ? client.select({ fullName: localContacts.fullName, phone: localContacts.phone }).from(localContacts)
+              .where(sql`right(regexp_replace(coalesce(${localContacts.phone}, ''), '[^0-9]', '', 'g'), 10) = ANY(${numberDigits}::text[])`).catch(() => [])
+          : Promise.resolve([] as { fullName: string | null; phone: string | null }[]),
+      ]);
+      const repNameByEmail = new Map(repRows.map((r) => [r.email, r.name]));
+      const nameByContactId = new Map(contactByIdRows.map((r) => [r.id, r.fullName]));
+      const nameByPhone = new Map(contactByPhoneRows.map((r) => [last10(r.phone), r.fullName]));
+
       // Real outcome for scheduled calls lives in dispositions (the rep's set
       // outcome), keyed by the GHL appointment id = meetConferenceId minus the
       // "ghlappt_" prefix. Use it to show no-show / completed instead of a flat
@@ -164,25 +192,44 @@ export async function GET(req: NextRequest) {
         return "completed"; // past, held — no outcome logged yet
       }
 
-      dbRows = rawRows.map((r) => ({
-        id: r.id,
-        callType: r.callType as "meet" | "dialer",
-        direction: r.direction as "inbound" | "outbound" | null,
-        contactId: r.contactId,
-        contactName: r.contactName,
-        repEmail: r.repEmail,
-        repName: r.repName,
-        startedAt: r.startedAt.toISOString(),
-        durationSeconds: r.durationSeconds,
-        meetingUrl: r.meetingUrl,
-        status: r.callType === "meet" ? meetStatus(r) : (r.status ?? "completed"),
-        transcriptAvailable: r.transcriptAvailable,
-        recordingAvailable: r.recordingAvailable,
-        meetConferenceId: r.meetConferenceId ?? undefined,
-        smartNotesUrl: r.smartNotesUrl ?? undefined,
-        fathomRecordingId: r.fathomRecordingId,
-        fathomShareUrl: r.fathomShareUrl ?? undefined,
-      }));
+      dbRows = rawRows.map((r) => {
+        const isDialer = r.callType === "dialer";
+        const dialedNumber = isDialer ? (r.toNumber ?? null) : null;
+        let contactName = r.contactName;
+        let contactMatched = !!r.contactName;
+        // Only resolve names for dialer rows that DON'T already have one (the Twilio
+        // in-app dialer calls). GHL-synced dialer calls keep their existing name.
+        if (isDialer && !r.contactName) {
+          const matched =
+            (r.contactId ? nameByContactId.get(r.contactId) : null) ??
+            (r.toNumber ? nameByPhone.get(last10(r.toNumber)) : null) ??
+            null;
+          if (matched) { contactName = matched; contactMatched = true; }
+          else { contactName = dialedNumber; contactMatched = false; }
+        }
+        const repName = r.repName ?? (r.repEmail ? repNameByEmail.get(r.repEmail) ?? null : null);
+        return {
+          id: r.id,
+          callType: r.callType as "meet" | "dialer",
+          direction: r.direction as "inbound" | "outbound" | null,
+          contactId: r.contactId,
+          contactName,
+          repEmail: r.repEmail,
+          repName,
+          startedAt: r.startedAt.toISOString(),
+          durationSeconds: r.durationSeconds,
+          meetingUrl: r.meetingUrl,
+          status: r.callType === "meet" ? meetStatus(r) : (r.status ?? "completed"),
+          transcriptAvailable: r.transcriptAvailable,
+          recordingAvailable: r.recordingAvailable,
+          meetConferenceId: r.meetConferenceId ?? undefined,
+          smartNotesUrl: r.smartNotesUrl ?? undefined,
+          fathomRecordingId: r.fathomRecordingId,
+          fathomShareUrl: r.fathomShareUrl ?? undefined,
+          dialedNumber,
+          contactMatched,
+        };
+      });
     }
 
     // ── 2. Fetch GHL calendar events ────────────────────────────────────
