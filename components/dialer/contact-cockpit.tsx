@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Mail, Phone, Play, MessageSquare, FileText, Activity, ListChecks, Sparkles, SkipForward, Users, Presentation, ListTodo, ClipboardCheck, Eye, ArrowLeft, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { CreateTaskModal } from "@/components/shared/create-task-modal";
@@ -57,6 +57,15 @@ function LoadedContact({ contact, isPreview, onSkip, onBack, onToast, stageLabel
   const [noteDraft, setNoteDraft] = useState("");
   const [addedNotes, setAddedNotes] = useState<{ author: string; body: string; time: string }[]>([]);
   const notes = [...addedNotes, ...contact.notes];
+
+  // Auto-grow the note composer as you line-break, capped at ~4 lines then it scrolls.
+  const noteRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = noteRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 96) + "px";
+  }, [noteDraft]);
 
   function saveNote() {
     if (!noteDraft.trim()) return;
@@ -192,12 +201,13 @@ function LoadedContact({ contact, isPreview, onSkip, onBack, onToast, stageLabel
       <div className="shrink-0 border-t border-border bg-card/80 px-6 py-3 backdrop-blur-sm">
         <div className="flex items-end gap-2">
           <textarea
+            ref={noteRef}
             value={noteDraft}
             onChange={(e) => setNoteDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveNote(); }}
             rows={1}
             placeholder="Add a note while you talk… (⌘↵ to save)"
-            className="flex-1 resize-none rounded-[9px] border border-border bg-card px-3 py-2 text-[12.5px] text-foreground placeholder:text-muted-foreground/60 focus:border-ring/60 focus:outline-none focus:ring-2 focus:ring-ring/15"
+            className="max-h-[96px] flex-1 resize-none overflow-y-auto rounded-[9px] border border-border bg-card px-3 py-2 text-[12.5px] leading-snug text-foreground placeholder:text-muted-foreground/60 focus:border-ring/60 focus:outline-none focus:ring-2 focus:ring-ring/15"
           />
           <button type="button" onClick={saveNote} disabled={!noteDraft.trim()} className="h-[38px] shrink-0 rounded-[9px] bg-primary px-3.5 text-[12px] font-semibold text-primary-foreground transition-all hover:brightness-110 active:scale-95 disabled:pointer-events-none disabled:opacity-35">Save note</button>
         </div>
