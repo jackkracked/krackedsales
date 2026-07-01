@@ -27,6 +27,7 @@ interface UnifiedCall {
   smartNotesUrl?: string;
   fathomRecordingId?: number | null;
   fathomShareUrl?: string | null;
+  recordingUrl?: string | null; // Twilio/dialer recording (Blob) — plays in the modal
   // Dialer-only: the dialed number, and whether the name resolved to a real contact.
   dialedNumber?: string | null;
   contactMatched?: boolean;
@@ -226,6 +227,7 @@ export async function GET(req: NextRequest) {
           smartNotesUrl: r.smartNotesUrl ?? undefined,
           fathomRecordingId: r.fathomRecordingId,
           fathomShareUrl: r.fathomShareUrl ?? undefined,
+          recordingUrl: r.recordingUrl ?? null,
           dialedNumber,
           contactMatched,
         };

@@ -61,6 +61,40 @@ ${transcriptText.slice(0, 12000)}`;
   return parsed;
 }
 
+/**
+ * Transcribe call audio (Gemini accepts the audio inline) into a diarized
+ * transcript. Returns null when there's no discernible speech (voicemail, ringing,
+ * an unanswered/rejected call).
+ */
+export async function transcribeAudio(base64: string, mimeType: string): Promise<string | null> {
+  const client = getClient();
+  const model = client.getGenerativeModel({ model: MODEL });
+  const prompt = `This is the audio recording of an outbound sales phone call for an email design agency. Transcribe it verbatim as a diarized transcript. Put each speaker turn on its own line, prefixed with "Rep:" (the salesperson who placed the call) or "Prospect:" (the person who was called). Do not add any commentary. If there is no discernible conversation (voicemail greeting only, ringing, silence, or the call was not answered), reply with exactly: NO_SPEECH`;
+  const result = await model.generateContent([
+    { text: prompt },
+    { inlineData: { mimeType, data: base64 } },
+  ]);
+  const text = result.response.text().trim();
+  if (!text || /^NO_SPEECH\.?$/i.test(text) || text.length < 4) return null;
+  return text;
+}
+
+/**
+ * Convert a diarized "Rep:/Prospect:" transcript into the JSON shape the calls
+ * transcript route reads (Fathom-compatible), so dialer transcripts render there.
+ */
+export function diarizedToStored(text: string): string {
+  const items = text
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const m = line.match(/^(Rep|Prospect|Agent|Caller|Speaker\s*\d*)\s*[:\-]\s*(.*)$/i);
+      return { speaker: { display_name: m ? m[1] : "Speaker" }, text: m ? m[2] : line, timestamp: "" };
+    });
+  return JSON.stringify(items);
+}
+
 /** Generate insights for a call and persist to callInsights table. Idempotent. */
 export async function generateAndStoreInsights(
   callId: string,

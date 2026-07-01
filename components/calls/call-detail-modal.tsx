@@ -179,6 +179,8 @@ export function CallDetailModal({ call, onClose }: { call: Call | null; onClose:
   });
   const insights = insightsData?.insights ?? null;
 
+  const isDialer = call?.callType === "dialer";
+  const dialerAudio = isDialer && call?.recordingAvailable ? (call?.recordingUrl ?? null) : null;
   const hasVideo = !!call?.fathomShareUrl;
   const entries = useMemo(() => (data?.entries ?? []).map((e) => ({ ...e, sec: tsToSec(e.startTime) })), [data?.entries]);
   const repLower = (call?.repName ?? data?.repName ?? "").toLowerCase().split(" ")[0];
@@ -291,15 +293,21 @@ export function CallDetailModal({ call, onClose }: { call: Call | null; onClose:
         <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1.15fr_1fr]">
           {/* Left: video + summary/insights */}
           <div data-r10n-call-leftpanel className="min-h-0 overflow-y-auto border-b md:border-b-0 md:border-r border-border p-4 space-y-4">
-            {hasVideo ? (
+            {dialerAudio ? (
+              <div data-r10n-call-audio className="flex flex-col items-center gap-3 rounded-[10px] bg-muted/40 ring-1 ring-border px-5 py-6">
+                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-muted"><Phone className="h-5 w-5 text-muted-foreground/60" /></div>
+                <p className="text-sm font-medium text-foreground">Call recording</p>
+                <audio controls preload="metadata" src={dialerAudio} className="w-full max-w-[420px]" />
+              </div>
+            ) : hasVideo ? (
               <VideoPlayer callId={callId!} videoRef={videoRef} shareUrl={call!.fathomShareUrl} />
             ) : (
               <div data-r10n-call-videoempty className="aspect-video w-full rounded-[10px] bg-muted/40 ring-1 ring-border flex flex-col items-center justify-center text-center px-6">
                 <div data-r10n-call-videoempty-glyph className="w-11 h-11 rounded-full bg-muted flex items-center justify-center mb-2">
-                  {isUpcoming ? <Clock className="w-5 h-5 text-muted-foreground/50" /> : <Video className="w-5 h-5 text-muted-foreground/50" />}
+                  {isUpcoming ? <Clock className="w-5 h-5 text-muted-foreground/50" /> : isDialer ? <Phone className="w-5 h-5 text-muted-foreground/50" /> : <Video className="w-5 h-5 text-muted-foreground/50" />}
                 </div>
                 <p className="text-sm font-medium text-foreground">{isUpcoming ? "This call hasn't happened yet" : "No recording for this call"}</p>
-                <p className="text-xs text-muted-foreground mt-0.5 max-w-[280px]">Once it's recorded with Fathom, the video, transcript and AI summary appear here automatically.</p>
+                <p className="text-xs text-muted-foreground mt-0.5 max-w-[280px]">{isDialer ? "This dialer call has no audio recording (it may not have connected)." : "Once it's recorded with Fathom, the video, transcript and AI summary appear here automatically."}</p>
               </div>
             )}
 
@@ -352,7 +360,7 @@ export function CallDetailModal({ call, onClose }: { call: Call | null; onClose:
               {entries.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center text-center py-12">
                   <p className="text-sm font-medium text-foreground mb-1">No transcript</p>
-                  <p className="text-xs text-muted-foreground max-w-[220px]">This call wasn&apos;t recorded with Fathom.</p>
+                  <p className="text-xs text-muted-foreground max-w-[240px]">{isDialer ? "This dialer call hasn't been transcribed yet, or there was no conversation to transcribe." : "This call wasn't recorded with Fathom."}</p>
                 </div>
               ) : (
                 <div className="space-y-0.5">

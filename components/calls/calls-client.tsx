@@ -39,6 +39,7 @@ export interface Call {
   smartNotesUrl?: string;
   fathomRecordingId?: number | null;
   fathomShareUrl?: string | null;
+  recordingUrl?: string | null;
   dialedNumber?: string | null;
   contactMatched?: boolean;
 }
