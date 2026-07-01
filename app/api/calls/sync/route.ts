@@ -392,6 +392,7 @@ export async function runSync(): Promise<{ meet: number; dialer: number; calenda
               startedAt,
               durationSeconds,
               meetConferenceId:    `ghlappt_${ev.id}`, // dedup key (unique column)
+              calendarId:          ev.calendarId ?? cal.id,
               transcriptAvailable: false,
               recordingAvailable:  false,
             })
@@ -407,6 +408,7 @@ export async function runSync(): Promise<{ meet: number; dialer: number; calenda
                 meetingUrl:  sql`coalesce(${ev.address ?? null}::text, ${calls.meetingUrl})`,
                 repEmail:    sql`coalesce(${rep?.email ?? null}::text, ${calls.repEmail})`,
                 repName:     sql`coalesce(${rep?.name ?? null}::text, ${calls.repName})`,
+                calendarId:  sql`coalesce(${ev.calendarId ?? cal.id ?? null}::text, ${calls.calendarId})`,
               },
             });
           calendarCount++;

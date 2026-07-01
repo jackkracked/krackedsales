@@ -484,6 +484,7 @@ export const calls = pgTable("calls", {
   // Meet-specific
   meetConferenceId: text("meet_conference_id").unique(), // dedup key
   meetSpaceId: text("meet_space_id"),
+  calendarId: text("calendar_id"),       // GHL calendar this meet call belongs to (Calls-page allowlist)
   transcriptAvailable: boolean("transcript_available").default(false).notNull(),
   transcriptText: text("transcript_text"),
   transcriptStoredAt: timestamp("transcript_stored_at"),
@@ -776,6 +777,13 @@ export const dialerSettings = pgTable("dialer_settings", {
   callerId: text("caller_id"),                       // the shared business number (E.164)
   voicemailGreetingUrl: text("voicemail_greeting_url"),
   updatedBy: uuid("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/** Which GHL calendars' Meet calls appear on the Calls page. Empty = show all. */
+export const callSettings = pgTable("call_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  allowedCalendarIds: jsonb("allowed_calendar_ids").notNull().default([]),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 

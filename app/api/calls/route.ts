@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, avg, count, desc, eq, gte, ilike, inArray, isNotNull, lte, sum, sql } from "drizzle-orm";
+import { and, avg, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, ne, or, sum, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { calls, users, callDispositions, localContacts } from "@/lib/db/schema";
+import { calls, users, callDispositions, localContacts, callSettings } from "@/lib/db/schema";
 import { ghl, locationId } from "@/lib/ghl/client";
 import type { GHLCalendarEvent } from "@/lib/ghl/types";
 
@@ -44,13 +44,16 @@ async function fetchGHLEventsForUser(
   startMs: number,
   endMs: number,
   repEmail: string,
-  repName: string
+  repName: string,
+  allowedCalendarIds: string[]
 ): Promise<UnifiedCall[]> {
   try {
     const data = await ghl.get<GHLCalendarResponse>(
       `/calendars/events?locationId=${locationId()}&userId=${ghlUserId}&startTime=${startMs}&endTime=${endMs}`
     );
-    return (data.events ?? []).map((e) => {
+    return (data.events ?? [])
+      .filter((e) => allowedCalendarIds.length === 0 || allowedCalendarIds.includes(e.calendarId))
+      .map((e) => {
       const start = new Date(e.startTime);
       const end = new Date(e.endTime);
       const durationSeconds = Math.round((end.getTime() - start.getTime()) / 1000);
@@ -104,6 +107,11 @@ export async function GET(req: NextRequest) {
   try {
     const client = db();
 
+    // Calls-page calendar allowlist (empty = show all). Applies to meet/scheduled
+    // calls only; dialer + un-tagged (null calendar) rows always pass (fail-open).
+    const [cs] = await client.select().from(callSettings).limit(1);
+    const allowedCalendars = (cs?.allowedCalendarIds as string[] | undefined) ?? [];
+
     // ── 1. Fetch DB calls (existing behaviour) ──────────────────────────
 
     const conditions = [];
@@ -128,6 +136,12 @@ export async function GET(req: NextRequest) {
 
     if (search) {
       conditions.push(ilike(calls.contactName, `%${search}%`));
+    }
+
+    // Meet-calls calendar allowlist: keep non-meet rows, allowed calendars, and
+    // un-tagged (null) rows; drop meet rows on a calendar that's not allowed.
+    if (allowedCalendars.length > 0) {
+      conditions.push(or(ne(calls.callType, "meet"), inArray(calls.calendarId, allowedCalendars), isNull(calls.calendarId)));
     }
 
     const where = conditions.length > 0 ? and(...conditions) : undefined;
@@ -264,7 +278,7 @@ export async function GET(req: NextRequest) {
       // Fetch GHL events for all target users in parallel
       const eventArrays = await Promise.all(
         targetUsers.map((u) =>
-          fetchGHLEventsForUser(u.ghlUserId!, startMs, endMs, u.email, u.name)
+          fetchGHLEventsForUser(u.ghlUserId!, startMs, endMs, u.email, u.name, allowedCalendars)
         )
       );
       const rawGhlEvents = eventArrays.flat();

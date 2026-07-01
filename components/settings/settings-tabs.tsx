@@ -10,6 +10,7 @@ import { CostSettings } from "@/components/settings/cost-settings";
 import { DemoTargets } from "@/components/settings/demo-targets";
 import { IntegrationsGrid } from "@/components/settings/integrations-grid";
 import { UserCalendarsSettings } from "@/components/settings/user-calendars-settings";
+import { CallCalendarsSettings } from "@/components/settings/call-calendars-settings";
 import { GhlSyncPanel } from "@/components/settings/GhlSyncPanel";
 
 const TABS = [
@@ -109,6 +110,7 @@ function SettingsTabsInner() {
         {activeTab === "calendars" && (
           <div className="p-6">
             <div className="max-w-3xl space-y-6">
+              <CallCalendarsSettings />
               <UserCalendarsSettings />
             </div>
           </div>
