@@ -74,7 +74,9 @@ export function DialerOutcomeModal({
           )}
 
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Notes</label>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Notes <span className="text-destructive">*</span> <span className="font-normal normal-case tracking-normal text-muted-foreground/70">required</span>
+            </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
@@ -100,10 +102,13 @@ export function DialerOutcomeModal({
         </div>
 
         <div className="border-t border-border px-5 py-3.5">
+          {opt && !notes.trim() && (
+            <p className="mb-2 text-center text-[11.5px] font-medium text-muted-foreground">Add a note to save this outcome.</p>
+          )}
           <button
             type="button"
-            disabled={!opt}
-            onClick={() => opt && onSave({ key: opt.key, label: opt.label, requeue: opt.requeue }, notes, stage)}
+            disabled={!opt || !notes.trim()}
+            onClick={() => opt && notes.trim() && onSave({ key: opt.key, label: opt.label, requeue: opt.requeue }, notes.trim(), stage)}
             className="flex h-11 w-full items-center justify-center rounded-[10px] bg-primary text-[14px] font-semibold text-primary-foreground transition-all duration-150 hover:brightness-110 active:scale-[0.99] disabled:opacity-35 disabled:pointer-events-none"
           >
             Save &amp; next contact
