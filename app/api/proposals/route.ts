@@ -105,6 +105,7 @@ export async function POST(req: NextRequest) {
       listAmount,
       discountType,
       discountValue,
+      subscriptionStartDate,
     } = body;
 
     if (!type || !ghlContactId || !contactName || !totalAmount || !paymentStructure) {
@@ -166,10 +167,32 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Instalment amounts must add up to the total." }, { status: 400 });
       }
     }
+    // Deposit is now ANY amount, independent of the monthly retainer: the deposit total is
+    // simply the sum of its payments. Each payment must be a valid non-negative number.
+    let depositSum = 0;
     if (resolvedHasDeposit && Array.isArray(depositInstalments) && depositInstalments.length > 0) {
-      const sum = depositInstalments.reduce((acc: number, i: { amount?: number }) => acc + (Number(i.amount) || 0), 0);
-      if (Math.abs(sum - billed) > 0.01) {
-        return NextResponse.json({ error: "Deposit amounts must add up to one billing cycle." }, { status: 400 });
+      for (const i of depositInstalments as { amount?: number }[]) {
+        const a = Number(i.amount);
+        if (!Number.isFinite(a) || a < 0) {
+          return NextResponse.json({ error: "Each deposit payment must be a valid non-negative amount." }, { status: 400 });
+        }
+      }
+      depositSum =
+        Math.round(depositInstalments.reduce((acc: number, i: { amount?: number }) => acc + (Number(i.amount) || 0), 0) * 100) / 100;
+      if (!(depositSum > 0)) {
+        return NextResponse.json({ error: "Deposit amount must be greater than zero." }, { status: 400 });
+      }
+    }
+
+    // The subscription first-charge date must be within ~18 months. Stripe caps a trial at
+    // ~2 years from sign time; reject well under that so a deposit can never be collected and
+    // then leave the subscription unable to be created.
+    if (subscriptionStartDate) {
+      const scd = new Date(subscriptionStartDate + "T12:00:00.000Z");
+      const maxOut = new Date();
+      maxOut.setMonth(maxOut.getMonth() + 18);
+      if (isNaN(scd.getTime()) || scd.getTime() > maxOut.getTime()) {
+        return NextResponse.json({ error: "The subscription's first charge date must be within 18 months." }, { status: 400 });
       }
     }
 
@@ -214,10 +237,13 @@ export async function POST(req: NextRequest) {
         discountType: hasDiscount ? (discountType ?? null) : null,
         discountValue: hasDiscount ? discountValue : null,
         startDate: startDate ? new Date(startDate + "T12:00:00.000Z") : todayNoon,
+        // Rep-chosen date the recurring subscription's first charge lands. Null = legacy
+        // behaviour (first charge one billing cycle after start, i.e. deposit covers cycle 1).
+        subscriptionStartDate: subscriptionStartDate ? new Date(subscriptionStartDate + "T12:00:00.000Z") : null,
         endDate: resolvedEndDate,
         expiresAt,
         hasDeposit: resolvedHasDeposit,
-        depositTotal: resolvedHasDeposit ? billed : null,
+        depositTotal: resolvedHasDeposit ? depositSum : null,
         updatedAt: new Date(),
       })
       .returning();

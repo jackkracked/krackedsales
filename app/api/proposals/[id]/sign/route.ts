@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { proposals, proposalInstalments, slackSettings, agreementTemplates } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { hasStripe, stripe } from "@/lib/stripe/client";
+import { clampedTrialEnd } from "@/lib/proposals/deposit-billing";
 import { generateAgreementPdf } from "@/lib/pdf/render";
 import { sendSignedAgreementEmail } from "@/lib/email/resend";
 import { dispatchWorkflowEvent } from "@/lib/workflows/triggers";
@@ -156,6 +157,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           },
         });
 
+        // If the rep picked a first-charge date, trial the subscription until then so nothing
+        // charges before it. With no date and no deposit, it bills immediately (as before).
+        const subTrialEnd = proposal.subscriptionStartDate
+          ? clampedTrialEnd(new Date(proposal.subscriptionStartDate))
+          : null;
+
         const session = await stripe().checkout.sessions.create({
           customer: proposal.stripeCustomerId,
           mode: "subscription",
@@ -165,6 +172,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           metadata: { proposal_id: proposal.id },
           subscription_data: {
             metadata: { proposal_id: proposal.id },
+            ...(subTrialEnd ? { trial_end: subTrialEnd } : {}),
           },
         });
 

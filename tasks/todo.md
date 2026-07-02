@@ -1,3 +1,81 @@
+# TASK (2026-07-02): Fix "cash collected" KPI — book actual deposit, not full retainer
+
+Problem (flagged during the flexible-deposits build): the proposal-derived "cash collected" KPI
+books the FULL monthly retainer at deposit-completion, not the amount actually collected. Flexible
+deposits widen it: a $1000 deposit on a $2000/mo retainer books $2000 of "cash" the instant the
+deposit completes, before Stripe has charged the subscription. The separate Stripe-charges KPI is
+unaffected (it reads real charges). Jack: fix it.
+
+- [ ] Locate the proposal-derived cash-collected calc (grep the KPI/metrics layer for where a
+      completed/paid proposal contributes to cash; likely lib/kpi/* or the proposals→metrics map).
+- [ ] Book only what is really collected: depositsPaidTotal as deposits clear + the recurring
+      retainer only when Stripe actually charges it. Align with the Stripe-charges KPI definition.
+- [ ] Prove no double-count against the Stripe-charges KPI; verify against a known proposal.
+- [ ] tsc gate → deploy → confirm the number on /kpis + dashboard.
+
+---
+
+# TASK (2026-07-02): Flexible deposits + subscription start date (max flexibility)
+
+Goal: Gage can set, per proposal: any deposit amount (or none) split into any payments/dates,
+AND the date the recurring subscription's first charge lands. Deposit + subscription stay
+SEPARATE (deposit does not discount the first charge). MUST be proven in Stripe SANDBOX before live.
+
+- [x] schema: proposals.subscription_start_date (additive) + migration 0026 (applied to prod)
+- [x] API proposals/route.ts: dropped "deposit must = one cycle"; depositTotal = sum; store subscriptionStartDate; +NaN guard +18-month far-future guard
+- [x] deposit-billing.ts: firstChargeDate() (subscriptionStartDate else start+cycle) + clampedTrialEnd() [now+24h, now+700d] so a far-future date can NEVER fail sub creation after a deposit is collected
+- [x] sign route no-deposit checkout: subscription_data.trial_end via clampedTrialEnd when set
+- [x] SANDBOX HARNESS (sk_test): 61/61 assertions — deposit<month, =month(sequential/legacy), >month, no-deposit+date, far-future-clamp. Verified invoice amounts, due dates, first-charge date, independent depositTotal, recurring amount. Harness deleted from repo (never deploy).
+- [x] UI create-modal: free deposit amounts + "First subscription charge" date field (max 18mo) + relaxed validation + payload
+- [x] independent money-review: found + FIXED a BLOCKER (far-future date stranding a paid deposit) + should-fixes (NaN, stale comment). Legacy path unchanged (anchor removal is a fix).
+- [x] backfill deposit-awareness fix (route deposit invoices through settleDeposits)
+- [x] deploy → LIVE on prod (dpl lff5kmwps, Ready 2026-07-02 10:03, production alias points to it; migration 0026 column confirmed on prod DB). Blast radius: 0 real proposals have touched the new path since deploy.
+- [x] RE-VERIFIED LIVE 2026-07-02 (post battery-death, fresh session): rebuilt the sandbox harness and ran the REAL settleDeposits/issueNextDepositInvoice against Stripe TEST mode. 76/76 assertions PASS across pure date-logic + 4 integration scenarios (deposit<month legacy, deposit=month legacy, deposit>month + chosen start, far-future clamp). Verified: sequential one-invoice-at-a-time, invoice amounts/currency/collection_method, no sub on partial, sub created only on full collection, trial_end = clampedTrialEnd(firstChargeDate), recurring = retainer independent of deposit. Harness self-cleaned (prod DB sentinel rows deleted, leftover 0); harness file deleted.
+- [ ] NOT committed yet: working tree still holds the 12 modified + 4 new files (prod was deployed from this uncommitted tree). Commit + push so live prod has a git record. Awaiting Jack's go.
+- FLAG (RESOLVED → its own task): proposal-derived "cash collected" KPI books the full retainer at deposit-completion, not the actual deposit. Jack: fix it. Tracked as the "cash collected" KPI task at the top of this file.
+
+---
+
+# TASK (2026-07-02): Fix proposal/Stripe deposit billing (Gage incident)
+
+Verified root causes (prod DB + Stripe API + code + adversarial audit):
+- SYSTEMIC: Stripe webhook endpoint is DISABLED in Stripe (0 events ever) → no auto-reconcile → reps forced to use the override → bugs below. FIX: re-enable + correctly configure endpoint, match signing secret, verify.
+- Bug 1: send finalizes ALL deposit invoices at once, 7-day due (send/route.ts:126-155). FIX: issue deposits ONE AT A TIME (Jack: keep split, sequential).
+- Bug 2: override marks ALL deposits paid + writes full depositsPaidTotal with no Stripe check (deposit-paid/route.ts:40-47,102). FIX: reconcile against real Stripe invoices; only mark what actually cleared.
+- Bug 3: trial subscription created on partial deposit (override :93; webhook gate :325 ignores amount). FIX: create sub only when full deposit genuinely collected; dedupe the one subscription builder.
+- Data-model gap: instalments only have pending/paid (can't reflect Stripe void/failed). Optional follow-up.
+
+Plan:
+- [x] lib/proposals/deposit-billing.ts — one module: issueNextDepositInvoice / reconcileDeposits / createDepositSubscription / settleDeposits
+- [x] Rewire send/route.ts (issue first only), webhook deposit branch (mark one + settleDeposits), deposit-paid override (honest reconcile), delete duplicated createSubscriptionForDeposit
+- [x] tsc + adversarial money-code review (2 subagents): caught + fixed a double-subscription RACE (create-then-claim-then-cancel-loser), cents comparison, transient-error fallback
+- [x] Re-enable Stripe webhook: OLD endpoint was DISABLED. Created new endpoint (5 correct events), rotated STRIPE_WEBHOOK_SECRET, deleted old. Verified: signed event → 200 + stored; bad sig → 400. stripe_events populating.
+- [x] Deployed + verified. STILL OPEN (human/money): Lebanta record ($1.5k collected vs $3k shown, open $1.5k inst#2 invoice, trialing sub) needs Gage to reconcile. C&G/TradeFlows Stripe-verification question is separate (my Stripe calls were all read-only, one-key-one-account).
+
+---
+
+# TASK (2026-07-01): Proposal signed / paid → #kracked-ai-sales Slack alert
+
+Goal: when a proposal transitions to SIGNED or PAID, the `kracked_ai` bot posts a celebratory
+message to #kracked-ai-sales (channelId already configured in slack_settings). Must not disturb
+any working sign/payment code. Test with a clearly-labelled [TEST] message.
+
+Design: hook at the event-dispatch layer (`dispatchWorkflowEvent`), NOT in the Stripe webhook or
+sign route → zero edits to money/sign code. Both events already dispatch there. Duplicate guard =
+additive `proposals.slack_paid_notified_at` + race-safe update (paid can fire from >1 Stripe event).
+
+- [x] Add `slackPaidNotifiedAt` column to `proposals` (schema.ts)
+- [x] Migration 0025 (additive, idempotent) + applied to prod (verified column exists)
+- [x] `lib/proposals/slack-notify.ts` — notifier + pure message builder (celebratory, no em dashes)
+- [x] Hook `notifyProposalSlack` into `dispatchWorkflowEvent` (triggers.ts)
+- [x] tsc gate (exit 0) → deployed to prod → [TEST] message landed in #kracked-ai-sales (2026-07-01)
+
+DONE. Signed rides the existing `proposal.signed` dispatch, paid rides all 5 paid paths via
+`proposal.paid`. Zero edits to the Stripe webhook / sign route. Existing demoWebhookUrl
+"New client signed!" message left untouched (separate destination).
+
+---
+
 # ★ INITIATIVE (2026-06-27): R10N rebrand — non-destructive, toggleable, "most beautiful UI"
 
 **Goal:** Reskin the entire app to the R10N "Brand Lab" design system, beautifully + flawlessly, WITHOUT

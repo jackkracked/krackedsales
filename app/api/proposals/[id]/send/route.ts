@@ -4,6 +4,7 @@ import { proposals, proposalInstalments, stripeCustomers } from "@/lib/db/schema
 import { eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
 import { hasStripe, stripe } from "@/lib/stripe/client";
+import { issueNextDepositInvoice } from "@/lib/proposals/deposit-billing";
 import { sendProposalLinkEmail } from "@/lib/email/resend";
 import { logActivity } from "@/lib/activity/logger";
 
@@ -53,6 +54,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             stripeCustomerId: customer.id,
           });
         }
+      }
+
+      // Persist the customer id now so the deposit-billing helpers, which re-read the
+      // proposal from the DB, can see it before we issue the first deposit invoice.
+      if (stripeCustomerId && stripeCustomerId !== proposal.stripeCustomerId) {
+        await db()
+          .update(proposals)
+          .set({ stripeCustomerId, updatedAt: new Date() })
+          .where(eq(proposals.id, id));
+        proposal.stripeCustomerId = stripeCustomerId;
       }
 
       if (proposal.paymentStructure === "single") {
@@ -116,43 +127,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           await stripe().invoices.finalizeInvoice(instInvoiceId, { auto_advance: false });
         }
       } else if (proposal.paymentStructure === "subscription" && proposal.hasDeposit) {
-        // Create + finalize deposit instalment invoices (subscription created when all deposits paid)
-        const depositInstalments = await db()
-          .select()
-          .from(proposalInstalments)
-          .where(eq(proposalInstalments.proposalId, id))
-          .orderBy(proposalInstalments.instalmentNumber);
-
-        for (const inst of depositInstalments.filter(i => i.isDeposit)) {
-          let instInvoiceId = inst.stripeInvoiceId;
-          if (!instInvoiceId) {
-            const inv = await stripe().invoices.create({
-              customer: stripeCustomerId,
-              collection_method: "send_invoice",
-              days_until_due: 7,
-              metadata: {
-                ghl_contact_id: proposal.ghlContactId,
-                proposal_id: proposal.id,
-                instalment_number: String(inst.instalmentNumber),
-                is_deposit: "true",
-              },
-              auto_advance: false,
-            });
-            await stripe().invoiceItems.create({
-              customer: stripeCustomerId,
-              invoice: inv.id,
-              amount: Math.round(inst.amount * 100),
-              currency: proposal.currency,
-              description: `Deposit ${inst.instalmentNumber} of ${depositInstalments.filter(i => i.isDeposit).length} — ${proposal.contactName}`,
-            });
-            instInvoiceId = inv.id;
-            await db()
-              .update(proposalInstalments)
-              .set({ stripeInvoiceId: instInvoiceId })
-              .where(eq(proposalInstalments.id, inst.id));
-          }
-          await stripe().invoices.finalizeInvoice(instInvoiceId, { auto_advance: false });
-        }
+        // Issue ONLY the first deposit invoice now. Deposits are sequential: the next
+        // invoice is issued automatically when the current one is paid (the Stripe
+        // webhook calls settleDeposits → issueNextDepositInvoice). This replaces the old
+        // loop that dumped the whole deposit schedule out at once with flat 7-day dues.
+        await issueNextDepositInvoice(id);
       }
       // Subscription without deposit: Stripe Checkout Session created at sign time
     }

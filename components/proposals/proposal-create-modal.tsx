@@ -67,6 +67,7 @@ interface FormState {
   discountType: "percent" | "fixed";
   discountValue: string;
   startDate: string;
+  subscriptionStartDate: string; // when recurring billing first charges (blank = default)
   // Deal / billing
   paymentStructure: "subscription" | "single" | "instalment";
   autoRenew: boolean;
@@ -605,6 +606,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
     discountType: "percent",
     discountValue: "",
     startDate: format(toZonedDate(new Date(), tz), "yyyy-MM-dd"),
+    subscriptionStartDate: "",
     paymentStructure: "subscription",
     autoRenew: true,
     billingInterval: "month",
@@ -663,11 +665,13 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
   function addDepositInstalment() { setForm(prev => ({ ...prev, depositInstalments: [...prev.depositInstalments, newDepositInstalment()] })); }
   function removeDepositInstalment(id: string) { setForm(prev => ({ ...prev, depositInstalments: prev.depositInstalments.filter(i => i.id !== id) })); }
   function distributeDepositEvenly() {
-    const cycleAmt = billedTotalOf(form);
+    // Split the CURRENT deposit total evenly across the payments (deposit is any amount now,
+    // no longer forced to one billing cycle).
+    const total = form.depositInstalments.reduce((a, i) => a + (i.amount || 0), 0);
     const count = form.depositInstalments.length;
-    if (!count) return;
-    const each = Math.round((cycleAmt / count) * 100) / 100;
-    setForm(prev => ({ ...prev, depositInstalments: prev.depositInstalments.map((i, idx) => ({ ...i, amount: idx === count - 1 ? Math.round((cycleAmt - each * (count - 1)) * 100) / 100 : each })) }));
+    if (!count || total <= 0) return;
+    const each = Math.round((total / count) * 100) / 100;
+    setForm(prev => ({ ...prev, depositInstalments: prev.depositInstalments.map((i, idx) => ({ ...i, amount: idx === count - 1 ? Math.round((total - each * (count - 1)) * 100) / 100 : each })) }));
   }
 
   // ── derived ──
@@ -705,8 +709,9 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
           return Math.abs(sum - billedTotal) < 0.01 && form.instalments.length > 0;
         }
         if (form.hasDeposit) {
+          // Deposit can be ANY amount now (independent of the retainer): just require it to be positive.
           const sum = form.depositInstalments.reduce((acc, i) => acc + (i.amount || 0), 0);
-          return Math.abs(sum - billedTotal) < 0.01 && form.depositInstalments.length > 0;
+          return sum > 0 && form.depositInstalments.length > 0;
         }
         return true;
       }
@@ -758,9 +763,13 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
       if (form.type === "management") {
         payload.billingInterval = form.billingInterval;
         payload.billingIntervalCount = parseInt(form.billingIntervalCount) || 1;
+        // Rep-chosen first-charge date (blank = default: one cycle after start, or immediate if no deposit).
+        if (form.autoRenew && form.subscriptionStartDate) {
+          payload.subscriptionStartDate = form.subscriptionStartDate;
+        }
         if (form.paymentStructure === "subscription" && form.hasDeposit) {
           payload.hasDeposit = true;
-          payload.depositTotal = billed;
+          payload.depositTotal = form.depositInstalments.reduce((a, i) => a + (i.amount || 0), 0);
           payload.depositInstalments = form.depositInstalments.map((i, idx) => ({ number: idx + 1, amount: i.amount, dueDate: i.dueDate }));
         }
       }
@@ -1068,6 +1077,16 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
                     <input type="date" value={form.startDate} onChange={e => set("startDate", e.target.value)}
                       className="w-full px-3 py-2 text-sm bg-background border border-border rounded-[7px] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50" />
                   </div>
+
+                  {form.type === "management" && form.autoRenew && (
+                    <div className="mt-4">
+                      <label className="block text-xs font-medium text-foreground mb-1.5">First subscription charge <span className="text-muted-foreground font-normal">(optional)</span></label>
+                      <input type="date" value={form.subscriptionStartDate} onChange={e => set("subscriptionStartDate", e.target.value)}
+                        max={format(new Date(new Date().setMonth(new Date().getMonth() + 18)), "yyyy-MM-dd")}
+                        className="w-full px-3 py-2 text-sm bg-background border border-border rounded-[7px] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50" />
+                      <p className="mt-1.5 text-[11px] text-muted-foreground">When recurring billing starts. Leave blank for the default: one cycle after the start date, or immediately if there is no deposit.</p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1076,12 +1095,12 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
                 <div>
                   <h3 data-r10n-proposal-q className="text-[1.6rem] leading-[1.15] font-bold text-foreground mb-1.5 tracking-[-0.02em] text-balance" style={{ fontFamily: "var(--font-heading)" }}>Set the schedule</h3>
                   <p className="text-sm text-muted-foreground mb-5">
-                    {form.type === "project" ? `Split ${fmtMoney(billedTotal, form.currency)} into payments.` : `The deposit covers the first cycle — ${fmtMoney(billedTotal, form.currency)}.`}
+                    {form.type === "project" ? `Split ${fmtMoney(billedTotal, form.currency)} into payments.` : `Set the deposit amount and when each payment is due.`}
                   </p>
                   {form.type === "project" ? (
                     <ScheduleEditor rows={form.instalments} currencySymbol={currencySymbol} onUpdate={updateInstalment} onAdd={addInstalment} onRemove={removeInstalment} onDistribute={distributeEvenly} total={billedTotal} addLabel="Add payment" />
                   ) : (
-                    <ScheduleEditor rows={form.depositInstalments} currencySymbol={currencySymbol} onUpdate={updateDepositInstalment} onAdd={addDepositInstalment} onRemove={removeDepositInstalment} onDistribute={distributeDepositEvenly} total={billedTotal} addLabel="Add deposit payment" />
+                    <ScheduleEditor rows={form.depositInstalments} currencySymbol={currencySymbol} onUpdate={updateDepositInstalment} onAdd={addDepositInstalment} onRemove={removeDepositInstalment} onDistribute={distributeDepositEvenly} total={form.depositInstalments.reduce((a, i) => a + (i.amount || 0), 0)} addLabel="Add deposit payment" />
                   )}
                 </div>
               )}

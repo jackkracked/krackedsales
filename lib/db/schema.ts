@@ -624,11 +624,14 @@ export const proposals = pgTable("proposals", {
   // false => paid-in-full fixed term (paymentStructure "single"); covers N months, never recurs.
   autoRenew: boolean("auto_renew").notNull().default(true),
   startDate: timestamp("start_date"),
+  // When the recurring subscription's FIRST real charge should land (the rep picks it). The
+  // subscription trials until this date. Null = legacy behaviour (start + one billing cycle).
+  subscriptionStartDate: timestamp("subscription_start_date"),
   endDate: timestamp("end_date"),
   expiresAt: timestamp("expires_at"),
   // Deposit system — for management proposals collecting upfront deposits before subscription starts
   hasDeposit: boolean("has_deposit").notNull().default(false),
-  depositTotal: doublePrecision("deposit_total"), // locked to one billing cycle amount
+  depositTotal: doublePrecision("deposit_total"), // the deposit sum (any amount, independent of the cycle)
   depositsPaidTotal: doublePrecision("deposits_paid_total").notNull().default(0),
   subscriptionCreatedAt: timestamp("subscription_created_at"),
   stripeInvoiceId: text("stripe_invoice_id"),
@@ -642,6 +645,9 @@ export const proposals = pgTable("proposals", {
   additionalRates: text("additional_rates"), // JSON: [{item: string, cost: string}]
   sentAt: timestamp("sent_at"),
   paidAt: timestamp("paid_at"),
+  // Set the first time a "paid" Slack alert is posted for this proposal, so the multiple
+  // Stripe events that can flip a proposal to "paid" only announce it once (see lib/proposals/slack-notify.ts).
+  slackPaidNotifiedAt: timestamp("slack_paid_notified_at"),
   cancelledAt: timestamp("cancelled_at"),
   lostAt: timestamp("lost_at"),
   lostReason: text("lost_reason"),

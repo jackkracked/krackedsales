@@ -244,7 +244,6 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
   const [resendSuccess, setResendSuccess] = useState(false);
   const [markPaidStep, setMarkPaidStep] = useState<"idle" | "confirm">("idle");
   const [markPaidDate, setMarkPaidDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [depositOverrideStep, setDepositOverrideStep] = useState<"idle" | "confirm">("idle");
   const [deleteStep, setDeleteStep] = useState<"idle" | "confirm">("idle");
   const [markLostStep, setMarkLostStep] = useState<"idle" | "confirm">("idle");
   const [lostReason, setLostReason] = useState("");
@@ -320,19 +319,6 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
     },
   });
 
-  const depositOverrideMutation = useMutation({
-    mutationFn: async () => {
-      const r = await fetch(`/api/proposals/${proposal.id}/deposit-paid`, { method: "POST" });
-      const json = await r.json();
-      if (!r.ok || json.error) throw new Error(json.error ?? "Failed");
-      return json;
-    },
-    onSuccess: () => {
-      setDepositOverrideStep("idle");
-      queryClient.invalidateQueries({ queryKey: ["proposals"] });
-      onUpdated();
-    },
-  });
 
   const [resendStep, setResendStep] = useState<"idle" | "confirm">("idle");
   const [resendEmail, setResendEmail] = useState(proposal.contactEmail ?? "");
@@ -853,50 +839,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
             </div>
           )}
 
-          {/* Deposit override — admin marks all deposits as paid */}
-          {proposal.hasDeposit && !proposal.subscriptionCreatedAt && ["signed", "partial"].includes(proposal.status) && (
-            <div className="space-y-2">
-              {depositOverrideStep === "idle" ? (
-                <button
-                  onClick={() => setDepositOverrideStep("confirm")}
-                  data-r10n-proposal-cta="positive-soft"
-                  className="w-full flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium text-indigo-700 border border-indigo-200 bg-indigo-50 rounded-[7px] hover:bg-indigo-100 transition-colors"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  Mark Deposits as Paid
-                </button>
-              ) : (
-                <div data-r10n-proposal-promptbox="deposit" className="space-y-2 p-3 bg-indigo-50/50 border border-indigo-200 rounded-[8px]">
-                  <p data-r10n-proposal-prompt-text className="text-xs text-indigo-700 font-medium text-center">
-                    Mark all deposits as paid and start the subscription?
-                  </p>
-                  {depositOverrideMutation.isError && (
-                    <p data-r10n-proposal-error className="text-[11px] text-red-600 px-1">
-                      {(depositOverrideMutation.error as Error)?.message}
-                    </p>
-                  )}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => { setDepositOverrideStep("idle"); depositOverrideMutation.reset(); }}
-                      data-r10n-proposal-cta="ghost"
-                      className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground border border-border rounded-[7px] hover:border-foreground/40 hover:text-foreground transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => depositOverrideMutation.mutate()}
-                      disabled={depositOverrideMutation.isPending}
-                      data-r10n-proposal-cta="positive"
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 text-white text-xs font-medium rounded-[7px] hover:bg-indigo-700 transition-colors disabled:opacity-60"
-                    >
-                      <Check className="w-3 h-3" />
-                      {depositOverrideMutation.isPending ? "Processing…" : "Confirm"}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          {/* Deposit reconciliation is fully automatic (Stripe webhook + settleDeposits). No manual button. */}
 
           {/* Mark as Paid — manual backfill for existing clients */}
           {!["paid", "void"].includes(proposal.status) && (

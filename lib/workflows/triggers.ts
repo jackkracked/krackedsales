@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { workflows, proposals } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { executeWorkflow, type FlowNode, type FlowEdge } from "./executor";
+import { notifyProposalSlack } from "@/lib/proposals/slack-notify";
 
 /** Fetch a proposal and return a rich payload for workflow trigger events */
 export async function buildProposalPayload(
@@ -36,6 +37,18 @@ export async function dispatchWorkflowEvent(
   event: string,
   data: Record<string, unknown>
 ): Promise<void> {
+  // System notification: announce signings and payments to #kracked-ai-sales. Hooked here
+  // (not in the sign route or Stripe webhook) so every current and future dispatch of these
+  // events posts exactly once, without touching the payment/sign code paths. Fire-and-forget.
+  if (event === "proposal.signed" || event === "proposal.paid") {
+    const proposalId = typeof data.proposalId === "string" ? data.proposalId : null;
+    if (proposalId) {
+      notifyProposalSlack(event === "proposal.paid" ? "paid" : "signed", proposalId).catch((err) =>
+        console.error(`[dispatchWorkflowEvent] slack notify ${event}:`, err)
+      );
+    }
+  }
+
   try {
     const all = await db()
       .select()

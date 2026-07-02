@@ -7,6 +7,7 @@ import type Stripe from "stripe";
 import { generateAgreementPdf } from "@/lib/pdf/render";
 import { sendPaymentReceiptEmail } from "@/lib/email/resend";
 import { dispatchWorkflowEvent, buildProposalPayload } from "@/lib/workflows/triggers";
+import { settleDeposits } from "@/lib/proposals/deposit-billing";
 
 const DEFAULT_MANAGEMENT_TERMS = `**Service Collaboration & Cooperation**
 
@@ -81,91 +82,9 @@ async function createOnboardingTasks(proposalId: string) {
   }
 }
 
-/**
- * Create a Stripe subscription after all deposit instalments are paid.
- * Sets trial_end so the first subscription charge is skipped (deposit covers it).
- */
-async function createSubscriptionForDeposit(proposal: {
-  id: string;
-  title: string;
-  totalAmount: number;
-  currency: string;
-  billingInterval: string | null;
-  billingIntervalCount: number | null;
-  startDate: Date | null;
-  stripeCustomerId: string | null;
-  depositTotal: number | null;
-  contactName: string;
-}) {
-  if (!proposal.stripeCustomerId) {
-    console.error(`[webhook] Cannot create subscription for ${proposal.id}: no Stripe customer`);
-    return;
-  }
-
-  const interval = (proposal.billingInterval ?? "month") as "day" | "week" | "month" | "year";
-  const intervalCount = proposal.billingIntervalCount ?? 1;
-  const startDate = proposal.startDate ?? new Date();
-  const now = new Date();
-
-  // Calculate trial_end = startDate + one billing cycle (so first charge is skipped)
-  const trialEnd = new Date(startDate);
-  if (interval === "day") trialEnd.setDate(trialEnd.getDate() + intervalCount);
-  else if (interval === "week") trialEnd.setDate(trialEnd.getDate() + intervalCount * 7);
-  else if (interval === "month") trialEnd.setMonth(trialEnd.getMonth() + intervalCount);
-  else if (interval === "year") trialEnd.setFullYear(trialEnd.getFullYear() + intervalCount);
-
-  // Ensure trial_end is in the future (Stripe requires it)
-  const trialEndUnix = Math.max(
-    Math.floor(trialEnd.getTime() / 1000),
-    Math.floor(Date.now() / 1000) + 86400 // at least 24 hours from now
-  );
-
-  const price = await stripe().prices.create({
-    currency: proposal.currency,
-    unit_amount: Math.round(proposal.totalAmount * 100),
-    recurring: { interval, interval_count: intervalCount },
-    product_data: {
-      name: proposal.title,
-      metadata: { proposal_id: proposal.id },
-    },
-  });
-
-  const subscriptionParams: Stripe.SubscriptionCreateParams = {
-    customer: proposal.stripeCustomerId,
-    items: [{ price: price.id }],
-    trial_end: trialEndUnix,
-    metadata: { proposal_id: proposal.id },
-  };
-
-  // If start date is in the future, anchor billing to that date
-  if (startDate > now) {
-    subscriptionParams.billing_cycle_anchor = Math.floor(startDate.getTime() / 1000);
-    subscriptionParams.proration_behavior = "none";
-  }
-
-  const subscription = await stripe().subscriptions.create(subscriptionParams);
-
-  // Update the proposal: deposits fully paid, subscription active
-  const depositTotal = proposal.depositTotal ?? proposal.totalAmount;
-  await db()
-    .update(proposals)
-    .set({
-      status: "paid",
-      paidAt: new Date(),
-      depositsPaidTotal: depositTotal,
-      subscriptionCreatedAt: new Date(),
-      stripeSubscriptionId: subscription.id,
-      updatedAt: new Date(),
-    })
-    .where(eq(proposals.id, proposal.id));
-
-  createOnboardingTasks(proposal.id).catch(() => {});
-  buildProposalPayload(proposal.id).then((payload) =>
-    dispatchWorkflowEvent("proposal.paid", payload)
-  ).catch(() => {});
-
-  console.log(`[webhook] Created subscription ${subscription.id} for deposit proposal ${proposal.id}`);
-}
+// Deposit invoicing, reconciliation, and subscription creation now live in one
+// money-safe module: lib/proposals/deposit-billing.ts (settleDeposits). The webhook
+// and the admin override both go through it, so they can never disagree.
 
 async function sendReceiptForProposal(proposalId: string) {
   const [proposal] = await db()
@@ -295,49 +214,25 @@ export async function POST(req: NextRequest) {
       case "invoice.paid": {
         // Check if this is a deposit instalment payment
         if (metadata.is_deposit === "true" && metadata.proposal_id) {
+          // Mark the single instalment this invoice belongs to as paid.
           await db()
             .update(proposalInstalments)
             .set({ status: "paid", paidAt: new Date() })
             .where(eq(proposalInstalments.stripeInvoiceId, stripeInvoiceId));
 
+          // Reconcile against Stripe. Only if the FULL deposit is genuinely collected
+          // does this create the subscription; otherwise it records the real partial
+          // total and issues the next deposit invoice (deposits are sequential).
           const proposalId = metadata.proposal_id;
-          const [proposal] = await db()
-            .select()
-            .from(proposals)
-            .where(eq(proposals.id, proposalId))
-            .limit(1);
-
-          if (proposal) {
-            // Get the amount from the paid instalment
-            const [paidInst] = await db()
-              .select()
-              .from(proposalInstalments)
-              .where(eq(proposalInstalments.stripeInvoiceId, stripeInvoiceId))
-              .limit(1);
-            const newPaidTotal = (proposal.depositsPaidTotal ?? 0) + (paidInst?.amount ?? 0);
-
-            // Check if all deposit instalments are now paid
-            const allDeposits = await db()
-              .select()
-              .from(proposalInstalments)
-              .where(eq(proposalInstalments.proposalId, proposalId));
-            const depositInstalments = allDeposits.filter(i => i.isDeposit);
-            const allDepositsPaid = depositInstalments.every(i => i.status === "paid");
-
-            if (allDepositsPaid) {
-              // All deposits paid — create the Stripe subscription
-              await createSubscriptionForDeposit(proposal);
-            } else {
-              // Partial deposits paid
-              await db()
-                .update(proposals)
-                .set({
-                  status: "partial",
-                  depositsPaidTotal: newPaidTotal,
-                  updatedAt: new Date(),
-                })
-                .where(eq(proposals.id, proposalId));
-            }
+          const result = await settleDeposits(proposalId);
+          if (result.justCompleted) {
+            sendReceiptForProposal(proposalId).catch((e) =>
+              console.error("[webhook] Receipt email failed:", e)
+            );
+            createOnboardingTasks(proposalId).catch(() => {});
+            buildProposalPayload(proposalId, { stripeInvoiceId }).then((payload) =>
+              dispatchWorkflowEvent("proposal.paid", payload)
+            ).catch(() => {});
           }
 
         // Check if this matches a regular instalment

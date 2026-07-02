@@ -19,6 +19,7 @@ export type ActivityAction =
   | "follow_up.sent"
   | "lead.added"
   | "proposal.deposit_override"
+  | "proposal.deposit_reconcile"
   | "contact.assigned";
 
 export interface LogActivityParams {

@@ -1,20 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { proposals, proposalInstalments } from "@/lib/db/schema";
+import { proposals } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
-import { hasStripe, stripe } from "@/lib/stripe/client";
 import { logActivity } from "@/lib/activity/logger";
 import { dispatchWorkflowEvent, buildProposalPayload } from "@/lib/workflows/triggers";
-import type Stripe from "stripe";
+import { settleDeposits } from "@/lib/proposals/deposit-billing";
 
 export const dynamic = "force-dynamic";
 
 /**
  * POST /api/proposals/[id]/deposit-paid
- * Admin override: mark all remaining deposit instalments as paid and trigger subscription creation.
+ *
+ * Admin "sync deposit from Stripe" action. It reconciles the deposit instalments
+ * against their real Stripe invoices: it marks paid ONLY what Stripe has actually
+ * collected, records the true collected total, and creates the subscription ONLY when
+ * the full deposit is genuinely paid. It never fabricates payment state.
+ *
+ * (Previously this blindly marked every deposit paid and started the subscription on a
+ * single click, which is how a partial deposit ended up shown as fully paid.)
  */
-export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -30,101 +36,58 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: "Subscription already created" }, { status: 400 });
     }
 
-    // Mark all unpaid deposit instalments as paid
-    const allInstalments = await db()
-      .select()
-      .from(proposalInstalments)
-      .where(eq(proposalInstalments.proposalId, id));
-
-    const depositInstalments = allInstalments.filter(i => i.isDeposit);
-    for (const inst of depositInstalments) {
-      if (inst.status !== "paid") {
-        await db()
-          .update(proposalInstalments)
-          .set({ status: "paid", paidAt: new Date() })
-          .where(eq(proposalInstalments.id, inst.id));
-      }
-    }
-
-    const depositTotal = proposal.depositTotal ?? proposal.totalAmount;
-
-    // Create the Stripe subscription if Stripe is configured
-    let subscriptionId: string | null = null;
-    if (hasStripe() && proposal.stripeCustomerId) {
-      const interval = (proposal.billingInterval ?? "month") as "day" | "week" | "month" | "year";
-      const intervalCount = proposal.billingIntervalCount ?? 1;
-      const startDate = proposal.startDate ?? new Date();
-      const now = new Date();
-
-      // trial_end = startDate + one billing cycle
-      const trialEnd = new Date(startDate);
-      if (interval === "day") trialEnd.setDate(trialEnd.getDate() + intervalCount);
-      else if (interval === "week") trialEnd.setDate(trialEnd.getDate() + intervalCount * 7);
-      else if (interval === "month") trialEnd.setMonth(trialEnd.getMonth() + intervalCount);
-      else if (interval === "year") trialEnd.setFullYear(trialEnd.getFullYear() + intervalCount);
-
-      const trialEndUnix = Math.max(
-        Math.floor(trialEnd.getTime() / 1000),
-        Math.floor(Date.now() / 1000) + 86400
-      );
-
-      const price = await stripe().prices.create({
-        currency: proposal.currency,
-        unit_amount: Math.round(proposal.totalAmount * 100),
-        recurring: { interval, interval_count: intervalCount },
-        product_data: {
-          name: proposal.title,
-          metadata: { proposal_id: proposal.id },
-        },
-      });
-
-      const subParams: Stripe.SubscriptionCreateParams = {
-        customer: proposal.stripeCustomerId,
-        items: [{ price: price.id }],
-        trial_end: trialEndUnix,
-        metadata: { proposal_id: proposal.id },
-      };
-
-      if (startDate > now) {
-        subParams.billing_cycle_anchor = Math.floor(startDate.getTime() / 1000);
-        subParams.proration_behavior = "none";
-      }
-
-      const subscription = await stripe().subscriptions.create(subParams);
-      subscriptionId = subscription.id;
-    }
-
-    await db()
-      .update(proposals)
-      .set({
-        status: "paid",
-        paidAt: new Date(),
-        depositsPaidTotal: depositTotal,
-        subscriptionCreatedAt: new Date(),
-        stripeSubscriptionId: subscriptionId,
-        updatedAt: new Date(),
-      })
-      .where(eq(proposals.id, id));
+    // Reconcile against Stripe (money-safe: only marks what actually cleared).
+    const result = await settleDeposits(id);
 
     logActivity({
       userId: user.id,
       userName: user.name,
       userEmail: user.email,
-      action: "proposal.deposit_override",
+      action: "proposal.deposit_reconcile",
       entityType: "proposal",
       entityId: proposal.id,
       entityName: proposal.contactName,
-      metadata: { deposit_total: depositTotal },
+      metadata: {
+        paid_total: result.paidTotal,
+        deposit_total: result.depositTotal,
+        fully_paid: result.fullyPaid,
+        subscription_id: result.subscriptionId,
+      },
     });
 
-    buildProposalPayload(id).then((payload) =>
-      dispatchWorkflowEvent("proposal.paid", payload)
-    ).catch(() => {});
+    if (result.justCompleted) {
+      buildProposalPayload(id).then((payload) =>
+        dispatchWorkflowEvent("proposal.paid", payload)
+      ).catch(() => {});
+    }
 
-    return NextResponse.json({ success: true, subscriptionId });
+    const message = result.fullyPaid
+      ? "Deposit is fully collected in Stripe. Subscription is active."
+      : `Only ${formatMoney(result.paidTotal, proposal.currency)} of ${formatMoney(result.depositTotal, proposal.currency)} has cleared in Stripe. Marked what actually paid; the rest is still outstanding.`;
+
+    return NextResponse.json({
+      success: true,
+      fullyPaid: result.fullyPaid,
+      paidTotal: result.paidTotal,
+      depositTotal: result.depositTotal,
+      subscriptionId: result.subscriptionId,
+      message,
+    });
   } catch (err) {
     console.error("[POST /api/proposals/[id]/deposit-paid]", err);
-    const msg = err instanceof Error ? err.message : "Failed to process deposit override";
+    const msg = err instanceof Error ? err.message : "Failed to reconcile deposit";
     return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+function formatMoney(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: (currency || "usd").toUpperCase(),
+      minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    }).format(amount);
+  } catch {
+    return `${amount} ${(currency || "").toUpperCase()}`.trim();
   }
 }

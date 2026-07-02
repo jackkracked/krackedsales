@@ -4,6 +4,7 @@ import { proposals, proposalInstalments } from "@/lib/db/schema";
 import { eq, isNull, and, inArray } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
 import { stripe, hasStripe } from "@/lib/stripe/client";
+import { settleDeposits } from "@/lib/proposals/deposit-billing";
 
 export const dynamic = "force-dynamic";
 
@@ -61,7 +62,16 @@ export async function POST() {
 
           instalmentsUpdated += result.length;
 
-          // If all instalments now paid → mark parent proposal paid
+          // Deposit instalments must settle through settleDeposits so the subscription is
+          // created (and the deposit gate + start date honoured), never flip the proposal
+          // paid directly. This closes the gap where a missed webhook + a backfill would
+          // mark a deposit deal paid with no recurring subscription.
+          if (meta.is_deposit === "true") {
+            await settleDeposits(proposalId).catch((e) => console.error("[backfill] settleDeposits failed:", e));
+            continue;
+          }
+
+          // Non-deposit instalment plan: mark the parent proposal paid once all are paid.
           if (result.length > 0) {
             const allInstalments = await db()
               .select({ status: proposalInstalments.status })
