@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { proposals, slackSettings, users } from "@/lib/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
+import { amountBlockLabel } from "@/lib/proposals/billing";
 
 /**
  * Posts a celebratory message to #kracked-ai-sales (the channel configured in
@@ -21,7 +22,7 @@ const INTERVAL_SUFFIX: Record<string, string> = {
   year: "/yr",
 };
 
-/** "$6,000" — whole-dollar when even, else 2dp. */
+/** "$6,000", whole-dollar when even, else 2dp. */
 function formatMoney(amount: number, currency: string): string {
   const whole = Number.isInteger(amount);
   try {
@@ -32,7 +33,7 @@ function formatMoney(amount: number, currency: string): string {
       maximumFractionDigits: whole ? 0 : 2,
     }).format(amount);
   } catch {
-    // Unknown currency code — fall back to a plain number so we never crash a notification.
+    // Unknown currency code, fall back to a plain number so we never crash a notification.
     return `${whole ? amount.toLocaleString("en-US") : amount.toFixed(2)} ${(currency || "").toUpperCase()}`.trim();
   }
 }
@@ -47,29 +48,59 @@ function formatValue(p: Pick<ProposalRow, "totalAmount" | "currency" | "paymentS
   return `${base}${INTERVAL_SUFFIX[interval] ?? `/${interval}`}`;
 }
 
+/** Label for the money collected right now: a deposit, the first month, or a one-off. */
+function paidNowLabel(p: Pick<ProposalRow, "hasDeposit" | "paymentStructure">): string {
+  if (p.hasDeposit) return "Deposit";
+  if (p.paymentStructure === "subscription") return "First month";
+  return "Paid";
+}
+
 /**
- * Pure Slack mrkdwn builder — no side effects, so the test harness can render the
+ * How much actually changes hands NOW, which is not the same as the total value:
+ *   - deposit deals    => the deposit collected (what cleared, else the intended deposit)
+ *   - everything else  => the first/only charge (totalAmount)
+ * e.g. a $3,500/mo retainer taken with a $1,750 deposit => "now" is $1,750, value is $3,500/mo.
+ */
+function amountPaidNow(p: Pick<ProposalRow, "hasDeposit" | "depositsPaidTotal" | "depositTotal" | "totalAmount">): number {
+  if (p.hasDeposit) {
+    const cleared = p.depositsPaidTotal ?? 0;
+    if (cleared > 0) return cleared;
+    return p.depositTotal ?? p.totalAmount;
+  }
+  return p.totalAmount;
+}
+
+/**
+ * Pure Slack mrkdwn builder, no side effects, so the test harness can render the
  * exact real-world message. No em dashes anywhere (house style).
+ *
+ * Every message carries: who, the package, what was paid now, and the total value.
  */
 export function buildProposalSlackMessage(
   kind: "signed" | "paid",
-  data: { contactName: string; title: string; value: string; amount: string; rep?: string | null },
+  data: {
+    contactName: string;
+    packageLabel: string; // e.g. "Monthly Retainer"
+    paidLabel: string; // "Deposit" | "First month" | "Paid"
+    amount: string; // paid now, e.g. "$1,750"
+    value: string; // total value, e.g. "$3,500/mo"
+    rep?: string | null;
+  },
 ): string {
-  const repLine = data.rep ? `   ·   Rep: ${data.rep}` : "";
-  if (kind === "signed") {
-    return [
-      "🎉  *New signing*",
-      `*${data.contactName}* just signed`,
-      `*${data.title}*`,
-      `Value: ${data.value}${repLine}`,
-    ].join("\n");
-  }
-  return [
-    "💰  *Payment received*",
-    `*${data.contactName}* paid *${data.amount}*`,
-    `for *${data.title}*`,
+  const details = [
+    `${data.paidLabel}: *${data.amount}*`,
+    `Value: *${data.value}*`,
     data.rep ? `Rep: ${data.rep}` : "",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("   ·   ");
+
+  const headline =
+    kind === "signed"
+      ? `🎉  *New signing*\n*${data.contactName}* signed a *${data.packageLabel}*`
+      : `💰  *Payment received*\n*${data.contactName}*   ·   *${data.packageLabel}*`;
+
+  return `${headline}\n${details}`;
 }
 
 /** Read the single slack_settings row; returns null when Slack is unconfigured or disabled. */
@@ -133,9 +164,10 @@ export async function notifyProposalSlack(kind: "signed" | "paid", proposalId: s
 
     const text = buildProposalSlackMessage(kind, {
       contactName: p.contactName || "New client",
-      title: p.title,
+      packageLabel: amountBlockLabel(p),
+      paidLabel: paidNowLabel(p),
+      amount: formatMoney(amountPaidNow(p), p.currency),
       value: formatValue(p),
-      amount: formatMoney(p.totalAmount, p.currency),
       rep,
     });
 

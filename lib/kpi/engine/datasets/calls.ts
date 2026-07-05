@@ -12,6 +12,7 @@
 import { db } from "@/lib/db";
 import { calls } from "@/lib/db/schema";
 import { and, gte, lt } from "drizzle-orm";
+import { isTakenCall } from "@/lib/calls/taken";
 import type { DatasetDef, LoadCtx, RawRow } from "../types";
 
 export const callsDataset: DatasetDef = {
@@ -64,6 +65,7 @@ export const callsDataset: DatasetDef = {
           repName: calls.repName,
           callType: calls.callType,
           direction: calls.direction,
+          status: calls.status,
           repEmail: calls.repEmail,
           durationSeconds: calls.durationSeconds,
           startedAt: calls.startedAt,
@@ -73,9 +75,12 @@ export const callsDataset: DatasetDef = {
 
       // Rep scoping (non-admin): only this rep's own calls, by email.
       const repEmail = ctx.isAdmin === false ? ctx.repEmail ?? null : null;
+      // "Calls Logged" = calls actually taken, never upcoming/missed (shared predicate).
+      const nowMs = Date.now();
 
       return rows
         .filter((r) => (repEmail ? r.repEmail === repEmail : true))
+        .filter((r) => isTakenCall(r, nowMs))
         .map((r) => ({
           contactName: r.contactName,
           repName: r.repName,

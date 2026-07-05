@@ -11,6 +11,7 @@ import { getMetricEntry, type DetailSource } from "@/lib/kpi/metric-catalog";
 import { loadMetaAdSpend } from "@/lib/kpi/meta-series";
 import { getRepCommissionEvents, getPayoutTiming, commissionDetailRows } from "@/lib/kpi/rep-proposal-commission";
 import { getConfig, getMetricValue } from "@/lib/kpi/engine";
+import { isTakenCall } from "@/lib/calls/taken";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -286,8 +287,11 @@ async function buildSource(
       const conds = [];
       if (params.scoped && ctx.email) conds.push(eq(calls.repEmail, ctx.email));
       const results = await db().select().from(calls).where(conds.length ? and(...conds) : undefined).orderBy(desc(calls.startedAt)).limit(1000);
+      // Only list calls actually taken — never upcoming bookings or missed/unconnected calls.
+      const nowMs = Date.now();
+      const taken = results.filter((c) => isTakenCall(c, nowMs));
       let periodCount = 0;
-      const rows = results.map((c) => {
+      const rows = taken.map((c) => {
         const ip = inRange(new Date(c.startedAt).getTime(), range);
         if (ip) periodCount++;
         return { label: c.contactName || c.repEmail || "Call", sublabel: [c.callType, c.repName].filter(Boolean).join(" · ") || undefined, date: new Date(c.startedAt).toISOString(), inPeriod: ip };

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { slackSettings } from "@/lib/db/schema";
+import { slackSettings, callDispositions } from "@/lib/db/schema";
+import { and, eq, gte, lt, count } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -34,6 +35,28 @@ function easternYesterday(): string {
   return `${p.year}-${p.month}-${p.day}`;
 }
 
+/**
+ * No-shows so far this month, tallied by CALL OUTCOMES (call_dispositions.outcome
+ * = "no_show") rather than by a pipeline stage. `monthStart` and `endDate` are
+ * YYYY-MM-DD strings; `endDate` is inclusive (the day that just ended).
+ */
+async function monthlyNoShowCount(monthStart: string, endDate: string): Promise<number> {
+  const lower = new Date(`${monthStart}T00:00:00.000Z`);
+  const upper = new Date(`${endDate}T00:00:00.000Z`);
+  upper.setUTCDate(upper.getUTCDate() + 1); // make endDate inclusive
+  const [row] = await db()
+    .select({ n: count() })
+    .from(callDispositions)
+    .where(
+      and(
+        eq(callDispositions.outcome, "no_show"),
+        gte(callDispositions.dispositionedAt, lower),
+        lt(callDispositions.dispositionedAt, upper),
+      ),
+    );
+  return Number(row?.n ?? 0);
+}
+
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
@@ -61,15 +84,16 @@ export async function GET(req: NextRequest) {
   const [
     dailyAds, monthlyAds,
     dailyComments, monthlyComments,
-    dailyBooked, dailyNoShows,
+    monthlyBooked, monthlyNoShows,
     demosMonth,
   ] = await Promise.allSettled([
     get<{ spend: number; leads: number; cpl: number | null }>(`/api/meta/ads?since=${date}&until=${date}`),
     get<{ spend: number; leads: number; cpl: number | null }>(`/api/meta/ads?since=${monthStart}&until=${date}`),
     get<{ count: number }>(`/api/comment-leads/count?since=${date}&until=${date}`),
     get<{ count: number }>(`/api/comment-leads/count?since=${monthStart}&until=${date}`),
-    get<{ count: number }>(`/api/ghl/opportunities/booked-calls?since=${date}&until=${date}`),
-    get<{ count: number }>(`/api/ghl/opportunities/no-show-calls?since=${date}&until=${date}`),
+    // Booked calls + no-shows are now MONTHLY (were a single day → always ~0).
+    get<{ count: number }>(`/api/ghl/opportunities/booked-calls?since=${monthStart}&until=${date}`),
+    monthlyNoShowCount(monthStart, date), // by call outcomes, not pipeline stage
     get<{ count: number }>(`/api/clickup/demos/count?since=${monthStart}&until=${date}`),
   ]);
 
@@ -77,8 +101,8 @@ export async function GET(req: NextRequest) {
   const mAds    = monthlyAds.status  === "fulfilled" ? monthlyAds.value  : null;
   const dCom    = dailyComments.status === "fulfilled" ? dailyComments.value : null;
   const mCom    = monthlyComments.status === "fulfilled" ? monthlyComments.value : null;
-  const booked  = dailyBooked.status === "fulfilled" ? dailyBooked.value : null;
-  const noShow  = dailyNoShows.status === "fulfilled" ? dailyNoShows.value : null;
+  const booked  = monthlyBooked.status === "fulfilled" ? monthlyBooked.value : null;
+  const noShow  = monthlyNoShows.status === "fulfilled" ? monthlyNoShows.value : null;
   const demos   = demosMonth.status  === "fulfilled" ? demosMonth.value  : null;
 
   // Daily figures
@@ -86,7 +110,7 @@ export async function GET(req: NextRequest) {
   const dayLeads     = (dAds?.leads ?? 0) + (dCom?.count ?? 0);
   const dayCPL       = daySpend > 0 && dayLeads > 0 ? daySpend / dayLeads : null;
   const bookedCount  = booked?.count ?? 0;
-  const noShowCount  = noShow?.count ?? 0;
+  const noShowCount  = noShow ?? 0;
   const showRate     = bookedCount > 0 ? Math.round(((bookedCount - noShowCount) / bookedCount) * 100) : null;
 
   // Monthly figures
@@ -101,7 +125,7 @@ export async function GET(req: NextRequest) {
     `*Yesterday's Ad Spend:* ${fmt(daySpend)}   *Leads Yesterday:* ${dayLeads}${dayCPL ? `   *CPL:* ${fmt(dayCPL)}` : ""}`,
     `*${monthName} Spend So Far:* ${fmt(monthSpend)}   *Leads This Month:* ${monthLeads}${monthCPL ? `   *Month CPL:* ${fmt(monthCPL)}` : ""}`,
     "",
-    `*Booked Calls:* ${bookedCount}   *No-Shows:* ${noShowCount}${showRate !== null ? `   *Show Rate:* ${showRate}%` : ""}`,
+    `*Booked This Month:* ${bookedCount}   *No-Shows:* ${noShowCount}${showRate !== null ? `   *Show Rate:* ${showRate}%` : ""}`,
     `*Demos This Month:* ${demos?.count ?? "—"}`,
   ];
 

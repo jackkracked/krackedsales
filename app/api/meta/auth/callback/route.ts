@@ -161,6 +161,19 @@ export async function GET(req: NextRequest) {
       });
 
     console.log(`[Meta OAuth] Upserted page ${page.id} (${page.name})`);
+
+    // Subscribe the page to the webhook fields we consume, including `leadgen`
+    // (Lead Ads form submissions), so live lead capture turns on automatically.
+    try {
+      await fetch(`${GRAPH_BASE}/${page.id}/subscribed_apps`, {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: `subscribed_fields=feed,messages,messaging_postbacks,messaging_referrals,leadgen&access_token=${encodeURIComponent(page.access_token)}`,
+      });
+    } catch (err) {
+      console.warn(`[Meta OAuth] Could not subscribe page ${page.id} to webhooks:`, err);
+    }
   }
 
   // Clear state cookie and return success HTML that closes the popup

@@ -20,9 +20,13 @@ import { loadStripeKpiSeries, type StripeKpiSeries } from "@/lib/kpi/stripe-seri
 import { loadMetaAdSpend, type MetaAdSpend } from "@/lib/kpi/meta-series";
 import { readSnapshotSeries } from "@/lib/kpi/snapshots";
 import { readLastGood, writeLastGood } from "@/lib/kpi/last-good";
+import { isTakenCall } from "@/lib/calls/taken";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+/** Row shape for the "Calls Logged" filter — enough to tell a taken call from an upcoming/missed one. */
+type CallRow = { startedAt: Date; callType: string | null; status: string | null; durationSeconds: number | null };
 
 /** Parse a YYYY-MM-DD string as a UTC midnight Date. */
 function parseYMD(s: string | null): Date | null {
@@ -144,11 +148,11 @@ export async function GET(req: NextRequest) {
     needsStripe ? loadStripeKpiSeries(prevStart, end) : Promise.resolve(null as StripeKpiSeries | null),
     needsMeta ? loadMetaAdSpend(prevStart, end) : Promise.resolve(null as MetaAdSpend | null),
     needsCallsAdmin
-      ? db().select({ startedAt: calls.startedAt }).from(calls).where(and(gte(calls.startedAt, prevStart), lt(calls.startedAt, end)))
-      : Promise.resolve([] as { startedAt: Date }[]),
+      ? db().select({ startedAt: calls.startedAt, callType: calls.callType, status: calls.status, durationSeconds: calls.durationSeconds }).from(calls).where(and(gte(calls.startedAt, prevStart), lt(calls.startedAt, end)))
+      : Promise.resolve([] as CallRow[]),
     needsCallsRep && repEmail
-      ? db().select({ startedAt: calls.startedAt }).from(calls).where(and(eq(calls.repEmail, repEmail), gte(calls.startedAt, prevStart), lt(calls.startedAt, end)))
-      : Promise.resolve([] as { startedAt: Date }[]),
+      ? db().select({ startedAt: calls.startedAt, callType: calls.callType, status: calls.status, durationSeconds: calls.durationSeconds }).from(calls).where(and(eq(calls.repEmail, repEmail), gte(calls.startedAt, prevStart), lt(calls.startedAt, end)))
+      : Promise.resolve([] as CallRow[]),
     needsProposalsAdmin
       ? db().select({ sentAt: proposals.sentAt }).from(proposals).where(and(eq(proposals.status, "sent"), isNotNull(proposals.sentAt), gte(proposals.sentAt, prevStart), lt(proposals.sentAt, end)))
       : Promise.resolve([] as { sentAt: Date | null }[]),
@@ -182,6 +186,12 @@ export async function GET(req: NextRequest) {
   if (needsCommission && userId && commissionPct > 0) {
     commissionEvents = await getRepCommissionEvents({ userId, commissionPct, payoutTiming });
   }
+
+  // "Calls Logged" only counts calls actually taken — drop upcoming bookings and
+  // unconnected/no-show calls before any counting (same predicate as /kpis + drawer).
+  const nowMs = now.getTime();
+  const takenCallAdminRows = callAdminRows.filter((r) => isTakenCall(r, nowMs));
+  const takenCallRepRows = callRepRows.filter((r) => isTakenCall(r, nowMs));
 
   // ── Helpers shared across metrics ──────────────────────────────────────────
   const inRange = (d: Date | string | null | undefined, s: Date, e: Date): boolean => {
@@ -225,9 +235,9 @@ export async function GET(req: NextRequest) {
         // ── Admin: Calls Logged (DB) ───────────────────────────────────────────
         case "calls_admin": {
           metrics[key] = {
-            value: callAdminRows.filter((r) => inRange(r.startedAt, start, end)).length,
-            prev: callAdminRows.filter((r) => inRange(r.startedAt, prevStart, prevEnd)).length,
-            series: bucketCount(callAdminRows, (r) => r.startedAt, buckets),
+            value: takenCallAdminRows.filter((r) => inRange(r.startedAt, start, end)).length,
+            prev: takenCallAdminRows.filter((r) => inRange(r.startedAt, prevStart, prevEnd)).length,
+            series: bucketCount(takenCallAdminRows, (r) => r.startedAt, buckets),
           };
           break;
         }
@@ -335,10 +345,10 @@ export async function GET(req: NextRequest) {
         case "calls_rep": {
           const cpd = repTarget?.callsPerDay ?? 0;
           metrics[key] = {
-            value: callRepRows.filter((r) => inRange(r.startedAt, start, end)).length,
-            prev: callRepRows.filter((r) => inRange(r.startedAt, prevStart, prevEnd)).length,
+            value: takenCallRepRows.filter((r) => inRange(r.startedAt, start, end)).length,
+            prev: takenCallRepRows.filter((r) => inRange(r.startedAt, prevStart, prevEnd)).length,
             target: cpd > 0 ? cpd * daysInRange : undefined,
-            series: bucketCount(callRepRows, (r) => r.startedAt, buckets),
+            series: bucketCount(takenCallRepRows, (r) => r.startedAt, buckets),
           };
           break;
         }

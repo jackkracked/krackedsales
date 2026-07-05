@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, AlertCircle } from "lucide-react";
+import { RefreshCw, AlertCircle, DownloadCloud, Check } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -31,6 +31,18 @@ async function fetchMetaPages(): Promise<MetaSettingsData> {
 async function disconnectMetaPage(pageId: string): Promise<void> {
   const res = await fetch(`/api/settings/meta/${pageId}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to disconnect page");
+}
+
+async function fetchLeadStatus(): Promise<{ leadsCaptured: number; pagesConnected: number }> {
+  const res = await fetch("/api/meta/leads/backfill");
+  if (!res.ok) throw new Error("Failed to fetch lead status");
+  return res.json();
+}
+
+async function importRecentLeads(): Promise<{ inserted: number; forms: number }> {
+  const res = await fetch("/api/meta/leads/backfill", { method: "POST" });
+  if (!res.ok) throw new Error("Failed to import leads");
+  return res.json();
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -272,6 +284,81 @@ function EmptyState({ onConnect }: { onConnect: () => void }) {
   );
 }
 
+// ─── Lead Ads ─────────────────────────────────────────────────────────────────
+
+function LeadAdsSection() {
+  const queryClient = useQueryClient();
+
+  const { data } = useQuery({
+    queryKey: ["meta-lead-status"],
+    queryFn: fetchLeadStatus,
+    refetchOnWindowFocus: true,
+  });
+
+  const importMutation = useMutation({
+    mutationFn: importRecentLeads,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["meta-lead-status"] }),
+  });
+
+  const captured = data?.leadsCaptured ?? 0;
+
+  return (
+    <div className="border-t border-border pt-4 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p
+            className="text-sm font-semibold text-foreground leading-tight"
+            style={{ fontFamily: "var(--font-heading)" }}
+          >
+            Lead Ads
+          </p>
+          <p className="text-xs text-muted-foreground mt-1 max-w-[380px] leading-relaxed">
+            Facebook &amp; Instagram lead-form submissions flow into New Leads
+            automatically, with real names. Import your recent leads so nothing is missing.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => importMutation.mutate()}
+          disabled={importMutation.isPending}
+          className={cn(
+            "shrink-0 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-[6px]",
+            "text-xs font-semibold transition-colors",
+            "border border-border text-foreground hover:bg-muted/60",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+          )}
+        >
+          {importMutation.isPending ? (
+            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <DownloadCloud className="w-3.5 h-3.5" />
+          )}
+          {importMutation.isPending ? "Importing…" : "Import recent leads"}
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2 text-xs">
+        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[6px] bg-muted/60 text-muted-foreground font-medium tabular-nums">
+          {captured.toLocaleString("en-US")} lead{captured === 1 ? "" : "s"} captured
+        </span>
+        {importMutation.isSuccess && (
+          <span className="inline-flex items-center gap-1 text-emerald-600">
+            <Check className="w-3.5 h-3.5" />
+            Imported {importMutation.data.inserted.toLocaleString("en-US")} new
+          </span>
+        )}
+        {importMutation.isError && (
+          <span className="inline-flex items-center gap-1 text-destructive">
+            <AlertCircle className="w-3.5 h-3.5" />
+            Import failed, try again
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function MetaSettings() {
@@ -372,18 +459,21 @@ export function MetaSettings() {
       {isLoading ? (
         <LoadingSkeleton />
       ) : hasPages ? (
-        <div className="space-y-2.5">
-          {pages.map((page) => (
-            <PageCard
-              key={page.pageId}
-              page={page}
-              onDisconnect={() => disconnectMutation.mutate(page.pageId)}
-              isDisconnecting={
-                disconnectMutation.isPending &&
-                disconnectMutation.variables === page.pageId
-              }
-            />
-          ))}
+        <div className="space-y-5">
+          <div className="space-y-2.5">
+            {pages.map((page) => (
+              <PageCard
+                key={page.pageId}
+                page={page}
+                onDisconnect={() => disconnectMutation.mutate(page.pageId)}
+                isDisconnecting={
+                  disconnectMutation.isPending &&
+                  disconnectMutation.variables === page.pageId
+                }
+              />
+            ))}
+          </div>
+          <LeadAdsSection />
         </div>
       ) : (
         !isError && <EmptyState onConnect={openMetaOAuth} />

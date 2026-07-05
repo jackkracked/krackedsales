@@ -11,6 +11,7 @@ import { describeDataset } from "../types";
 
 import { stripeCharges, stripeInvoices, stripeSubscriptions } from "./stripe";
 import { metaSpend, metaLeads } from "./meta";
+import { facebookLeadsDataset } from "./facebook-leads";
 import { proposalsDataset } from "./proposals";
 import { callsDataset } from "./calls";
 import { softwareCostsDataset, manualExpensesDataset, demoBoardsDataset } from "./internal";
@@ -24,6 +25,7 @@ export const REGISTRY: Record<string, DatasetDef> = {
   [stripeSubscriptions.key]: stripeSubscriptions,
   [metaSpend.key]: metaSpend,
   [metaLeads.key]: metaLeads,
+  [facebookLeadsDataset.key]: facebookLeadsDataset,
   [proposalsDataset.key]: proposalsDataset,
   [callsDataset.key]: callsDataset,
   [softwareCostsDataset.key]: softwareCostsDataset,

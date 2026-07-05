@@ -339,6 +339,34 @@ export const metaPages = pgTable("meta_pages", {
 });
 
 /**
+ * Individual Facebook / Instagram Lead Ads form submissions, pulled straight from
+ * Meta (leadgen webhook + Graph API), NOT via GoHighLevel. One row per lead, with
+ * the person's name and the campaign/ad it came from — so "New Leads" can show real
+ * names instead of aggregate campaign counts. Additive: GHL stays the operating
+ * system; these mirror the same leads locally for display + attribution.
+ */
+export const facebookLeads = pgTable("facebook_leads", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  leadgenId: text("leadgen_id").notNull().unique(), // Meta's lead id — dedup key
+  formId: text("form_id"),
+  formName: text("form_name"),
+  pageId: text("page_id"),
+  pageName: text("page_name"),
+  platform: text("platform").notNull().default("facebook"), // "facebook" | "instagram"
+  campaignId: text("campaign_id"),
+  campaignName: text("campaign_name"), // the funnel/campaign shown small under the name
+  adsetName: text("adset_name"),
+  adName: text("ad_name"),
+  fullName: text("full_name"), // the lead's name — shown big in the drawer
+  email: text("email"),
+  phone: text("phone"),
+  fieldData: jsonb("field_data"), // full raw answers, so nothing is ever lost
+  isOrganic: boolean("is_organic").notNull().default(false), // organic (non-paid) leadgen
+  createdTime: timestamp("created_time").notNull(), // when the lead submitted (Meta's created_time)
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/**
  * Exact timestamp when each DEMO_SENT task entered "Scheduled/Live".
  * Populated via ClickUp's GET /task/{id}/time_in_status endpoint.
  * date_closed is NOT used — "Scheduled/Live" is a custom status, not a ClickUp "closed" type.

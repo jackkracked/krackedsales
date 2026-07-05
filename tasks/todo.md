@@ -1,17 +1,198 @@
+# TASK (2026-07-05): KPI + Slack round — 4 fixes, each with its own #kracked-software GIF
+
+Four fixes from Jack (screenshots), done fix-by-fix, each shipped then demoed with a SEPARATE
+headless-rendered GIF to #kracked-software (standard broadcaster practice; open clip for Jack first).
+
+STATUS 2026-07-05: ALL CODE COMPLETE + tsc CLEAN + REVIEWED (correctness APPROVED; security
+SHIP-WITH-FIXES, both blockers + should-fix FIXED: subscribe-page admin-gated + off PUBLIC_PATHS,
+webhook no fail-open in prod, leadgen id numeric-sanitized). Fix 1 upgraded to the DIRECT Facebook
+lead connection (Jack's call). NOT yet deployed (schema + config change → stop for approval per gate).
+Deploy order: commit → apply 0027 migration → vercel --prod → Jack connects FB (OAuth, new scope
+auto-subscribes leadgen) → POST backfill → run repoint-new-leads-config.mjs LAST. Then GIFs per fix.
+
+## Fix 1 — "New Leads" drawer shows lead NAMES, not campaign names
+Problem: New Leads detail drawer lists rows grouped by campaign (big "DTC | FREE DEMO OFFER | Round 2 |
+Max Leads", small "N leads · date"). Jack wants each row = a lead NAME (big) + the campaign it came
+from (small), like the Calls Logged drawer.
+Root cause: `leads` metric catalog default IS individual GHL opps (`o.name || o.contact?.name`), but
+it's DB-wired to Meta `meta.leads` (per-campaign aggregate, no names). The "43" = Meta ad-reported count.
+GHL opps carry `source` (funnel/campaign) -> name-big + source-small is exactly achievable (types.ts:64).
+DECISION NEEDED (see check-in): switch to GHL opps (names, count may differ from Meta 43) vs keep Meta.
+- [ ] (Option A) Un-wire the `leads` DB override so card + drawer use catalog `opps` (mode created)
+- [ ] `app/api/kpis/detail/route.ts` case "opps": sublabel = `o.source` for created mode (name + campaign)
+- [ ] Verify dashboard card + /kpis card + drawer agree on the count
+Files: app/api/kpis/detail/route.ts:310-338, lib/kpi/metric-catalog.ts:152-156, KPI engine DB config.
+
+## Fix 2 — "Calls Logged" counts only calls TAKEN, not upcoming
+Problem: counts every `calls` row with `startedAt` in range incl. FUTURE booked meet calls (drawer
+showed Jul 13/14/15 vs today Jul 5). Want: past meet calls that happened + dialer (in/out) connected.
+Predicate (shared across all 3 loaders so card == drawer):
+  meet: startedAt <= now AND status NOT IN ('noshow','cancelled')
+  dialer: startedAt <= now, exclude Twilio in_progress/no-answer/busy/failed/queued/ringing; GHL dialer (past, null status) include
+- [ ] app/api/dashboard/kpis/route.ts:146-151 (+ value filters 228-230 / 338-341)
+- [ ] lib/kpi/engine/datasets/calls.ts:72
+- [ ] app/api/kpis/detail/route.ts:285-296 (+ inPeriod gate)
+
+## Fix 3 — Slack "New signing"/"New payment" shows Name · Package · Payment · Value
+Problem: message shows only "Value: $X/mo · Rep". Want Name, Package (e.g. Monthly Retainer), Payment
+(cleared now: deposit or first month), total Value. Ex: $3,500/mo retainer + $1,750 deposit -> Payment
+$1,750, Value $3,500.
+- [ ] Edit ONLY lib/proposals/slack-notify.ts. Package label via `amountBlockLabel(p)`; amountNow =
+      hasDeposit ? (depositsPaidTotal>0 ? depositsPaidTotal : depositTotal) : totalAmount. New layout.
+- [ ] Keep at-most-once paid guard; no money-movement code touched (display only).
+Files: lib/proposals/slack-notify.ts:25-73,112-146; reuse lib/proposals/billing.ts.
+
+## Fix 4 — Daily Summary "Booked Calls" + "No-Shows" stuck at 0
+Problem: both use a single-DAY window; No-Shows reads a near-empty pipeline-stage table. Want both for
+the MONTH; no-shows by call OUTCOMES.
+- [ ] app/api/cron/daily-summary/route.ts: month window for both. Booked Calls via canonical
+      `ghl.appointments` multi-calendar (matches /kpis). No-Shows = count call_dispositions where
+      outcome='no_show' and dispositionedAt in month. Compute in cron; don't change shared endpoints.
+Files: app/api/cron/daily-summary/route.ts:45-46,71-72,98-106; call_dispositions schema 714-725;
+lib/kpi/engine/datasets/ghl.ts:177-247.
+
+## Per fix: tsc gate -> batched deploy -> separate #kracked-software GIF (open for Jack, ask before posting).
+
+---
+
+# TASK (2026-07-03): Inbox manual "mark as read" (shared read-state) — replace auto-read-on-click
+
+Trigger: clicking a message currently marks it read (Meta tab only, via localStorage `meta-seen-v2`)
+→ un-replied messages vanish from unread and can't be found. Elsewhere NO real read-state exists (GHL
+surfaces show GHL's own `unreadCount`; the app never writes read). Build a proper, app-owned, shared
+read system. Bar: phenomenally beautiful + flawless.
+
+Grill LOCKED (2026-07-03):
+- Q1 Read-state = SHARED across the team (one marks read → read for everyone).
+- Q2 Clears on: sending a REPLY (auto) OR explicit "Mark as read". A plain click/open NEVER marks read.
+- Q3 App OWNS read-state (single source of truth); do NOT write back to GHL. Unread = "new inbound
+  since marked read". GHL's own unread flag ignored.
+- Q4 Per-row quick mark-read (hover) + multi-select (checkbox + floating action bar, reuse pipeline
+  selection bar) + select-all-of-current-view. NO global "mark all read" nuke.
+- Q5 Dashboard "clear" = real mark-read (clears everywhere). No dashboard-only hide.
+- Q6 Scope: GHL/SMS/Email, Meta DM, Meta comment, IG-via-GHL, TikTok (build real unread; wire its
+  dead toggle), BOTH queues (inbox Queue tab + dashboard Reply Queue widget), dashboard strip.
+  Mark-read also DROPS the thread from both awaiting-reply queues. OUT: Follow-ups cadence tool +
+  notification bell (separate systems).
+- Q7 New inbound re-flags a read thread as unread. Include "Mark as UNREAD" (undo) — safety valve.
+
+Data model (Explore map): no read-state store exists → add one. Natural shape: `readAt` (+ optional
+readBy) keyed per conversation id, SHARED (not per-user), covering GHL convo ids AND Meta/TikTok/comment
+ids (not all in local_conversations). Reference impl already in app: `notifications.readAt` + PATCH
+/api/notifications. Unread rule: unread iff lastInboundAt > readAt (or never read).
+Key files: lib/hooks/use-conversations.ts, components/inbox/{conversation-list,meta-conversations,
+tiktok-conversations,reply-queue}.tsx, app/api/inbox/queue/route.ts, components/dashboard/
+conversations-strip/*, components/dashboard/follow-up-queue.tsx, lib/db/schema.ts (~local_conversations)
++ new write endpoint.
+
+Gates: grill ✓ → impeccable shape ✓ (Jack approved 2026-07-03; unread-only cleared rows ANIMATE OUT +
+undo toast). NEXT: craft (staged below) → polish → harden → Gate 6 + code review → 1 batched deploy.
+
+## CRAFT PLAN (staged — build backend first, UI second, one prod deploy at the end)
+### Stage 1 — Backend read-state foundation (no UI)
+- [ ] Schema: new SHARED `conversation_reads` table keyed by (platform, conversation_id) so it covers
+      GHL convo ids + Meta DM/comment ids + TikTok ids uniformly. Cols: id, platform, conversation_id,
+      read_at, read_by (userId, audit), created_at/updated_at. UNIQUE(platform, conversation_id).
+      Migration additive + idempotent.
+- [ ] Endpoint `POST /api/inbox/read` (getSessionUser-gated): body {items:[{platform,conversationId}],
+      read:boolean}. Bulk. read=true → upsert read_at=now/read_by; read=false → clear (mark unread).
+      Platform whitelist; non-fatal.
+- [ ] Shared helper: unread iff lastInboundAt > readAt (or never read). Used by every surface + counts.
+- [ ] Gate 6 self-check (additive/idempotent migration; auth-scoped writes; no mass-assign) + tsc.
+### Stage 2 — Rewire unread READS to the new store (no new UI)
+- [ ] use-conversations.ts (GHL): unread from read-state + lastInbound, not GHL unreadCount.
+- [ ] meta-conversations.tsx: replace localStorage seenMap with server read-state; REMOVE auto-seen
+      -on-click (handleSelect 1005-1017) + init bulk-seen (983-997).
+- [ ] tiktok-conversations.tsx: real unread; wire the dead toggle.
+- [ ] app/api/inbox/queue/route.ts: awaiting-reply AND not-read (mark-read drops from both queues).
+- [ ] Tab counts + dashboard "N unread" recompute from read-state.
+### Stage 3 — UI craft (the shape)
+- [ ] Row affordances (conversation-list + meta + tiktok rows): leading unread DOT, hover checkbox
+      (leading), mark-read/unread action (trailing, replaces timestamp on hover), tooltips.
+- [ ] Multi-select: selectedIds Set + floating bar (reuse pipeline selection bar + data-r10n-
+      selectionbar hooks): N selected / Mark read / Mark unread / Clear + select-all-of-view; Esc clears.
+- [ ] Reply auto-marks read (send handlers / reply-composer).
+- [ ] Dashboard conversations-strip: real mark-read (replace client dismissedIds) + per-row control.
+- [ ] Optimistic update + query invalidation; animate cleared rows out (Framer Motion, reduced-motion
+      instant); undo toast after bulk ("Marked N as read · Undo").
+- [ ] Keyboard: Esc, shift-click range, e/u on focused thread. Both themes (default + R10N).
+### Stage 4 — Finish
+- [ ] /impeccable polish + /impeccable harden (1000+ rows, optimistic failure, shared-state race,
+      empty "No unread", long names, RTL).
+- [ ] Gate 6 data review + requesting-code-review (multi-file, fresh subagent) → tsc → ONE batched
+      prod deploy (skew discipline) → verify live on all surfaces.
+
+---
+
+# TASK (2026-07-02): Payment links must NOT expire + surface signed-but-unpaid (Epicured/Fumi incident)
+
+Trigger: Epicured (Blake, blake.brossman@gmail.com, $4,500/mo, no-deposit subscription) signed 30 Jun
+but the Stripe CHECKOUT SESSION created at sign expired 1 Jul 19:19 (Stripe's 24h cap) with no
+payment → 0 subscription, 0 invoice, 0 charge in Stripe (only the customer cus_Ungj8D6S72jbkr).
+"Signed" != "paid". Jack: links can't expire once signed (the 24h expiry is just a sign-faster ploy).
+
+DONE 2026-07-02 (by hand): created a durable Stripe PAYMENT LINK for Epicured
+(buy.stripe.com/14A28rcTCap94ty7no4ow04, plink_1TomSk..., no expiry, subscription_data.metadata
+.proposal_id set so payment reconciles) + repointed proposal.stripe_hosted_url at it. Fumi The Label
+($3k, subscription+deposit) is NOT the same: its 2 deposit invoices exist + open (in_1ToCxb.. due
+16 Jul, in_1ToCyA.. due 1 Aug); invoices don't expire, no action.
+
+Systemic TODO (money-facing — own grill/plan before code):
+- [ ] Sign flow (app/api/proposals/[id]/sign/route.ts ~145-180): no-deposit subscription proposals
+      should generate a durable Stripe PAYMENT LINK, not a 24h checkout.sessions.create. Keep
+      proposal_id on link.metadata + subscription_data.metadata (webhook reconciles via
+      session.metadata AND invoice→subscription.metadata). Decide customer handling (Payment Links
+      create a customer by email → dup vs the pre-made stripeCustomerId).
+- [ ] Fix the misleading "View Stripe Invoice" button on subscription proposals (no invoice exists
+      until they pay; today it points at the dead checkout/session URL).
+- [ ] Surface "signed but NOT paid" (status/alert) so a signed client can't silently sit uncollected.
+
+---
+
 # TASK (2026-07-02): Fix "cash collected" KPI — book actual deposit, not full retainer
 
-Problem (flagged during the flexible-deposits build): the proposal-derived "cash collected" KPI
-books the FULL monthly retainer at deposit-completion, not the amount actually collected. Flexible
-deposits widen it: a $1000 deposit on a $2000/mo retainer books $2000 of "cash" the instant the
-deposit completes, before Stripe has charged the subscription. The separate Stripe-charges KPI is
-unaffected (it reads real charges). Jack: fix it.
+Problem: a proposal-derived "cash collected" number books proposal `totalAmount` at `paidAt`, which
+overstates retainers (books a whole month / the full retainer the instant a deposit completes).
+Flexible deposits widen it. GRILLED + DESIGN LOCKED 2026-07-02.
 
-- [ ] Locate the proposal-derived cash-collected calc (grep the KPI/metrics layer for where a
-      completed/paid proposal contributes to cash; likely lib/kpi/* or the proposals→metrics map).
-- [ ] Book only what is really collected: depositsPaidTotal as deposits clear + the recurring
-      retainer only when Stripe actually charges it. Align with the Stripe-charges KPI definition.
-- [ ] Prove no double-count against the Stripe-charges KPI; verify against a known proposal.
-- [ ] tsc gate → deploy → confirm the number on /kpis + dashboard.
+## Decisions (grill 2026-07-02)
+- "Cash collected" = BUSINESS cash, not rep-specific.
+- Headline "Cash Collected" (metric-catalog cash/cashCollected) = all successful Stripe charges in
+  the period. ALREADY CORRECT — unchanged.
+- "Revenue this month" (goal-progress) is the SAME concept → rename to "Cash Collected (this month)"
+  and source from real Stripe cash for the month. Stop summing proposals.totalAmount.
+- Offer funnel "Cash Collected" (kpis/offer) = ACTUAL cash on that offer's proposals: deposits
+  genuinely paid + those proposals' real subscription/invoice charges, counted by CHARGE date (not
+  totalAmount, not paidAt-booking). Effectively one offer (demo/free-design), so ~all proposals.
+- Rep cash cards (dashboard rep-performance) + commission (rep-proposal-commission.ts, payoutTiming)
+  = UNTOUCHED. DISPLAY-ONLY fix; do not change any pay logic.
+- CLARITY IS A DELIVERABLE (Jack, said 3x): every number carries a plain-language definition where
+  it's read (card explanation + drill-down). Exact copy below.
+- Restatement accepted: numbers are live-computed, so history restates to the honest value.
+
+## Definition copy (must appear on the cards + drill-downs)
+- Headline: "All money that actually hit Stripe this period (deposits, invoices, subscription
+  payments). Total business cash, not just from proposals."
+- Cash Collected (this month): "Same as Cash Collected: money actually received through Stripe this month."
+- Offer funnel: "Cash actually collected from this offer's proposals: deposits paid plus their
+  subscription and invoice payments. Only counts money tied to a proposal, so it's usually less than
+  total business Cash Collected."
+
+## Build steps (PLAN ONLY — staff-eng plan review before code; Stripe→proposal attribution is the risk area)
+- [ ] goal-progress route: replace sum(proposals.totalAmount@paidAt) with Stripe cashInRange for the
+      month (reuse lib/kpi/stripe-series.ts). Rename label "Revenue this month" → "Cash Collected
+      (this month)" everywhere it renders. Update definition/tooltip.
+- [ ] kpis/offer: replace `cashCollected = sum(totalAmount)` with ACTUAL cash on the offer's
+      proposals. Attribute succeeded Stripe charges → proposal via proposal_id metadata (deposit
+      invoices set invoice.metadata.proposal_id; subscription sets metadata.proposal_id) / the
+      proposal's stripeSubscriptionId / stripeCustomerId; scope by the existing contactsInPipelines
+      set; sum by charge date in [start,end]. Keep `valueOfProposalsSent` as-is (correctly named).
+- [ ] Clarity copy: update metric-catalog explanations + offer + goal-progress card definitions +
+      drill-down text to the wording above; offer card states it's proposal-tied and < business total.
+- [ ] Verify no double-count (offer cash <= headline; never summed together); check every consumer.
+- [ ] Read-only attribution check against a known paid proposal (charges resolve to the right offer).
+- [ ] tsc → deploy → confirm on /kpis (offer) + dashboard (Cash Collected this month). Gate 6 light
+      (read-only metrics, no writes).
 
 ---
 
@@ -31,7 +212,7 @@ SEPARATE (deposit does not discount the first charge). MUST be proven in Stripe 
 - [x] backfill deposit-awareness fix (route deposit invoices through settleDeposits)
 - [x] deploy → LIVE on prod (dpl lff5kmwps, Ready 2026-07-02 10:03, production alias points to it; migration 0026 column confirmed on prod DB). Blast radius: 0 real proposals have touched the new path since deploy.
 - [x] RE-VERIFIED LIVE 2026-07-02 (post battery-death, fresh session): rebuilt the sandbox harness and ran the REAL settleDeposits/issueNextDepositInvoice against Stripe TEST mode. 76/76 assertions PASS across pure date-logic + 4 integration scenarios (deposit<month legacy, deposit=month legacy, deposit>month + chosen start, far-future clamp). Verified: sequential one-invoice-at-a-time, invoice amounts/currency/collection_method, no sub on partial, sub created only on full collection, trial_end = clampedTrialEnd(firstChargeDate), recurring = retainer independent of deposit. Harness self-cleaned (prod DB sentinel rows deleted, leftover 0); harness file deleted.
-- [ ] NOT committed yet: working tree still holds the 12 modified + 4 new files (prod was deployed from this uncommitted tree). Commit + push so live prod has a git record. Awaiting Jack's go.
+- [x] Committed (7e9fdfc) + pushed to origin/main (fully synced). Pushed via jackkracked gh account (default aiposuk has no write); see memory project_github_push_account.
 - FLAG (RESOLVED → its own task): proposal-derived "cash collected" KPI books the full retainer at deposit-completion, not the actual deposit. Jack: fix it. Tracked as the "cash collected" KPI task at the top of this file.
 
 ---

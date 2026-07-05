@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { db } from "@/lib/db";
 import { keywordTriggers, socialLeads } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { pusherTrigger } from "@/lib/pusher/server";
+import { ingestLeadgen } from "@/lib/meta/leads";
 
 export const dynamic = "force-dynamic";
 
@@ -25,20 +27,57 @@ export async function GET(req: NextRequest) {
 // ─── POST — Meta webhook event handler ──────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  // Always return 200 immediately — Meta retries on non-200
-  const body = await req.json().catch(() => ({}));
+  // Read the RAW body so we can verify Meta's signature over the exact bytes.
+  const raw = await req.text();
 
-  // Process async — fire and forget so we respond instantly
-  handleMetaEvent(body).catch((err) =>
+  // Gate 5: verify the payload really came from Meta (HMAC-SHA256 with the app
+  // secret). We deliberately do NOT reject on failure, because the existing
+  // comment/DM webhook has always run unverified and this deploy must not risk
+  // disturbing it. Instead the security-sensitive `leadgen` path is gated on a
+  // valid signature (see handleMetaEvent), so a spoofed lead event is ignored
+  // while comments/DMs keep working exactly as before.
+  const appSecret = process.env.META_APP_SECRET;
+  let signatureValid = false;
+  if (appSecret) {
+    signatureValid = verifyMetaSignature(raw, req.headers.get("x-hub-signature-256"), appSecret);
+    if (!signatureValid) {
+      console.warn("[Meta Webhook] Signature mismatch, leadgen events will be ignored");
+    }
+  } else {
+    console.error("[Meta Webhook] META_APP_SECRET is not set, cannot verify signatures");
+  }
+
+  const body = safeJson(raw);
+
+  // Process async, fire and forget so we respond instantly (Meta retries non-200).
+  handleMetaEvent(body, signatureValid).catch((err) =>
     console.error("[Meta Webhook] Unhandled error:", err)
   );
 
   return NextResponse.json({ ok: true }, { status: 200 });
 }
 
+function safeJson(raw: string): Record<string, unknown> {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+/** Timing-safe check that the body was signed with our Meta app secret. */
+function verifyMetaSignature(raw: string, header: string | null, appSecret: string): boolean {
+  if (!header) return false;
+  const expected = "sha256=" + crypto.createHmac("sha256", appSecret).update(raw, "utf8").digest("hex");
+  const a = Buffer.from(header);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
 // ─── Event dispatcher ───────────────────────────────────────────────────────
 
-async function handleMetaEvent(body: Record<string, unknown>) {
+async function handleMetaEvent(body: Record<string, unknown>, signatureValid: boolean) {
   const object = body.object as string | undefined;
   const entries = (body.entry as Record<string, unknown>[]) ?? [];
 
@@ -63,7 +102,35 @@ async function handleMetaEvent(body: Record<string, unknown>) {
       if (field === "comments") {
         await handleInstagramComment(value);
       }
+
+      if (field === "leadgen") {
+        // Only ingest leads from a payload we cryptographically verified as Meta's.
+        if (signatureValid) {
+          await handleLeadgen(value);
+        } else {
+          console.warn("[Meta Webhook] Ignoring leadgen event with unverified signature");
+        }
+      }
     }
+  }
+}
+
+// ─── Lead Ads form submissions ───────────────────────────────────────────────
+
+async function handleLeadgen(value: Record<string, unknown>) {
+  const leadgenId = value?.leadgen_id as string | undefined;
+  const pageId = value?.page_id as string | undefined;
+  if (!leadgenId) return;
+
+  // Fetch the full lead (name/email/phone/campaign) and store it, deduped.
+  const stored = await ingestLeadgen({ leadgenId, pageId });
+  if (!stored) return;
+
+  console.log(`[Meta Webhook] Stored Facebook lead ${leadgenId} (page ${pageId ?? "?"})`);
+  try {
+    await pusherTrigger("meta-inbox", "lead.received", { leadgenId, pageId });
+  } catch (err) {
+    console.error("[Meta Webhook] Pusher trigger failed:", err);
   }
 }
 
@@ -93,7 +160,7 @@ async function handleDirectMessage(
       timestamp,
     });
   } catch (err) {
-    // Pusher is optional — log but don't fail
+    // Pusher is optional, log but don't fail
     console.error("[Meta Webhook] Pusher trigger failed:", err);
   }
 }
@@ -115,7 +182,7 @@ async function handleFacebookComment(value: Record<string, unknown>) {
   if (!matchedKeyword) return;
 
   console.log(
-    `[Meta Webhook] Facebook comment matched keyword "${matchedKeyword}" — comment ${commentId} on post ${postId}`
+    `[Meta Webhook] Facebook comment matched keyword "${matchedKeyword}", comment ${commentId} on post ${postId}`
   );
 
   await saveCommentLead({
@@ -151,7 +218,7 @@ async function handleInstagramComment(value: Record<string, unknown>) {
   if (!matchedKeyword) return;
 
   console.log(
-    `[Meta Webhook] Instagram comment matched keyword "${matchedKeyword}" — comment ${commentId}`
+    `[Meta Webhook] Instagram comment matched keyword "${matchedKeyword}", comment ${commentId}`
   );
 
   await saveCommentLead({

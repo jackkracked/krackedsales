@@ -10,6 +10,8 @@ const SCOPES = [
   "instagram_basic",
   "instagram_manage_messages",
   "pages_read_engagement",
+  "pages_manage_metadata", // subscribe the page to webhooks (incl. leadgen)
+  "leads_retrieval", // read Lead Ads form submissions for pages we manage
 ].join(",");
 
 export async function GET() {
