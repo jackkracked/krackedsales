@@ -3,12 +3,18 @@
 Four fixes from Jack (screenshots), done fix-by-fix, each shipped then demoed with a SEPARATE
 headless-rendered GIF to #kracked-software (standard broadcaster practice; open clip for Jack first).
 
-STATUS 2026-07-05: ALL CODE COMPLETE + tsc CLEAN + REVIEWED (correctness APPROVED; security
-SHIP-WITH-FIXES, both blockers + should-fix FIXED: subscribe-page admin-gated + off PUBLIC_PATHS,
-webhook no fail-open in prod, leadgen id numeric-sanitized). Fix 1 upgraded to the DIRECT Facebook
-lead connection (Jack's call). NOT yet deployed (schema + config change → stop for approval per gate).
-Deploy order: commit → apply 0027 migration → vercel --prod → Jack connects FB (OAuth, new scope
-auto-subscribes leadgen) → POST backfill → run repoint-new-leads-config.mjs LAST. Then GIFs per fix.
+STATUS 2026-07-05: DEPLOYED to prod (dpl_EuA4frs26aX59kyFoWPjgdeEcrv9, READY, kracked-sales.vercel.app,
+commit 58e14ae). Migration 0027 applied (facebook_leads exists, 0 rows, verified queryable). Smoke:
+root 307, webhook 403, subscribe-page 307 (gated), login 200. Fixes 2/3/4 LIVE. Fix 1 Facebook code
+DORMANT + SAFE: New Leads config still = meta.leads (verified, unchanged); leadgen webhook gated on
+verified signature so comment/DM flow untouched. Push to GitHub NOT done (local commit only; avoids the
+jackkracked account dance — do later if wanted).
+DEFERRED until Jack does the Facebook/Meta side (his timeline): reconnect FB (OAuth new scope
+auto-subscribes leadgen) → Settings "Import recent leads" → run scripts/repoint-new-leads-config.mjs LAST.
+Then New Leads shows names. GIFs: fix2/3/4 headless-rendered (web-to-video, R10N brand) + POSTED to
+#kracked-software (C0AADG61BE2) via Kracked bot files.completeUploadExternal, Jack-approved. New Leads
+clip (fix1-new-leads.gif) rendered + HELD at /tmp/kg until Facebook is connected (avoid showing the team
+a feature that isn't live yet); post it as the launch clip then. Scenes saved at /tmp/kg/scene-*.html.
 
 ## Fix 1 — "New Leads" drawer shows lead NAMES, not campaign names
 Problem: New Leads detail drawer lists rows grouped by campaign (big "DTC | FREE DEMO OFFER | Round 2 |

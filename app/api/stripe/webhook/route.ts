@@ -307,9 +307,12 @@ export async function POST(req: NextRequest) {
               const sub = await stripe().subscriptions.retrieve(subId);
               const pid = sub.metadata?.proposal_id;
               if (pid) {
+                // Point the proposal at the customer that actually holds this subscription
+                // (a Payment Link creates its own customer, distinct from the pre-sign one).
+                const subCustomer = typeof sub.customer === "string" ? sub.customer : sub.customer?.id ?? null;
                 const r = await db()
                   .update(proposals)
-                  .set({ status: "paid", paidAt: new Date(), stripeSubscriptionId: subId, stripeInvoiceId, updatedAt: new Date() })
+                  .set({ status: "paid", paidAt: new Date(), stripeSubscriptionId: subId, stripeInvoiceId, ...(subCustomer ? { stripeCustomerId: subCustomer } : {}), updatedAt: new Date() })
                   .where(and(eq(proposals.id, pid), ne(proposals.status, "paid")))
                   .returning({ id: proposals.id });
                 matchedId = r[0]?.id ?? null;
@@ -357,12 +360,16 @@ export async function POST(req: NextRequest) {
         const sessionMeta = session.metadata ?? {};
         if (sessionMeta.proposal_id) {
           const subId = typeof session.subscription === "string" ? session.subscription : null;
+          // A durable Payment Link creates its OWN customer from the email the client enters,
+          // so point the proposal at the customer that actually holds the live subscription.
+          const payingCustomer = typeof session.customer === "string" ? session.customer : session.customer?.id ?? null;
           const [updated] = await db()
             .update(proposals)
             .set({
               status: "paid",
               paidAt: new Date(),
               stripeSubscriptionId: subId,
+              ...(payingCustomer ? { stripeCustomerId: payingCustomer } : {}),
               updatedAt: new Date(),
             })
             .where(eq(proposals.id, sessionMeta.proposal_id))

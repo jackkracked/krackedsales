@@ -38,6 +38,9 @@ interface Proposal {
   totalAmount: number;
   currency: string;
   paymentStructure: string;
+  hasDeposit: boolean;
+  depositTotal: number | null;
+  depositsPaidTotal: number;
   serviceDescription: string | null;
   stripeInvoiceId: string | null;
   sentAt: string | null;
@@ -63,6 +66,22 @@ function fmtAmount(amount: number, currency: string) {
     currency: currency.toUpperCase(),
     maximumFractionDigits: 0,
   }).format(amount);
+}
+
+/**
+ * How much has actually been collected on a proposal so far, using only fields the
+ * list already returns (no extra Stripe calls):
+ *   - deposit deals: the deposit cash cleared (paid deposit instalments, reconciled from Stripe)
+ *   - instalment projects: the sum of paid instalments
+ *   - single / subscription: the whole amount once it flips to paid
+ */
+function paidSoFar(p: Proposal): number {
+  const paidInstalments = (p.instalments ?? [])
+    .filter((i) => i.status === "paid")
+    .reduce((sum, i) => sum + i.amount, 0);
+  if (p.hasDeposit) return Math.max(paidInstalments, p.depositsPaidTotal ?? 0);
+  if (p.paymentStructure === "instalment") return paidInstalments;
+  return p.status === "paid" || p.paidAt ? p.totalAmount : 0;
 }
 
 
@@ -604,8 +623,46 @@ export function ProposalsClient() {
                     <td data-r10n-proposal-cell-date className="px-4 py-3 text-sm text-muted-foreground tabular-nums">
                       {fmtDate(proposal.paidAt, tz) ?? <span className="text-muted-foreground/40">—</span>}
                     </td>
-                    <td data-r10n-proposal-amount className="px-4 py-3 text-right tabular-nums font-medium text-foreground/80">
-                      {fmtAmount(proposal.totalAmount, proposal.currency)}
+                    <td data-r10n-proposal-amount className="px-4 py-3 text-right tabular-nums">
+                      {(() => {
+                        const paid = paidSoFar(proposal);
+                        const total = proposal.totalAmount;
+                        const pct = total > 0 ? Math.min(100, Math.max(0, (paid / total) * 100)) : 0;
+                        const full = paid > 0 && paid >= total;
+                        return (
+                          <div className="flex flex-col items-end gap-1">
+                            {/* Value — the full deal amount */}
+                            <span className="font-medium text-foreground/85 leading-none">
+                              {fmtAmount(total, proposal.currency)}
+                            </span>
+                            {/* Paid so far — micro progress track + caption, colored by state */}
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className="relative block h-1 w-10 rounded-full bg-foreground/10 overflow-hidden"
+                                aria-hidden
+                              >
+                                <span
+                                  className={cn(
+                                    "absolute inset-y-0 left-0 rounded-full transition-[width] duration-500",
+                                    paid > 0 ? "bg-emerald-500" : "bg-transparent",
+                                  )}
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </span>
+                              <span
+                                className={cn(
+                                  "text-[10.5px] font-medium leading-none tabular-nums",
+                                  paid > 0 ? "text-emerald-600" : "text-muted-foreground/45",
+                                )}
+                              >
+                                {full
+                                  ? "Paid"
+                                  : `${fmtAmount(paid, proposal.currency)} paid`}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">

@@ -95,7 +95,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       req.headers.get("x-real-ip") ??
       "unknown";
 
-    const origin = req.headers.get("origin") ?? "";
+    // Always resolve an ABSOLUTE base URL. A missing Origin header would otherwise make the
+    // Stripe redirect/success URLs relative, which Stripe rejects — silently forcing the
+    // Payment Link back to a 24h Checkout Session (the exact stranding bug we're fixing).
+    const origin =
+      process.env.NEXT_PUBLIC_APP_URL ||
+      req.headers.get("origin") ||
+      "https://kracked-sales.vercel.app";
     let hostedUrl: string | null = null;
 
     if (hasStripe()) {
@@ -163,20 +169,52 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           ? clampedTrialEnd(new Date(proposal.subscriptionStartDate))
           : null;
 
-        const session = await stripe().checkout.sessions.create({
-          customer: proposal.stripeCustomerId,
-          mode: "subscription",
-          line_items: [{ price: price.id, quantity: 1 }],
-          success_url: `${origin}/p/${proposal.token}?payment=success`,
-          cancel_url: `${origin}/p/${proposal.token}`,
-          metadata: { proposal_id: proposal.id },
-          subscription_data: {
-            metadata: { proposal_id: proposal.id },
-            ...(subTrialEnd ? { trial_end: subTrialEnd } : {}),
-          },
-        });
+        // Durable Payment Link (preferred): unlike a Checkout Session, it NEVER expires, so a
+        // client who signs today but pays in a few days is never stranded (the Epicured incident).
+        // Payment Links use a RELATIVE trial (days from payment), so convert the absolute
+        // first-charge date to whole days from now, clamped to >= 1.
+        const trialDays = subTrialEnd
+          ? Math.max(1, Math.ceil((subTrialEnd * 1000 - Date.now()) / 86_400_000))
+          : null;
 
-        hostedUrl = session.url;
+        try {
+          // Subscription-mode Payment Links always create their own customer from the email the
+          // client enters (Stripe does not allow pinning a pre-made customer here). That can make
+          // a duplicate Stripe customer, but reconciliation is by the subscription's proposal_id
+          // metadata (see the webhook), so the proposal still flips to paid correctly.
+          const link = await stripe().paymentLinks.create({
+            line_items: [{ price: price.id, quantity: 1 }],
+            metadata: { proposal_id: proposal.id },
+            subscription_data: {
+              metadata: { proposal_id: proposal.id },
+              ...(trialDays ? { trial_period_days: trialDays } : {}),
+            },
+            after_completion: {
+              type: "redirect",
+              redirect: { url: `${origin}/p/${proposal.token}?payment=success` },
+            },
+            restrictions: { completed_sessions: { limit: 1 } },
+          }, { idempotencyKey: `plink_${proposal.id}` });
+          hostedUrl = link.url;
+        } catch (linkErr) {
+          // The live key may not yet have `payment_links_write`. Fall back to the previous
+          // Checkout Session so signing NEVER breaks. This link expires in 24h (Stripe's cap),
+          // so grant the payment-link permission on the key to get the durable link.
+          console.error("[sign] Payment Link unavailable, falling back to Checkout Session:", linkErr);
+          const session = await stripe().checkout.sessions.create({
+            customer: proposal.stripeCustomerId,
+            mode: "subscription",
+            line_items: [{ price: price.id, quantity: 1 }],
+            success_url: `${origin}/p/${proposal.token}?payment=success`,
+            cancel_url: `${origin}/p/${proposal.token}`,
+            metadata: { proposal_id: proposal.id },
+            subscription_data: {
+              metadata: { proposal_id: proposal.id },
+              ...(subTrialEnd ? { trial_end: subTrialEnd } : {}),
+            },
+          }, { idempotencyKey: `csess_${proposal.id}` });
+          hostedUrl = session.url;
+        }
       }
     }
 
