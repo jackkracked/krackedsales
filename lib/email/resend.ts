@@ -33,7 +33,7 @@ function fmtAmt(amount: number, currency: string) {
 
 // ─── Shared layout wrapper ────────────────────────────────────────────────────
 
-function emailShell(content: string): string {
+export function emailShell(content: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -83,7 +83,7 @@ function emailShell(content: string): string {
 </html>`;
 }
 
-function ctaButton(href: string, label: string): string {
+export function ctaButton(href: string, label: string): string {
   return `<table cellpadding="0" cellspacing="0" style="margin:32px auto;">
     <tr>
       <td style="background:#0f0f0f;border-radius:8px;">
@@ -100,6 +100,28 @@ function divider(): string {
 }
 
 // ─── Proposal link email ──────────────────────────────────────────────────────
+
+/**
+ * Send an already-rendered branded email (full HTML doc from renderEmail / emailShell).
+ * Used by the reminder engine and the "send me a test" action. Throws on failure so the
+ * caller can mark the send failed and retry; returns false only when email is unconfigured.
+ */
+export async function sendRenderedEmail(to: string, subject: string, html: string): Promise<boolean> {
+  const resend = client();
+  if (!resend) {
+    console.warn("[email] RESEND_API_KEY not set — skipping rendered email");
+    return false;
+  }
+  const { error } = await resend.emails.send({
+    from: FROM,
+    to: [to],
+    replyTo: GAGE,
+    subject,
+    html,
+  });
+  if (error) throw new Error(`Resend failed: ${error.message ?? String(error)}`);
+  return true;
+}
 
 export async function sendProposalLinkEmail(proposal: ProposalEmailData & {
   token: string;

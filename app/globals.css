@@ -8678,3 +8678,36 @@ h1, h2, h3, h4, h5, h6 {
 [data-theme="r10n"] .bg-gold.text-gold-foreground {
   color: #FFFFFF !important;
 }
+
+/* ─── REMINDERS: variable-pill editor ─────────────────────────────────────────
+   The TipTap body editor for client-email templates. Variables render as compact
+   pills; the editor itself is quiet prose. Scoped by class so it touches nothing else. */
+.rmd-body-editor {
+  min-height: 160px;
+  outline: none;
+}
+.rmd-body-editor:focus { outline: none; }
+.rmd-body-editor p {
+  margin: 0 0 0.6rem;
+  line-height: 1.6;
+  color: var(--foreground);
+}
+.rmd-body-editor p:last-child { margin-bottom: 0; }
+.rmd-body-editor strong { font-weight: 700; }
+/* The variable pill, in the editor and in any live-rendered spot */
+.rmd-pill {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  margin: 0 0.05rem;
+  border-radius: 9999px;
+  background: color-mix(in oklch, var(--primary) 12%, transparent);
+  color: var(--primary);
+  font-size: 0.82em;
+  font-weight: 600;
+  white-space: nowrap;
+  user-select: all;
+  vertical-align: baseline;
+}
+.rmd-body-editor .rmd-pill.ProseMirror-selectednode {
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--primary) 40%, transparent);
+}

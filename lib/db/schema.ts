@@ -720,6 +720,63 @@ export const agreementTemplates = pgTable("agreement_templates", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+/**
+ * Editable client-facing emails (branded, variable-driven). One row per email kind.
+ * Bridge system until the Workflows page owns comms. The `subject` + `bodyTemplate`
+ * carry {{variables}} that the reminder engine interpolates and HTML-escapes before
+ * wrapping in the branded email shell.
+ *
+ * `schedule` (reminder kinds only) is an ordered array of steps:
+ *   [{ delayDays: 2, anchor: "sent" }, { delayDays: 5, anchor: "sent" }]
+ *   anchor = "sent" (proposal reminders, days after sentAt) | "due" (invoice reminders, days after due date).
+ *
+ * `enabled` is the master on/off. Proposal reminders seed enabled=true; invoice
+ * reminders seed enabled=FALSE (paused) so they never send until an admin turns them
+ * on (Stripe may still be sending its own invoice reminders — see tasks/todo.md).
+ * `activeFrom` guards the late-enable foot-gun: when set, the engine only sends steps
+ * for entities whose anchor date is on/after it, so flipping a reminder on does NOT
+ * retro-blast every historical overdue record.
+ */
+export const emailTemplates = pgTable("email_templates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  key: text("key").notNull().unique(),
+    // "proposal_reminder" | "invoice_reminder" | "proposal_sent" | "payment_receipt"
+  name: text("name").notNull(), // display label, e.g. "Proposal reminder"
+  kind: text("kind").notNull(), // "reminder" | "transactional"
+  subject: text("subject").notNull(),
+  bodyTemplate: text("body_template").notNull(), // HTML body with {{variables}}
+  // The call-to-action button is STRUCTURAL: its URL is wired by the engine (sign/pay
+  // link) so it can never be removed or broken; the admin edits only its label. Empty
+  // label = no button (e.g. a receipt that needs no action).
+  ctaLabel: text("cta_label").notNull().default(""),
+  schedule: jsonb("schedule").notNull().default([]), // [{ delayDays, anchor }]
+  notifyRep: boolean("notify_rep").notNull().default(true), // @Gage after last step
+  enabled: boolean("enabled").notNull().default(true),
+  activeFrom: timestamp("active_from"), // late-enable guard (null = no floor)
+  updatedBy: uuid("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/**
+ * At-most-once ledger for automated reminders. One row per (entity, template, step)
+ * actually sent, so a daily cron re-run / retry / double-fire can NEVER re-email a
+ * client. entity_id is a proposalId (proposal reminders) or an instalmentId (invoice
+ * reminders). The UNIQUE index is the dedup guarantee.
+ */
+export const sentReminders = pgTable("sent_reminders", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  entityId: text("entity_id").notNull(),      // proposalId OR instalmentId (namespaced by template_key)
+  templateKey: text("template_key").notNull(),
+  stepNumber: integer("step_number").notNull(), // step index; -1 = the "notify rep" sentinel
+  recipientEmail: text("recipient_email"),
+  status: text("status").notNull().default("sending"), // "sending" | "sent" | "failed"
+  error: text("error"),
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
+}, (t) => ({
+  uniqStep: uniqueIndex("sent_reminders_entity_template_step_key").on(t.entityId, t.templateKey, t.stepNumber),
+}));
+
 // ─── Booking automation ───────────────────────────────────────────────────────
 
 export const bookingAutomationRules = pgTable("booking_automation_rules", {

@@ -1,3 +1,68 @@
+# ★ TASK (2026-07-07): Branded reminder + client-email system (bridge until Workflows is ready)
+
+Big one. Client-facing money comms. Must be phenomenally beautiful, on-brand (logo), 100% flawless.
+
+## Locked requirements (grill ✓ 2026-07-07)
+- SEND MODE: automatic, on a daily schedule (Vercel Hobby = daily cron granularity; timing is day-based).
+- CADENCE: fully EDITABLE in-tool. Frequency (how many reminder steps) + delay (days) per step, per type.
+  Ship a sensible default schedule, Jack edits freely, live, no code.
+- EDIT SCOPE: reminders AND all client emails, editable in ONE place with dynamic-variable drag-in +
+  live interpolation preview. Covers: proposal reminders, invoice reminders, the proposal-sent email,
+  the payment receipt. (Signed-agreement email optional add.)
+- STRIPE DUNNING: REPLACE Stripe's generic unpaid-invoice reminders with ours. Verify + turn OFF
+  Stripe's account-level "Send reminders for unpaid invoices" so clients never get duplicate emails.
+- REP NUDGE: when a client keeps ignoring reminders (after last step), post to #kracked-ai-sales and
+  @-mention Gage Flesher (need his Slack member ID for a real <@ID> tag).
+- FUTURE: this is a BRIDGE. When the Workflows page is fully functional, reminders migrate to a workflow
+  action node. Build standalone now, keep the send/interpolate logic reusable so it can be lifted later.
+
+## What already exists to build on (recon done)
+- Email: lib/email/resend.ts — Resend, branded emailShell() (cream/white + logo), FROM
+  proposals@krackedretention.com, LOGO_URL hosted. Existing: sendProposalLinkEmail, sendSignedAgreementEmail,
+  sendPaymentReceiptEmail. Reuse the shell; make the bodies template-driven.
+- Interpolation: lib/workflows/interpolate.ts — {{path.to.value}} resolver (reuse for variables).
+- Cron: app/api/cron/* (GET + CRON_SECRET). vercel.json crons (daily). task-reminders is the closest pattern (dedup via notifications.entityId).
+- Data: proposals (status/sentAt/signedAt/paidAt/token/contactEmail/stripeHostedUrl/totalAmount),
+  proposal_instalments (amount/dueDate/status/paidAt/stripeHostedUrl/isDeposit).
+- Invoices: collection_method send_invoice, days_until_due 7, auto_advance false → app must send its own.
+- Settings pattern: app/(app)/settings/* + a single-row settings table + GET/POST (Slack settings is the template).
+- Slack: slackSettings has botToken/channelId (#kracked-ai-sales). Reuse postToSalesChannel().
+
+## SHAPE ✓ APPROVED (2026-07-07): own nav item "Reminders" (under AUTOMATE); styled pills (TipTap
+## pill<->{{token}}); 3-zone split editor (left rail list · center subject+body+variable palette ·
+## right LIVE branded preview via emailShell + sample data + "Send me a test"); reminder items also get
+## a schedule strip (editable steps: frequency + delay, add/remove/reorder) + timeline + @Gage nudge
+## toggle; explicit Save (no autosave) + navigate-away guard; BLOCK-SAVE guardrail (proposal reminder
+## must keep Sign link, invoice reminder must keep Pay link); skeleton load; paused state.
+
+## STRIPE DECISION (Jack, 2026-07-07): DO NOT touch Stripe at all right now. Verified live: open invoices
+## have auto_advance=TRUE + recent invoice.sent events → Stripe IS currently emailing clients its own
+## invoice reminders. Jack will confirm with Gage (meeting in ~1hr) because Gage may send invoices
+## OUTSIDE the system + existing management clients predate it → turning off Stripe's ACCOUNT-WIDE
+## reminder toggle would break those. So:
+##  - Build invoice reminders FULLY but ship them PAUSED (master enabled=false); one toggle turns on later.
+##  - Proposal reminders ship ON (no Stripe interaction, safe).
+##  - Do NOT flip the Stripe account toggle. Do NOT change auto_advance on any invoice now (leave current
+##    Stripe reminder behavior 100% intact). The invoice-reminders ON toggle shows a "Stripe may still be
+##    sending its own — turn those off first" warning so Jack/Gage enable deliberately (accepts temp dupes).
+
+## BUILD ORDER
+## 1. Data model (migration 0028): email_templates (key, subject, body_template, schedule jsonb,
+##    notify_rep bool, enabled bool, updated_by/at) + sent_reminders (dedup: unique(entity_id,
+##    template_key, step_number) + sentAt/recipient) . Additive + idempotent.
+## 2. Engine (lib/reminders/): variable catalog (plain-name -> resolver + sample), pill<->token map,
+##    render.ts (interpolate + emailShell wrap), engine.ts (find-due -> render -> send -> log -> @Gage).
+##    Reuse lib/email/resend.ts (emailShell) + lib/workflows/interpolate.ts + slack postToSalesChannel.
+## 3. Cron app/api/cron/reminders (GET + CRON_SECRET) daily; vercel.json daily schedule. Invoice branch
+##    gated on the master enabled flag. Dedup via sent_reminders.
+## 4. Editor APIs: GET/PUT /api/reminders/templates (admin, whitelisted), POST /api/reminders/test (admin).
+## 5. UI craft: app/(app)/reminders + components/reminders/* (the approved shape) + nav item.
+## 6. SWEEP (Jack demanded): /impeccable critique -> audit -> polish -> harden.
+## 7. Gate 5 (template-injection sanitize + auth) + Gate 6 (dedup/no-double-send/additive) + code review -> deploy.
+## Need: Gage Flesher's Slack member ID for a real <@ID> mention (fetch via Slack users.lookupByEmail).
+
+---
+
 # TASK (2026-07-05): KPI + Slack round — 4 fixes, each with its own #kracked-software GIF
 
 Four fixes from Jack (screenshots), done fix-by-fix, each shipped then demoed with a SEPARATE

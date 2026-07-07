@@ -113,6 +113,25 @@ async function getEnabledSlack(): Promise<{ botToken: string; channelId: string 
   return { botToken: s.botToken, channelId: s.channelId };
 }
 
+/**
+ * Resolve a real Slack mention (`<@U123>`) for an email via users.lookupByEmail, so a
+ * nudge actually pings the person. Falls back to a plain "@name" when Slack is
+ * unconfigured or the lookup fails, so the message still reads sensibly.
+ */
+export async function slackMentionForEmail(email: string, fallbackName: string): Promise<string> {
+  const slack = await getEnabledSlack();
+  if (!slack) return `@${fallbackName}`;
+  try {
+    const res = await fetch(`https://slack.com/api/users.lookupByEmail?email=${encodeURIComponent(email)}`, {
+      headers: { Authorization: `Bearer ${slack.botToken}` },
+    });
+    const json = await res.json();
+    return json.ok && json.user?.id ? `<@${json.user.id}>` : `@${fallbackName}`;
+  } catch {
+    return `@${fallbackName}`;
+  }
+}
+
 /** Post to Slack. Returns true on success; logs and returns false on any failure. */
 export async function postToSalesChannel(text: string): Promise<boolean> {
   const slack = await getEnabledSlack();
