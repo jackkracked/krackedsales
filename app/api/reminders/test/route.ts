@@ -32,7 +32,13 @@ export async function POST(req: NextRequest) {
   // A representative live URL so the button is real in the test email.
   const ctaUrl = template.key === "invoice_reminder" ? "https://buy.stripe.com/test_sample" : `${APP_URL}/p/sample-token`;
 
-  const { subject, html } = renderEmail(template, scenario.values, { ctaUrl });
+  // Test exactly what's on screen (the current step), falling back to the saved base.
+  const tpl = {
+    subject: typeof body.subject === "string" ? body.subject : template.subject,
+    bodyTemplate: typeof body.bodyTemplate === "string" ? body.bodyTemplate : template.bodyTemplate,
+    ctaLabel: typeof body.ctaLabel === "string" ? body.ctaLabel : template.ctaLabel,
+  };
+  const { subject, html } = renderEmail(tpl, scenario.values, { ctaUrl });
   try {
     const ok = await sendRenderedEmail(u.email, `[Test] ${subject}`, html);
     if (!ok) return NextResponse.json({ error: "Email is not configured (RESEND_API_KEY missing)" }, { status: 503 });

@@ -50,13 +50,11 @@ export async function seedDefaultTemplates(): Promise<void> {
   }
 }
 
-/** All templates (seeds first if the table is empty), ordered reminders then transactional. */
+/** All templates (seeding any missing defaults first), ordered reminders then transactional. */
 export async function getAllTemplates(): Promise<TemplateRow[]> {
-  let rows = await db().select().from(emailTemplates);
-  if (rows.length === 0) {
-    await seedDefaultTemplates();
-    rows = await db().select().from(emailTemplates);
-  }
+  // Idempotent (ON CONFLICT DO NOTHING): backfills any template key that doesn't exist yet.
+  await seedDefaultTemplates();
+  const rows = await db().select().from(emailTemplates);
   const order = DEFAULT_TEMPLATES.map((t) => t.key);
   return rows.sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
 }

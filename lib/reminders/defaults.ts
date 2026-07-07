@@ -8,9 +8,18 @@
  * be sending its own — see tasks/todo.md). Transactional emails are always on.
  */
 
+/**
+ * One step in a reminder sequence. `delayDays` + `anchor` set WHEN it sends; the
+ * optional subject/body/cta let EACH step have its own messaging (step 1 gentle,
+ * step 4 firmer). When a step's messaging is blank the engine falls back to the
+ * template's base subject/body/cta, so a step is never sent empty.
+ */
 export interface ScheduleStep {
   delayDays: number;
   anchor: "sent" | "due";
+  subject?: string;
+  bodyTemplate?: string;
+  ctaLabel?: string;
 }
 
 export interface DefaultTemplate {
@@ -40,8 +49,26 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
       P("Any questions at all, just reply to this email, I'm happy to help."),
     ctaLabel: "Review & sign",
     schedule: [
-      { delayDays: 2, anchor: "sent" },
-      { delayDays: 5, anchor: "sent" },
+      {
+        delayDays: 2,
+        anchor: "sent",
+        subject: "A quick nudge on your proposal, {{client.firstName}}",
+        bodyTemplate:
+          P("Hi {{client.firstName}},") +
+          P("Just circling back on the {{proposal.package}} we put together for you ({{proposal.value}}). It's ready whenever you are, and signing takes about a minute.") +
+          P("Any questions at all, just reply to this email."),
+        ctaLabel: "Review & sign",
+      },
+      {
+        delayDays: 5,
+        anchor: "sent",
+        subject: "Still keen to get you started, {{client.firstName}}",
+        bodyTemplate:
+          P("Hi {{client.firstName}},") +
+          P("Wanted to make sure this didn't slip through. Your {{proposal.package}} ({{proposal.value}}) is ready to sign whenever you're set.") +
+          P("If anything's holding you up or you'd like to talk it through, just reply, happy to jump on a quick call."),
+        ctaLabel: "Review & sign",
+      },
     ],
     notifyRep: true,
     enabled: true,
@@ -57,8 +84,26 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
       P("Thanks so much, and let me know if anything needs sorting."),
     ctaLabel: "Pay invoice",
     schedule: [
-      { delayDays: 0, anchor: "due" },
-      { delayDays: 3, anchor: "due" },
+      {
+        delayDays: 0,
+        anchor: "due",
+        subject: "Your invoice for {{invoice.amount}} is due, {{client.firstName}}",
+        bodyTemplate:
+          P("Hi {{client.firstName}},") +
+          P("A quick reminder that your invoice for {{invoice.amount}} is due on {{invoice.dueDate}}. You can settle it in a few seconds using the button below.") +
+          P("Thanks so much, and let me know if anything needs sorting."),
+        ctaLabel: "Pay invoice",
+      },
+      {
+        delayDays: 3,
+        anchor: "due",
+        subject: "Following up on your {{invoice.amount}} invoice",
+        bodyTemplate:
+          P("Hi {{client.firstName}},") +
+          P("Just checking this didn't get missed, your invoice for {{invoice.amount}} was due on {{invoice.dueDate}}.") +
+          P("Tap below to take care of it, and if there's any issue with payment just let me know, we'll sort it."),
+        ctaLabel: "Pay invoice",
+      },
     ],
     notifyRep: true,
     enabled: false, // PAUSED until Jack + Gage clear the Stripe overlap

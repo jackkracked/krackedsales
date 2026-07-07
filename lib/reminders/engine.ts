@@ -20,7 +20,7 @@ import { proposals, proposalInstalments, sentReminders, users, emailTemplates } 
 import { and, or, eq, isNull, isNotNull, gte, lt, inArray } from "drizzle-orm";
 import { getAllTemplates } from "@/lib/reminders/store";
 import { resolveVars, type ResolveContext } from "@/lib/reminders/variables";
-import { renderEmail } from "@/lib/reminders/render";
+import { renderEmail, type RenderableTemplate } from "@/lib/reminders/render";
 import { sendRenderedEmail } from "@/lib/email/resend";
 import { postToSalesChannel, slackMentionForEmail } from "@/lib/proposals/slack-notify";
 import type { ScheduleStep } from "@/lib/reminders/defaults";
@@ -76,7 +76,7 @@ interface StepTarget {
  * Claim + send ONE step. Returns "sent" | "skip" | "fail". The unique (entity, template,
  * step) row is the at-most-once guarantee; a failed row is re-claimed on a later run.
  */
-async function sendStep(t: StepTarget, stepNumber: number, summary: RunSummary): Promise<void> {
+async function sendStep(t: StepTarget, stepNumber: number, tpl: RenderableTemplate, summary: RunSummary): Promise<void> {
   const target = and(
     eq(sentReminders.entityId, t.entityId),
     eq(sentReminders.templateKey, t.template.key),
@@ -110,7 +110,7 @@ async function sendStep(t: StepTarget, stepNumber: number, summary: RunSummary):
   }
 
   // A reminder with a CTA must have a real link; never send a broken/no-action email.
-  if (t.template.ctaLabel && !isHttpsUrl(t.ctaUrl)) {
+  if (tpl.ctaLabel && !isHttpsUrl(t.ctaUrl)) {
     await db().update(sentReminders).set({ status: "failed", error: "missing or invalid CTA url" }).where(eq(sentReminders.id, rowId));
     summary.failures++;
     return;
@@ -118,7 +118,7 @@ async function sendStep(t: StepTarget, stepNumber: number, summary: RunSummary):
 
   try {
     const values = resolveVars(t.ctx);
-    const { subject, html } = renderEmail(t.template, values, { ctaUrl: t.ctaUrl });
+    const { subject, html } = renderEmail(tpl, values, { ctaUrl: t.ctaUrl });
     await sendRenderedEmail(t.recipient, subject, html);
     await db().update(sentReminders).set({ status: "sent", sentAt: new Date() }).where(eq(sentReminders.id, rowId));
     summary.sent++;
@@ -137,8 +137,16 @@ async function processEntity(t: StepTarget, now: Date, summary: RunSummary): Pro
     const refStr = dateStr(t.referenceDate);
 
     for (let i = 0; i < schedule.length; i++) {
-      const dueStr = addDaysStr(refStr, Number(schedule[i].delayDays) || 0);
-      if (today >= dueStr) await sendStep(t, i, summary);
+      const step = schedule[i];
+      const dueStr = addDaysStr(refStr, Number(step.delayDays) || 0);
+      if (today < dueStr) continue;
+      // Each step has its own messaging; fall back to the template base when blank.
+      const tpl: RenderableTemplate = {
+        subject: step.subject || t.template.subject,
+        bodyTemplate: step.bodyTemplate || t.template.bodyTemplate,
+        ctaLabel: step.ctaLabel ?? t.template.ctaLabel,
+      };
+      await sendStep(t, i, tpl, summary);
     }
 
     // After the last step's day, if the entity is still unresolved (it wouldn't be in

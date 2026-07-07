@@ -61,6 +61,22 @@ Big one. Client-facing money comms. Must be phenomenally beautiful, on-brand (lo
 ## 7. Gate 5 (template-injection sanitize + auth) + Gate 6 (dedup/no-double-send/additive) + code review -> deploy.
 ## Need: Gage Flesher's Slack member ID for a real <@ID> mention (fetch via Slack users.lookupByEmail).
 
+## STATUS 2026-07-07: v1 SHIPPED + swept + deployed. Engine (dedup/floor/no-Stripe/escaping) + 3-zone
+## editor + daily cron LIVE. Proposal reminders ON (floor verified: 0 blast of 12 sent-unsigned).
+## Invoice PAUSED. Reviews passed (staff-eng plan + security SHIP-WITH-FIXES all applied incl. lost/void
+## exclusion, stale-claim retry, url hardening; UX audit tokens/a11y all applied).
+
+## v2 REQUESTS (Jack, 2026-07-07) — building next:
+## A. PER-STEP MESSAGING: each reminder step = its own editable email (subject/body/cta + delay). Model:
+##    repurpose email_templates.schedule jsonb -> [{delayDays,anchor,subject,bodyTemplate,ctaLabel}];
+##    backfill existing reminder rows from top-level msg. Engine: step i uses steps[i]. Editor: step tabs
+##    (1st/2nd/3rd/+) within a selected reminder. Validate tokens across ALL steps at save.
+## B. STOP-IF-SIGNED/PAID: ALREADY DONE + verified (engine re-checks live status each run; lost/void now
+##    excluded). No new work; confirm in v2 testing.
+## C. DRIP/SENT VIEW: per-step "N recipients + who" from sent_reminders. GET /api/reminders/activity?key=
+##    (grouped by step: counts + recipients + status) + a UI funnel panel in the editor.
+## Then: re-sweep (audit/harden) + Gate 5/6 + code review -> deploy.
+
 ---
 
 # TASK (2026-07-05): KPI + Slack round — 4 fixes, each with its own #kracked-software GIF

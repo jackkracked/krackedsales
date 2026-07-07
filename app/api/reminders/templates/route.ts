@@ -26,15 +26,26 @@ export async function GET() {
   return NextResponse.json({ templates, variables: VAR_CATALOG, scenarios: PREVIEW_SCENARIOS });
 }
 
-/** Sanitize an incoming schedule into a clean array of steps. */
+/** Sanitize an incoming schedule into clean steps, preserving each step's own messaging. */
 function cleanSchedule(input: unknown): ScheduleStep[] {
   if (!Array.isArray(input)) return [];
   return input.slice(0, 12).map((s) => {
-    const step = s as { delayDays?: unknown; anchor?: unknown };
-    const delayDays = Math.max(0, Math.min(365, Math.round(Number(step.delayDays) || 0)));
-    const anchor = step.anchor === "due" ? "due" : "sent";
-    return { delayDays, anchor };
+    const step = s as { delayDays?: unknown; anchor?: unknown; subject?: unknown; bodyTemplate?: unknown; ctaLabel?: unknown };
+    return {
+      delayDays: Math.max(0, Math.min(365, Math.round(Number(step.delayDays) || 0))),
+      anchor: step.anchor === "due" ? "due" : "sent",
+      subject: typeof step.subject === "string" ? step.subject : "",
+      bodyTemplate: typeof step.bodyTemplate === "string" ? step.bodyTemplate : "",
+      ctaLabel: typeof step.ctaLabel === "string" ? step.ctaLabel : "",
+    };
   });
+}
+
+/** Every {{token}} string across a template + all its steps (for save-time validation). */
+function allTemplateStrings(subject: string, body: string, cta: string, steps: ScheduleStep[]): string[] {
+  const out = [subject, body, cta];
+  for (const s of steps) out.push(s.subject ?? "", s.bodyTemplate ?? "", s.ctaLabel ?? "");
+  return out;
 }
 
 /** Save one template. Whitelisted fields only; unknown {{tokens}} are rejected. */
@@ -52,16 +63,16 @@ export async function PUT(req: NextRequest) {
   const subject = typeof body.subject === "string" ? body.subject : existing.subject;
   const bodyTemplate = typeof body.bodyTemplate === "string" ? body.bodyTemplate : existing.bodyTemplate;
   const ctaLabel = typeof body.ctaLabel === "string" ? body.ctaLabel : existing.ctaLabel;
-
-  // Reject any variable the catalog doesn't know, so a raw {{token}} can never reach a client.
-  const bad = unknownTokens(subject, bodyTemplate, ctaLabel);
-  if (bad.length) {
-    return NextResponse.json({ error: `Unknown variables: ${bad.join(", ")}` }, { status: 400 });
-  }
-
   const enabled = typeof body.enabled === "boolean" ? body.enabled : existing.enabled;
   const notifyRep = typeof body.notifyRep === "boolean" ? body.notifyRep : existing.notifyRep;
   const schedule = body.schedule !== undefined ? cleanSchedule(body.schedule) : (existing.schedule as ScheduleStep[]);
+
+  // Reject any variable the catalog doesn't know across the base AND every step's messaging,
+  // so a raw {{token}} can never reach a client.
+  const bad = unknownTokens(...allTemplateStrings(subject, bodyTemplate, ctaLabel, schedule));
+  if (bad.length) {
+    return NextResponse.json({ error: `Unknown variables: ${bad.join(", ")}` }, { status: 400 });
+  }
 
   // Late-enable guard: turning a reminder ON (or editing while on) sets the floor to now,
   // so it only ever reminds entities from this moment forward, never the historical backlog.
