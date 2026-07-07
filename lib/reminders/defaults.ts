@@ -136,7 +136,7 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
     subject: "Payment received, thank you {{client.firstName}}",
     bodyTemplate:
       P("Hi {{client.firstName}},") +
-      P("We've received your payment of {{invoice.amount}}, thank you. Your {{proposal.package}} is now active.") +
+      P("We've received your payment, thank you. Your {{proposal.package}} is now active.") +
       P("Welcome aboard, we're looking forward to getting to work."),
     ctaLabel: "",
     schedule: [],

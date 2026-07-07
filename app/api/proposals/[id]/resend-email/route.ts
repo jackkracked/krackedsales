@@ -3,7 +3,8 @@ import { db } from "@/lib/db";
 import { proposals } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
-import { sendProposalLinkEmail } from "@/lib/email/resend";
+import { sendProposalLinkEmail, sendRenderedEmail } from "@/lib/email/resend";
+import { renderTransactional } from "@/lib/reminders/transactional";
 
 export const dynamic = "force-dynamic";
 
@@ -25,16 +26,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const effectiveEmail = recipientEmail || proposal.contactEmail;
 
     try {
-      await sendProposalLinkEmail({
-        contactName: proposal.contactName,
-        contactEmail: effectiveEmail,
-        title: proposal.title,
-        totalAmount: proposal.totalAmount,
-        currency: proposal.currency,
-        serviceDescription: proposal.serviceDescription,
-        token: proposal.token,
-        type: proposal.type,
-      });
+      const templated = effectiveEmail ? await renderTransactional("proposal_sent", { ...proposal, contactEmail: effectiveEmail }) : null;
+      if (templated && effectiveEmail) {
+        await sendRenderedEmail(effectiveEmail, templated.subject, templated.html);
+      } else {
+        await sendProposalLinkEmail({
+          contactName: proposal.contactName,
+          contactEmail: effectiveEmail,
+          title: proposal.title,
+          totalAmount: proposal.totalAmount,
+          currency: proposal.currency,
+          serviceDescription: proposal.serviceDescription,
+          token: proposal.token,
+          type: proposal.type,
+        });
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[resend-email] Failed:", msg);

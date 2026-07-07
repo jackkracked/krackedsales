@@ -108,7 +108,12 @@ function divider(): string {
  * Used by the reminder engine and the "send me a test" action. Throws on failure so the
  * caller can mark the send failed and retry; returns false only when email is unconfigured.
  */
-export async function sendRenderedEmail(to: string, subject: string, html: string): Promise<boolean> {
+export async function sendRenderedEmail(
+  to: string | string[],
+  subject: string,
+  html: string,
+  attachments?: { filename: string; content: Buffer }[],
+): Promise<boolean> {
   const resend = client();
   if (!resend) {
     console.warn("[email] RESEND_API_KEY not set — skipping rendered email");
@@ -116,10 +121,11 @@ export async function sendRenderedEmail(to: string, subject: string, html: strin
   }
   const { error } = await resend.emails.send({
     from: FROM,
-    to: [to],
+    to: Array.isArray(to) ? to : [to],
     replyTo: GAGE,
     subject,
     html,
+    ...(attachments?.length ? { attachments } : {}),
   });
   if (error) throw new Error(`Resend failed: ${error.message ?? String(error)}`);
   return true;

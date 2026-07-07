@@ -5,7 +5,8 @@ import { eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
 import { hasStripe, stripe } from "@/lib/stripe/client";
 import { issueNextDepositInvoice } from "@/lib/proposals/deposit-billing";
-import { sendProposalLinkEmail } from "@/lib/email/resend";
+import { sendProposalLinkEmail, sendRenderedEmail } from "@/lib/email/resend";
+import { renderTransactional } from "@/lib/reminders/transactional";
 import { logActivity } from "@/lib/activity/logger";
 
 export const dynamic = "force-dynamic";
@@ -158,19 +159,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       metadata: { total_amount: proposal.totalAmount, currency: proposal.currency },
     });
 
-    // Send the proposal link email — await so errors surface to the caller
+    // Send the proposal link email — await so errors surface to the caller.
+    // Prefer the editable "proposal_sent" template; fall back to the built-in email.
     let emailWarning: string | null = null;
     try {
-      await sendProposalLinkEmail({
-        contactName: proposal.contactName,
-        contactEmail: effectiveEmail,
-        title: proposal.title,
-        totalAmount: proposal.totalAmount,
-        currency: proposal.currency,
-        serviceDescription: proposal.serviceDescription,
-        token: proposal.token,
-        type: proposal.type,
-      });
+      const templated = effectiveEmail ? await renderTransactional("proposal_sent", { ...proposal, contactEmail: effectiveEmail }) : null;
+      if (templated && effectiveEmail) {
+        await sendRenderedEmail(effectiveEmail, templated.subject, templated.html);
+      } else {
+        await sendProposalLinkEmail({
+          contactName: proposal.contactName,
+          contactEmail: effectiveEmail,
+          title: proposal.title,
+          totalAmount: proposal.totalAmount,
+          currency: proposal.currency,
+          serviceDescription: proposal.serviceDescription,
+          token: proposal.token,
+          type: proposal.type,
+        });
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[send] Proposal link email failed:", msg);

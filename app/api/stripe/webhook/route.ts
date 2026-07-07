@@ -5,7 +5,8 @@ import { eq, and, ne } from "drizzle-orm";
 import { stripe } from "@/lib/stripe/client";
 import type Stripe from "stripe";
 import { generateAgreementPdf } from "@/lib/pdf/render";
-import { sendPaymentReceiptEmail } from "@/lib/email/resend";
+import { sendPaymentReceiptEmail, sendRenderedEmail } from "@/lib/email/resend";
+import { renderTransactional } from "@/lib/reminders/transactional";
 import { dispatchWorkflowEvent, buildProposalPayload } from "@/lib/workflows/triggers";
 import { settleDeposits } from "@/lib/proposals/deposit-billing";
 
@@ -137,16 +138,25 @@ async function sendReceiptForProposal(proposalId: string) {
     signatureData: proposal.signatureData,
   });
 
-  await sendPaymentReceiptEmail(
-    {
-      contactName: proposal.contactName,
-      contactEmail: proposal.contactEmail,
-      title: proposal.title,
-      totalAmount: proposal.totalAmount,
-      currency: proposal.currency,
-    },
-    pdfBuffer
-  );
+  // Prefer the editable "payment_receipt" template; fall back to the built-in receipt.
+  // Both keep the signed-agreement PDF attached and copy Gage.
+  const templated = await renderTransactional("payment_receipt", proposal);
+  if (templated) {
+    const recipients = [proposal.contactEmail, "gage@krackedretention.com"].filter((e): e is string => !!e);
+    const filename = `kracked-retention-receipt-${proposal.contactName.toLowerCase().replace(/\s+/g, "-")}.pdf`;
+    await sendRenderedEmail(recipients, templated.subject, templated.html, [{ filename, content: pdfBuffer }]);
+  } else {
+    await sendPaymentReceiptEmail(
+      {
+        contactName: proposal.contactName,
+        contactEmail: proposal.contactEmail,
+        title: proposal.title,
+        totalAmount: proposal.totalAmount,
+        currency: proposal.currency,
+      },
+      pdfBuffer
+    );
+  }
 }
 
 export const dynamic = "force-dynamic";

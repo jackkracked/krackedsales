@@ -93,9 +93,9 @@ export function RemindersClient() {
   });
 
   const testMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (to: string) => {
       const res = await fetch("/api/reminders/test", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: draft!.key, scenarioId, subject: activeMsg.subject, bodyTemplate: activeMsg.bodyTemplate, ctaLabel: activeMsg.ctaLabel }) });
+        body: JSON.stringify({ key: draft!.key, scenarioId, to, subject: activeMsg.subject, bodyTemplate: activeMsg.bodyTemplate, ctaLabel: activeMsg.ctaLabel }) });
       if (!res.ok) throw new Error("Test failed");
       return res.json();
     },
@@ -212,7 +212,7 @@ export function RemindersClient() {
               {rightTab === "preview" ? (
                 <PreviewPane subject={preview.subject} html={preview.html} loading={previewLoading}
                   scenarios={data?.scenarios ?? []} scenarioId={scenarioId} onScenario={setScenarioId}
-                  onSendTest={() => draft && testMutation.mutate()} testState={testState} />
+                  onSendTest={(to) => draft && testMutation.mutate(to)} testState={testState} />
               ) : (
                 <ActivityPanel templateKey={draft.key} schedule={draft.schedule} />
               )}

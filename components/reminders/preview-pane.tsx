@@ -21,10 +21,17 @@ export function PreviewPane({
   scenarios: PreviewScenario[];
   scenarioId: string;
   onScenario: (id: string) => void;
-  onSendTest: () => void;
+  onSendTest: (to: string) => void;
   testState: "idle" | "sending" | "sent" | "error";
 }) {
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const [testOpen, setTestOpen] = useState(false);
+  const [testEmail, setTestEmail] = useState("");
+
+  function submitTest() {
+    onSendTest(testEmail.trim());
+    setTestOpen(false);
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -66,24 +73,58 @@ export function PreviewPane({
             })}
           </div>
 
-          <button
-            type="button"
-            onClick={onSendTest}
-            disabled={testState === "sending"}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-[6px] border px-2.5 py-1 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-              testState === "sent"
-                ? "border-success/40 text-success"
-                : testState === "error"
-                ? "border-destructive/40 text-destructive"
-                : "border-border text-foreground hover:bg-muted/60",
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setTestOpen((o) => !o)}
+              disabled={testState === "sending"}
+              aria-haspopup="dialog"
+              aria-expanded={testOpen}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-[6px] border px-2.5 py-1 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                testState === "sent"
+                  ? "border-success/40 text-success"
+                  : testState === "error"
+                  ? "border-destructive/40 text-destructive"
+                  : "border-border text-foreground hover:bg-muted/60",
+              )}
+            >
+              {testState === "sending" ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : testState === "sent" ? <Check className="h-3.5 w-3.5" />
+                : <Send className="h-3.5 w-3.5" />}
+              {testState === "sent" ? "Test sent" : testState === "error" ? "Try again" : "Send a test"}
+            </button>
+
+            {testOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setTestOpen(false)} aria-hidden />
+                <div role="dialog" aria-label="Send a test email"
+                  className="absolute right-0 top-full z-50 mt-1.5 w-72 rounded-[10px] border border-border bg-card p-3 shadow-lg">
+                  <label className="mb-1.5 block text-xs font-semibold text-foreground">Send a test to</label>
+                  <input
+                    type="email"
+                    autoFocus
+                    value={testEmail}
+                    onChange={(e) => setTestEmail(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") submitTest(); if (e.key === "Escape") setTestOpen(false); }}
+                    placeholder="Defaults to your email"
+                    className="w-full rounded-[7px] border border-border bg-background px-2.5 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30"
+                  />
+                  <div className="mt-2.5 flex items-center justify-end gap-2">
+                    <button type="button" onClick={() => setTestOpen(false)}
+                      className="rounded-[6px] px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
+                      Cancel
+                    </button>
+                    <button type="button" onClick={submitTest}
+                      className="inline-flex items-center gap-1.5 rounded-[6px] bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
+                      <Send className="h-3 w-3" /> Send test
+                    </button>
+                  </div>
+                  {testState === "error" && <p className="mt-2 text-xs text-destructive">Couldn&apos;t send, check the address and try again.</p>}
+                </div>
+              </>
             )}
-          >
-            {testState === "sending" ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              : testState === "sent" ? <Check className="h-3.5 w-3.5" />
-              : <Send className="h-3.5 w-3.5" />}
-            {testState === "sent" ? "Sent to you" : testState === "error" ? "Try again" : "Send me a test"}
-          </button>
+          </div>
         </div>
       </div>
 

@@ -25,6 +25,13 @@ export async function POST(req: NextRequest) {
   const key = typeof body.key === "string" ? body.key : null;
   if (!key) return NextResponse.json({ error: "key required" }, { status: 400 });
 
+  // Recipient: an admin-chosen address if given (validated), else the admin's own email.
+  const chosen = typeof body.to === "string" ? body.to.trim() : "";
+  if (chosen && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(chosen)) {
+    return NextResponse.json({ error: "That doesn't look like a valid email address" }, { status: 400 });
+  }
+  const recipient = chosen || u.email;
+
   const template = await getTemplate(key);
   if (!template) return NextResponse.json({ error: "Unknown template" }, { status: 404 });
 
@@ -40,9 +47,9 @@ export async function POST(req: NextRequest) {
   };
   const { subject, html } = renderEmail(tpl, scenario.values, { ctaUrl });
   try {
-    const ok = await sendRenderedEmail(u.email, `[Test] ${subject}`, html);
+    const ok = await sendRenderedEmail(recipient, `[Test] ${subject}`, html);
     if (!ok) return NextResponse.json({ error: "Email is not configured (RESEND_API_KEY missing)" }, { status: 503 });
-    return NextResponse.json({ ok: true, sentTo: u.email });
+    return NextResponse.json({ ok: true, sentTo: recipient });
   } catch (e) {
     console.error("[reminders/test] send failed:", e);
     return NextResponse.json({ error: "Failed to send test email" }, { status: 502 });
