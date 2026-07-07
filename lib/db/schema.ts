@@ -768,13 +768,15 @@ export const sentReminders = pgTable("sent_reminders", {
   id: uuid("id").primaryKey().defaultRandom(),
   entityId: text("entity_id").notNull(),      // proposalId OR instalmentId (namespaced by template_key)
   templateKey: text("template_key").notNull(),
-  stepNumber: integer("step_number").notNull(), // step index; -1 = the "notify rep" sentinel
+  stepKey: text("step_key"),                  // STABLE step id (dedup key); "rep_nudge" = the notify-rep sentinel
+  stepNumber: integer("step_number").notNull(), // step index at send time (display only, can drift on edits)
   recipientEmail: text("recipient_email"),
   status: text("status").notNull().default("sending"), // "sending" | "sent" | "failed"
   error: text("error"),
   sentAt: timestamp("sent_at").defaultNow().notNull(),
 }, (t) => ({
-  uniqStep: uniqueIndex("sent_reminders_entity_template_step_key").on(t.entityId, t.templateKey, t.stepNumber),
+  // Dedup by the STABLE step key so reordering/removing a step can never re-send.
+  uniqStep: uniqueIndex("sent_reminders_entity_template_stepkey_key").on(t.entityId, t.templateKey, t.stepKey),
 }));
 
 // ─── Booking automation ───────────────────────────────────────────────────────

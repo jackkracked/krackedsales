@@ -124,6 +124,7 @@ export function RemindersClient() {
       if (!d) return d;
       const last = d.schedule[d.schedule.length - 1];
       const next: ScheduleStep = {
+        id: crypto.randomUUID(), // stable id so dedup never re-sends after edits
         delayDays: (last?.delayDays ?? 0) + 3, anchor: anchorFor(d.key),
         subject: last?.subject ?? d.subject, bodyTemplate: last?.bodyTemplate ?? d.bodyTemplate, ctaLabel: last?.ctaLabel ?? d.ctaLabel,
       };

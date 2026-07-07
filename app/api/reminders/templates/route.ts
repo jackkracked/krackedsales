@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { db } from "@/lib/db";
 import { emailTemplates } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -30,8 +31,10 @@ export async function GET() {
 function cleanSchedule(input: unknown): ScheduleStep[] {
   if (!Array.isArray(input)) return [];
   return input.slice(0, 12).map((s) => {
-    const step = s as { delayDays?: unknown; anchor?: unknown; subject?: unknown; bodyTemplate?: unknown; ctaLabel?: unknown };
+    const step = s as { id?: unknown; delayDays?: unknown; anchor?: unknown; subject?: unknown; bodyTemplate?: unknown; ctaLabel?: unknown };
     return {
+      // Preserve the stable id; mint one for a brand-new step. Never reuse across steps.
+      id: typeof step.id === "string" && step.id ? step.id : crypto.randomUUID(),
       delayDays: Math.max(0, Math.min(365, Math.round(Number(step.delayDays) || 0))),
       anchor: step.anchor === "due" ? "due" : "sent",
       subject: typeof step.subject === "string" ? step.subject : "",

@@ -15,6 +15,9 @@
  * template's base subject/body/cta, so a step is never sent empty.
  */
 export interface ScheduleStep {
+  /** Stable id assigned at creation, never reused. Dedup keys on this, so removing or
+   *  reordering a step can never re-email a client who already received it. */
+  id: string;
   delayDays: number;
   anchor: "sent" | "due";
   subject?: string;
@@ -50,6 +53,7 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
     ctaLabel: "Review & sign",
     schedule: [
       {
+        id: "pr-1",
         delayDays: 2,
         anchor: "sent",
         subject: "A quick nudge on your proposal, {{client.firstName}}",
@@ -60,6 +64,7 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
         ctaLabel: "Review & sign",
       },
       {
+        id: "pr-2",
         delayDays: 5,
         anchor: "sent",
         subject: "Still keen to get you started, {{client.firstName}}",
@@ -85,6 +90,7 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
     ctaLabel: "Pay invoice",
     schedule: [
       {
+        id: "ir-1",
         delayDays: 0,
         anchor: "due",
         subject: "Your invoice for {{invoice.amount}} is due, {{client.firstName}}",
@@ -95,6 +101,7 @@ export const DEFAULT_TEMPLATES: DefaultTemplate[] = [
         ctaLabel: "Pay invoice",
       },
       {
+        id: "ir-2",
         delayDays: 3,
         anchor: "due",
         subject: "Following up on your {{invoice.amount}} invoice",

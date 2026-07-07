@@ -8,7 +8,7 @@ import type { ScheduleStep } from "@/lib/reminders/defaults";
 const ORD = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th", "11th", "12th"];
 
 interface StepActivity {
-  stepNumber: number;
+  stepKey: string;
   sent: number;
   failed: number;
   recipients: { email: string | null; sentAt: string; status: string }[];
@@ -27,7 +27,7 @@ export function ActivityPanel({ templateKey, schedule }: { templateKey: string; 
     refetchOnWindowFocus: true,
   });
 
-  const byStep = new Map((data?.steps ?? []).map((s) => [s.stepNumber, s]));
+  const byKey = new Map((data?.steps ?? []).map((s) => [s.stepKey, s]));
   const totalSent = (data?.steps ?? []).reduce((n, s) => n + s.sent, 0);
 
   return (
@@ -57,7 +57,7 @@ export function ActivityPanel({ templateKey, schedule }: { templateKey: string; 
       {!isError && totalSent > 0 && (
         <ol className="space-y-2.5">
           {schedule.map((s, i) => {
-            const a = byStep.get(i);
+            const a = byKey.get(s.id);
             const sent = a?.sent ?? 0;
             const failed = a?.failed ?? 0;
             return (

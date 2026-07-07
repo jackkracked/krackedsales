@@ -28,13 +28,16 @@ export async function GET(req: NextRequest) {
     .orderBy(desc(sentReminders.sentAt))
     .limit(2000);
 
-  // Group by step. step_number -1 is the "rep nudged" sentinel, surfaced separately.
-  const steps = new Map<number, { stepNumber: number; sent: number; failed: number; recipients: { email: string | null; sentAt: string; status: string }[] }>();
+  // Group by the STABLE step key so counts follow a step across sequence edits. The
+  // "rep_nudge" key is the rep-handoff sentinel, surfaced separately. The client maps
+  // each key to its current step via the schedule.
+  const byKey = new Map<string, { stepKey: string; sent: number; failed: number; recipients: { email: string | null; sentAt: string; status: string }[] }>();
   let repNudged = 0;
   for (const r of rows) {
-    if (r.stepNumber === -1) { if (r.status === "sent") repNudged++; continue; }
-    let g = steps.get(r.stepNumber);
-    if (!g) { g = { stepNumber: r.stepNumber, sent: 0, failed: 0, recipients: [] }; steps.set(r.stepNumber, g); }
+    const key = r.stepKey ?? `idx-${r.stepNumber}`;
+    if (key === "rep_nudge") { if (r.status === "sent") repNudged++; continue; }
+    let g = byKey.get(key);
+    if (!g) { g = { stepKey: key, sent: 0, failed: 0, recipients: [] }; byKey.set(key, g); }
     if (r.status === "sent") g.sent++;
     else if (r.status === "failed") g.failed++;
     if (g.recipients.length < 100) {
@@ -42,8 +45,5 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({
-    steps: [...steps.values()].sort((a, b) => a.stepNumber - b.stepNumber),
-    repNudged,
-  });
+  return NextResponse.json({ steps: [...byKey.values()], repNudged });
 }

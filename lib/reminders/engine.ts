@@ -76,18 +76,19 @@ interface StepTarget {
  * Claim + send ONE step. Returns "sent" | "skip" | "fail". The unique (entity, template,
  * step) row is the at-most-once guarantee; a failed row is re-claimed on a later run.
  */
-async function sendStep(t: StepTarget, stepNumber: number, tpl: RenderableTemplate, summary: RunSummary): Promise<void> {
+async function sendStep(t: StepTarget, stepNumber: number, stepKey: string, tpl: RenderableTemplate, summary: RunSummary): Promise<void> {
   const target = and(
     eq(sentReminders.entityId, t.entityId),
     eq(sentReminders.templateKey, t.template.key),
-    eq(sentReminders.stepNumber, stepNumber),
+    eq(sentReminders.stepKey, stepKey),
   );
 
-  // Claim the slot. If the row already exists and isn't a prior failure, skip.
+  // Claim the slot (dedup by the STABLE step key). If the row already exists and isn't a
+  // prior failure, skip.
   const claimed = await db()
     .insert(sentReminders)
-    .values({ entityId: t.entityId, templateKey: t.template.key, stepNumber, recipientEmail: t.recipient, status: "sending" })
-    .onConflictDoNothing({ target: [sentReminders.entityId, sentReminders.templateKey, sentReminders.stepNumber] })
+    .values({ entityId: t.entityId, templateKey: t.template.key, stepKey, stepNumber, recipientEmail: t.recipient, status: "sending" })
+    .onConflictDoNothing({ target: [sentReminders.entityId, sentReminders.templateKey, sentReminders.stepKey] })
     .returning({ id: sentReminders.id });
 
   let rowId: string;
@@ -138,6 +139,7 @@ async function processEntity(t: StepTarget, now: Date, summary: RunSummary): Pro
 
     for (let i = 0; i < schedule.length; i++) {
       const step = schedule[i];
+      const stepKey = step.id || `idx-${i}`; // stable id; legacy fallback for any pre-id row
       const dueStr = addDaysStr(refStr, Number(step.delayDays) || 0);
       if (today < dueStr) continue;
       // Each step has its own messaging; fall back to the template base when blank.
@@ -146,7 +148,7 @@ async function processEntity(t: StepTarget, now: Date, summary: RunSummary): Pro
         bodyTemplate: step.bodyTemplate || t.template.bodyTemplate,
         ctaLabel: step.ctaLabel ?? t.template.ctaLabel,
       };
-      await sendStep(t, i, tpl, summary);
+      await sendStep(t, i, stepKey, tpl, summary);
     }
 
     // After the last step's day, if the entity is still unresolved (it wouldn't be in
@@ -164,8 +166,8 @@ async function processEntity(t: StepTarget, now: Date, summary: RunSummary): Pro
 async function nudgeRep(t: StepTarget, summary: RunSummary): Promise<void> {
   const claimed = await db()
     .insert(sentReminders)
-    .values({ entityId: t.entityId, templateKey: t.template.key, stepNumber: -1, status: "sending" })
-    .onConflictDoNothing({ target: [sentReminders.entityId, sentReminders.templateKey, sentReminders.stepNumber] })
+    .values({ entityId: t.entityId, templateKey: t.template.key, stepKey: "rep_nudge", stepNumber: -1, status: "sending" })
+    .onConflictDoNothing({ target: [sentReminders.entityId, sentReminders.templateKey, sentReminders.stepKey] })
     .returning({ id: sentReminders.id });
   if (!claimed.length) return; // already nudged
 
