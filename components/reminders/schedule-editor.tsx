@@ -39,7 +39,7 @@ export function ScheduleEditor({
       </div>
 
       {schedule.length === 0 ? (
-        <p className="text-sm text-muted-foreground/70">No reminders scheduled. Add one below.</p>
+        <p className="text-sm text-muted-foreground">No reminders scheduled. Add one below.</p>
       ) : (
         <ol className="flex flex-wrap items-stretch gap-2">
           {schedule.map((step, i) => (
@@ -56,7 +56,7 @@ export function ScheduleEditor({
                   value={step.delayDays}
                   onChange={(e) => update(i, parseInt(e.target.value, 10) || 0)}
                   aria-label={`${ORD[i] ?? `Step ${i + 1}`} reminder delay in days`}
-                  className="w-12 rounded-[6px] border border-border bg-background px-2 py-1 text-center text-sm font-semibold tabular-nums text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30"
+                  className="w-12 rounded-[6px] border border-border bg-background px-2 py-1 text-center text-sm font-semibold tabular-nums text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 />
                 <span className="text-sm text-muted-foreground">
                   {step.delayDays === 1 ? "day" : "days"} {anchorPhrase(anchor)}
@@ -66,7 +66,7 @@ export function ScheduleEditor({
                 type="button"
                 onClick={() => remove(i)}
                 aria-label={`Remove ${ORD[i] ?? `step ${i + 1}`} reminder`}
-                className="ml-1 rounded-[5px] p-1 text-muted-foreground/50 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                className="ml-1 rounded-[5px] p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -81,7 +81,7 @@ export function ScheduleEditor({
         disabled={schedule.length >= 12}
         className={cn(
           "inline-flex items-center gap-1.5 rounded-[8px] border border-dashed border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground transition-colors",
-          "hover:border-primary/50 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40",
+          "hover:border-primary/50 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40",
         )}
       >
         <Plus className="h-3.5 w-3.5" />

@@ -116,7 +116,7 @@ export function RemindersClient() {
     },
     onMutate: () => setTestState("sending"),
     onSuccess: () => { setTestState("sent"); setTimeout(() => setTestState("idle"), 3000); },
-    onError: () => { setTestState("error"); setTimeout(() => setTestState("idle"), 3000); },
+    onError: () => setTestState("error"), // stays visible until the next attempt
   });
 
   const patch = useCallback((p: Partial<DraftTemplate>) => setDraft((d) => (d ? { ...d, ...p } : d)), []);
@@ -144,7 +144,7 @@ export function RemindersClient() {
             if (!items.length) return null;
             return (
               <div key={kind} className="mb-4">
-                <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   {kind === "reminder" ? "Reminders" : "Emails"}
                 </p>
                 <ul className="space-y-0.5">
@@ -156,15 +156,16 @@ export function RemindersClient() {
                         <button
                           type="button"
                           onClick={() => selectTemplate(t.key)}
+                          title={t.name}
                           className={cn(
-                            "flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left transition-colors",
+                            "flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
                             active ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted/60",
                           )}
                         >
                           <Icon className={cn("h-4 w-4 shrink-0", active ? "text-primary" : "text-muted-foreground")} />
                           <span className="flex-1 truncate text-sm font-medium">{t.name}</span>
                           {kind === "reminder" && (
-                            <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", t.enabled ? "bg-emerald-500" : "bg-muted-foreground/30")} />
+                            <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", t.enabled ? "bg-success" : "bg-muted-foreground/30")} />
                           )}
                         </button>
                       </li>

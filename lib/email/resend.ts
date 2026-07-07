@@ -84,10 +84,12 @@ export function emailShell(content: string): string {
 }
 
 export function ctaButton(href: string, label: string): string {
+  // Attribute-escape the href so a hostile/edited URL can never break out of the quotes.
+  const safeHref = href.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return `<table cellpadding="0" cellspacing="0" style="margin:32px auto;">
     <tr>
       <td style="background:#0f0f0f;border-radius:8px;">
-        <a href="${href}" style="display:inline-block;padding:14px 36px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:0.04em;text-transform:uppercase;">${label}</a>
+        <a href="${safeHref}" style="display:inline-block;padding:14px 36px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:0.04em;text-transform:uppercase;">${label}</a>
       </td>
     </tr>
   </table>`;

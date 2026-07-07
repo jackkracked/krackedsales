@@ -99,17 +99,18 @@ export function EmailEditor({
         <div className="flex shrink-0 items-center gap-3">
           {isReminder && (
             <label className="flex cursor-pointer items-center gap-2 text-sm">
-              <span className={cn("font-medium", draft.enabled ? "text-emerald-600" : "text-muted-foreground")}>
+              <span className={cn("font-medium", draft.enabled ? "text-success" : "text-muted-foreground")}>
                 {draft.enabled ? "On" : "Paused"}
               </span>
               <button
                 type="button"
                 role="switch"
                 aria-checked={draft.enabled}
+                aria-label={draft.enabled ? "Turn reminder off" : "Turn reminder on"}
                 onClick={() => onPatch({ enabled: !draft.enabled })}
                 className={cn(
-                  "relative h-5 w-9 rounded-full transition-colors",
-                  draft.enabled ? "bg-emerald-500" : "bg-muted-foreground/30",
+                  "relative h-5 w-9 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1",
+                  draft.enabled ? "bg-success" : "bg-muted-foreground/30",
                 )}
               >
                 <span className={cn(
@@ -119,27 +120,28 @@ export function EmailEditor({
               </button>
             </label>
           )}
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={!dirty || saving}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-[8px] px-4 py-2 text-sm font-semibold transition-colors",
-              dirty && !saving
-                ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                : "bg-muted text-muted-foreground",
-            )}
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : dirty ? <Save className="h-4 w-4" /> : <Check className="h-4 w-4" />}
-            {saving ? "Saving" : dirty ? "Save" : "Saved"}
-          </button>
+          {dirty || saving ? (
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 rounded-[8px] bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-70"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              {saving ? "Saving" : "Save"}
+            </button>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-2 py-2 text-sm font-medium text-success">
+              <Check className="h-4 w-4" /> Saved
+            </span>
+          )}
         </div>
       </div>
 
       <div className="flex-1 space-y-6 px-6 py-5">
         {/* Enabling-invoice warning */}
         {draft.key === "invoice_reminder" && draft.enabled && (
-          <div className="rounded-[8px] border border-amber-300/50 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800">
+          <div className="rounded-[8px] border border-warning/30 bg-warning-subtle px-3.5 py-2.5 text-xs text-warning">
             Stripe may still be sending its own invoice reminders. Turn those off in Stripe first, or clients could get two.
           </div>
         )}
@@ -165,15 +167,13 @@ export function EmailEditor({
           <div className="flex flex-wrap gap-3">
             {grouped.map(({ group, items }) => (
               <div key={group} className="flex flex-wrap items-center gap-1.5">
-                <span className="text-[11px] font-medium text-muted-foreground/60">{group}</span>
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{group}</span>
                 {items.map((v) => (
                   <button
                     key={v.token}
                     type="button"
-                    draggable
-                    onDragStart={(e) => e.dataTransfer.setData("text/plain", `{{${v.token}}}`)}
                     onClick={() => insertVariable(v.token)}
-                    className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                    className="cursor-pointer rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
                     {v.label}
                   </button>
@@ -189,13 +189,13 @@ export function EmailEditor({
           <div className="rounded-[8px] border border-border bg-background focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/30">
             <div className="flex items-center gap-1 border-b border-border px-2 py-1.5">
               <button type="button" onClick={() => editor?.chain().focus().toggleBold().run()}
-                aria-label="Bold"
-                className={cn("rounded p-1 text-muted-foreground hover:bg-muted", editor?.isActive("bold") && "bg-muted text-foreground")}>
+                aria-label="Bold" aria-pressed={editor?.isActive("bold")}
+                className={cn("rounded p-1 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40", editor?.isActive("bold") && "bg-muted text-foreground")}>
                 <Bold className="h-3.5 w-3.5" />
               </button>
               <button type="button" onClick={() => editor?.chain().focus().toggleItalic().run()}
-                aria-label="Italic"
-                className={cn("rounded p-1 text-muted-foreground hover:bg-muted", editor?.isActive("italic") && "bg-muted text-foreground")}>
+                aria-label="Italic" aria-pressed={editor?.isActive("italic")}
+                className={cn("rounded p-1 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40", editor?.isActive("italic") && "bg-muted text-foreground")}>
                 <Italic className="h-3.5 w-3.5" />
               </button>
             </div>
@@ -215,7 +215,7 @@ export function EmailEditor({
               className="w-full max-w-xs rounded-[8px] border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30"
               placeholder={draft.key === "invoice_reminder" ? "Pay invoice" : "Review & sign"}
             />
-            <p className="mt-1 text-xs text-muted-foreground/70">
+            <p className="mt-1 text-xs text-muted-foreground">
               The link is added automatically, so the button always works. Leave empty for no button.
             </p>
           </div>

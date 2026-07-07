@@ -17,7 +17,7 @@
  */
 import { db } from "@/lib/db";
 import { proposals, proposalInstalments, sentReminders, users, emailTemplates } from "@/lib/db/schema";
-import { and, eq, isNull, isNotNull, gte, inArray } from "drizzle-orm";
+import { and, or, eq, isNull, isNotNull, gte, lt, inArray } from "drizzle-orm";
 import { getAllTemplates } from "@/lib/reminders/store";
 import { resolveVars, type ResolveContext } from "@/lib/reminders/variables";
 import { renderEmail } from "@/lib/reminders/render";
@@ -55,8 +55,10 @@ function reminderFloor(activeFrom: Date | null, now: Date): Date {
   return activeFrom && activeFrom > lookback ? activeFrom : lookback;
 }
 function isHttpsUrl(u: string | null | undefined): u is string {
-  return !!u && /^https:\/\/\S+$/.test(u);
+  // Reject <>"' as well as whitespace so a URL can never break out of an href attribute.
+  return !!u && /^https:\/\/[^\s<>"']+$/.test(u);
 }
+const STALE_SENDING_MS = 15 * 60 * 1000;
 function scheduleOf(t: TemplateRow): ScheduleStep[] {
   return Array.isArray(t.schedule) ? (t.schedule as ScheduleStep[]) : [];
 }
@@ -92,11 +94,16 @@ async function sendStep(t: StepTarget, stepNumber: number, summary: RunSummary):
   if (claimed.length) {
     rowId = claimed[0].id;
   } else {
-    const [existing] = await db().select().from(sentReminders).where(target).limit(1);
-    if (!existing || existing.status !== "failed") { summary.skipped++; return; }
+    // Row exists: retry only if it previously FAILED, or was left "sending" by a crash
+    // mid-batch (older than the stale window). A fresh "sending"/"sent" row is skipped.
+    // The WHERE + RETURNING keeps this race-safe against a concurrent run.
+    const staleBefore = new Date(Date.now() - STALE_SENDING_MS);
     const reclaim = await db().update(sentReminders)
       .set({ status: "sending", error: null, recipientEmail: t.recipient, sentAt: new Date() })
-      .where(and(target, eq(sentReminders.status, "failed")))
+      .where(and(
+        target,
+        or(eq(sentReminders.status, "failed"), and(eq(sentReminders.status, "sending"), lt(sentReminders.sentAt, staleBefore))),
+      ))
       .returning({ id: sentReminders.id });
     if (!reclaim.length) { summary.skipped++; return; }
     rowId = reclaim[0].id;
@@ -160,7 +167,7 @@ async function nudgeRep(t: StepTarget, summary: RunSummary): Promise<void> {
     const isInvoice = t.template.key === "invoice_reminder";
     const client = t.ctx.proposal.contactName;
     const what = isInvoice ? "still hasn't paid" : "still hasn't signed";
-    const link = isInvoice ? (t.ctaUrl ?? "") : `${APP_URL}/p/${t.ctx.proposal.token}`;
+    const link = isInvoice ? (isHttpsUrl(t.ctaUrl) ? t.ctaUrl : "") : `${APP_URL}/p/${t.ctx.proposal.token}`;
     await postToSalesChannel(
       `${mention} *${client}* ${what} after all reminders. Might be worth a personal follow-up.${link ? `\n${link}` : ""}`,
     );
@@ -221,6 +228,9 @@ export async function runReminders(now: Date = new Date()): Promise<RunSummary> 
         isNotNull(proposalInstalments.dueDate),
         gte(proposalInstalments.dueDate, floor),
         isNotNull(proposals.contactEmail),
+        // Never dun a cancelled deal: lost/void proposals leave instalments "pending",
+        // so exclude any proposal that isn't in a live, money-owed state.
+        inArray(proposals.status, ["sent", "signed", "partial", "overdue"]),
       ));
     for (const { inst, prop } of instRows as { inst: InstalmentRow; prop: ProposalRow }[]) {
       if (!prop.contactEmail || !inst.dueDate) continue;

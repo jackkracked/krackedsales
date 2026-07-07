@@ -56,7 +56,7 @@ export function PreviewPane({
                   aria-label={`${d} preview`}
                   aria-pressed={device === d}
                   className={cn(
-                    "px-2 py-1 transition-colors",
+                    "px-2 py-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40",
                     device === d ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground",
                   )}
                 >
@@ -71,9 +71,9 @@ export function PreviewPane({
             onClick={onSendTest}
             disabled={testState === "sending"}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-[6px] border px-2.5 py-1 text-xs font-semibold transition-colors",
+              "inline-flex items-center gap-1.5 rounded-[6px] border px-2.5 py-1 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
               testState === "sent"
-                ? "border-emerald-500/40 text-emerald-600"
+                ? "border-success/40 text-success"
                 : testState === "error"
                 ? "border-destructive/40 text-destructive"
                 : "border-border text-foreground hover:bg-muted/60",
@@ -88,9 +88,9 @@ export function PreviewPane({
       </div>
 
       {/* Inbox-style subject line */}
-      <div className="border-b border-border bg-muted/30 px-5 py-2.5">
+      <div className="border-b border-border bg-muted/30 px-5 py-2.5" aria-live="polite">
         <p className="truncate text-sm font-semibold text-foreground">
-          {subject || <span className="text-muted-foreground/50">No subject</span>}
+          {subject || <span className="text-muted-foreground">No subject</span>}
         </p>
         <p className="truncate text-xs text-muted-foreground">Kracked Retention · proposals@krackedretention.com</p>
       </div>
@@ -98,7 +98,7 @@ export function PreviewPane({
       {/* The rendered email */}
       <div className="relative flex-1 overflow-auto bg-[#f0ede8] p-4">
         {loading && (
-          <div className="absolute right-6 top-6 z-10 flex items-center gap-1.5 rounded-full bg-background/90 px-2.5 py-1 text-xs text-muted-foreground shadow-sm">
+          <div role="status" className="absolute right-6 top-6 z-10 flex items-center gap-1.5 rounded-full bg-background/90 px-2.5 py-1 text-xs text-muted-foreground shadow-sm">
             <Loader2 className="h-3 w-3 animate-spin" /> updating
           </div>
         )}
