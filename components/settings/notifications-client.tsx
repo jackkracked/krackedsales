@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Save, Loader2, Check, AlertCircle } from "lucide-react";
+import { Save, Loader2, Check, AlertCircle, Hash, FileText, PhoneMissed, PhoneCall, CheckSquare, Bell } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
 interface NotifVar { token: string; label: string; sample: string }
@@ -18,17 +18,22 @@ const RECIPIENT_OPTS: { value: Rule["recipients"]; label: string }[] = [
   { value: "gage", label: "Gage only" },
 ];
 
+const RULE_ICON: Record<string, React.ElementType> = {
+  proposal_stalling: FileText,
+  call_outcome_missing: PhoneMissed,
+  call_upcoming: PhoneCall,
+  task_due: CheckSquare,
+};
+
 function interpolate(t: string, vars: NotifVar[]): string {
   const map = Object.fromEntries(vars.map((v) => [v.token, v.sample]));
   return t.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_m, k) => map[k] ?? "");
 }
-
 function mentionPreview(recipients: Rule["recipients"], vars: NotifVar[]): string {
-  const rep = vars.find((v) => v.token === "rep.name")?.sample ?? "Alice";
-  const repFirst = rep.split(" ")[0];
-  if (recipients === "rep") return `@${repFirst}`;
+  const rep = (vars.find((v) => v.token === "rep.name")?.sample ?? "Alice").split(" ")[0];
+  if (recipients === "rep") return `@${rep}`;
   if (recipients === "gage") return `@Gage`;
-  return `@${repFirst} @Gage`;
+  return `@${rep}  @Gage`;
 }
 
 export function NotificationsClient() {
@@ -37,7 +42,7 @@ export function NotificationsClient() {
     queryFn: async () => { const r = await fetch("/api/notifications/rules"); if (!r.ok) throw new Error("Failed"); return r.json(); },
   });
 
-  if (isLoading) return <div className="space-y-4">{[0, 1, 2, 3].map((i) => <div key={i} className="h-40 animate-pulse rounded-[12px] bg-muted/40" />)}</div>;
+  if (isLoading) return <div className="space-y-5">{[0, 1, 2, 3].map((i) => <div key={i} className="h-56 animate-pulse rounded-[14px] bg-muted/40" />)}</div>;
   if (isError) return (
     <div className="flex items-center gap-2 rounded-[8px] bg-destructive/8 px-3 py-2.5 text-destructive">
       <AlertCircle className="h-4 w-4" /><span className="text-sm">Couldn&apos;t load notifications.</span>
@@ -45,7 +50,7 @@ export function NotificationsClient() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {(data?.rules ?? []).map((rule) => (
         <NotificationCard key={rule.key} rule={rule} variables={data!.variables[rule.key] ?? []} />
       ))}
@@ -59,8 +64,8 @@ function NotificationCard({ rule, variables }: { rule: Rule; variables: NotifVar
   const [enabled, setEnabled] = useState(rule.enabled);
   const [recipients, setRecipients] = useState<Rule["recipients"]>(rule.recipients);
   const [message, setMessage] = useState(rule.messageTemplate);
-
   const dirty = enabled !== rule.enabled || recipients !== rule.recipients || message !== rule.messageTemplate;
+  const Icon = RULE_ICON[rule.key] ?? Bell;
 
   const save = useMutation({
     mutationFn: async () => {
@@ -79,18 +84,25 @@ function NotificationCard({ rule, variables }: { rule: Rule; variables: NotifVar
     if (!el) { setMessage((m) => `${m}{{${token}}}`); return; }
     const start = el.selectionStart ?? message.length;
     const end = el.selectionEnd ?? start;
-    const next = `${message.slice(0, start)}{{${token}}}${message.slice(end)}`;
-    setMessage(next);
+    setMessage(`${message.slice(0, start)}{{${token}}}${message.slice(end)}`);
     requestAnimationFrame(() => { el.focus(); const p = start + token.length + 4; el.setSelectionRange(p, p); });
   }
 
   return (
-    <section className={cn("rounded-[12px] border bg-card transition-colors", enabled ? "border-border" : "border-border/60 bg-muted/20")}>
+    <section
+      data-r10n-settings-card
+      className={cn("overflow-hidden rounded-[14px] border bg-card transition-colors", enabled ? "border-border shadow-sm" : "border-border/60 bg-muted/20")}
+    >
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
-        <div className="min-w-0">
-          <h2 className="text-sm font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{rule.name}</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{rule.description}</p>
+      <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
+        <div className="flex items-start gap-3 min-w-0">
+          <span className={cn("mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px]", enabled ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
+            <Icon className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-sm font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }} data-r10n-settings-cardtitle>{rule.name}</h2>
+            <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{rule.description}</p>
+          </div>
         </div>
         <label className="flex shrink-0 cursor-pointer items-center gap-2 text-sm">
           <span className={cn("font-medium", enabled ? "text-success" : "text-muted-foreground")}>{enabled ? "On" : "Off"}</span>
@@ -102,16 +114,16 @@ function NotificationCard({ rule, variables }: { rule: Rule; variables: NotifVar
         </label>
       </div>
 
-      <div className="grid gap-5 px-5 py-4 lg:grid-cols-2">
-        {/* Left: controls */}
-        <div className="space-y-4">
-          {/* Recipients */}
+      {/* Body: balanced two columns of equal height */}
+      <div className="grid items-stretch lg:grid-cols-2">
+        {/* Left: setup */}
+        <div className="space-y-5 px-6 py-5 lg:border-r lg:border-border">
           <div>
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Who gets pinged</label>
+            <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Who gets pinged</label>
             <div className="inline-flex overflow-hidden rounded-[8px] border border-border">
               {RECIPIENT_OPTS.map((o) => (
                 <button key={o.value} type="button" onClick={() => setRecipients(o.value)} aria-pressed={recipients === o.value}
-                  className={cn("px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40",
+                  className={cn("px-3.5 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40",
                     recipients === o.value ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted/60")}>
                   {o.label}
                 </button>
@@ -119,9 +131,8 @@ function NotificationCard({ rule, variables }: { rule: Rule; variables: NotifVar
             </div>
           </div>
 
-          {/* Message */}
           <div>
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Message</label>
+            <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Message</label>
             <div className="mb-2 flex flex-wrap gap-1.5">
               {variables.map((v) => (
                 <button key={v.token} type="button" onClick={() => insertToken(v.token)}
@@ -130,48 +141,56 @@ function NotificationCard({ rule, variables }: { rule: Rule; variables: NotifVar
                 </button>
               ))}
             </div>
-            <textarea ref={taRef} value={message} onChange={(e) => setMessage(e.target.value)} rows={4}
-              className="w-full resize-y rounded-[8px] border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30"
+            <textarea ref={taRef} value={message} onChange={(e) => setMessage(e.target.value)} rows={5}
+              className="w-full resize-y rounded-[8px] border border-border bg-background px-3 py-2.5 text-sm leading-relaxed text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30"
               placeholder="What the Slack message says…" />
           </div>
         </div>
 
-        {/* Right: live Slack preview */}
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Slack preview</label>
-          <div className="rounded-[10px] border border-border bg-white p-4">
-            <div className="flex gap-2.5">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] bg-[#0A0A0B]">
-                <span className="font-bold text-white" style={{ fontFamily: "var(--font-heading)" }}>K</span>
+        {/* Right: a real Slack window, filling the column height */}
+        <div className="flex flex-col bg-muted/25 px-6 py-5">
+          <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Preview in Slack</label>
+          <div className="flex min-h-[220px] flex-1 flex-col overflow-hidden rounded-[12px] border border-black/10 bg-white shadow-sm">
+            {/* channel bar */}
+            <div className="flex items-center gap-1.5 border-b border-black/5 px-4 py-2.5">
+              <Hash className="h-3.5 w-3.5 text-[#8a8a8a]" />
+              <span className="text-[13px] font-bold text-[#1D1C1D]">kracked-ai-sales</span>
+            </div>
+            {/* message */}
+            <div className="flex flex-1 items-start gap-2.5 px-4 py-4">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[#0A0A0B]">
+                <span className="text-base font-bold text-white" style={{ fontFamily: "var(--font-heading)" }}>K</span>
               </div>
-              <div className="min-w-0">
-                <p className="text-[13px] font-bold text-[#1D1C1D]">Kracked AI <span className="ml-1 rounded bg-[#e8e8e8] px-1 py-0.5 text-[9px] font-semibold text-[#616061] align-middle">APP</span></p>
-                <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-[#1D1C1D]">
-                  <span className="font-semibold text-[#1264A3]">{mentionPreview(recipients, variables)}</span>{" "}
+              <div className="min-w-0 pt-0.5">
+                <p className="mb-0.5 text-[13px] font-bold text-[#1D1C1D]">
+                  Kracked AI <span className="ml-1 rounded bg-[#e8e8e8] px-1 py-px text-[9px] font-semibold uppercase text-[#616061] align-[1px]">App</span>
+                  <span className="ml-1.5 text-[11px] font-normal text-[#9a9a9a]">just now</span>
+                </p>
+                <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-[#1D1C1D]">
+                  <span className="rounded bg-[#1264A3]/10 px-1 font-semibold text-[#1264A3]">{mentionPreview(recipients, variables)}</span>{"  "}
                   {interpolate(message, variables)}
                 </p>
               </div>
             </div>
           </div>
-          <p className="mt-1.5 text-xs text-muted-foreground">Posts to #kracked-ai-sales. Sample data shown.</p>
+          <p className="mt-2 text-[11px] text-muted-foreground">Shown with sample data.</p>
         </div>
       </div>
 
-      {/* Footer: save */}
-      {(dirty || save.isPending) && (
-        <div className="flex items-center justify-end gap-3 border-t border-border px-5 py-3">
+      {/* Footer: save / saved */}
+      {(dirty || save.isPending) ? (
+        <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-3">
           {save.isError && <span className="text-xs text-destructive">{(save.error as Error).message}</span>}
           <button type="button" onClick={() => save.mutate()} disabled={save.isPending}
             className="inline-flex items-center gap-1.5 rounded-[8px] bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-70">
-            {save.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{save.isPending ? "Saving" : "Save"}
+            {save.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{save.isPending ? "Saving" : "Save changes"}
           </button>
         </div>
-      )}
-      {!dirty && !save.isPending && save.isSuccess && (
-        <div className="flex items-center justify-end gap-1.5 border-t border-border px-5 py-2 text-xs font-medium text-success">
+      ) : save.isSuccess ? (
+        <div className="flex items-center justify-end gap-1.5 border-t border-border px-6 py-2.5 text-xs font-medium text-success">
           <Check className="h-3.5 w-3.5" /> Saved
         </div>
-      )}
+      ) : null}
     </section>
   );
 }
