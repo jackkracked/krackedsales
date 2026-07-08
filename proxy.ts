@@ -19,6 +19,7 @@ const PUBLIC_PATHS = [
   "/privacy",
   "/p/",                        // Public proposal signing pages — no auth required
   "/api/proposals/public/",    // API called by the public signing page — no auth required
+  "/api/proposals/track/",     // Email-open pixel + tracked click link — hit by email clients/prospects
   "/board/",                    // Public demo boards (tokenized) — no auth required
   "/api/boards/public/",       // API called by the public demo board — no auth required
   "/api/auth/login",

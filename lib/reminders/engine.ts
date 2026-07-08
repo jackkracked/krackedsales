@@ -121,7 +121,9 @@ async function sendStep(t: StepTarget, stepNumber: number, stepKey: string, tpl:
 
   try {
     const values = resolveVars(t.ctx);
-    const { subject, html } = renderEmail(tpl, values, { ctaUrl: t.ctaUrl });
+    // Open-tracking pixel on proposal reminders (classified server-side).
+    const pixelUrl = t.template.key === "proposal_reminder" ? `${APP_URL}/api/proposals/track/open/${t.ctx.proposal.token}` : null;
+    const { subject, html } = renderEmail(tpl, values, { ctaUrl: t.ctaUrl, pixelUrl });
     await sendRenderedEmail(t.recipient, subject, html);
     await db().update(sentReminders).set({ status: "sent", sentAt: new Date() }).where(eq(sentReminders.id, rowId));
     summary.sent++;
@@ -131,7 +133,8 @@ async function sendStep(t: StepTarget, stepNumber: number, stepKey: string, tpl:
     if (t.template.key === "proposal_reminder") {
       await dispatchNotification("proposal_stalling", {
         rep: t.rep ?? null,
-        values: { ...values, "reminder.step": String(stepNumber + 1), "proposal.link": t.ctaUrl ?? `${APP_URL}/p/${t.ctx.proposal.token}` },
+        // Direct link for the rep (not the tracked one — a rep click shouldn't pollute prospect tracking).
+        values: { ...values, "reminder.step": String(stepNumber + 1), "proposal.link": `${APP_URL}/p/${t.ctx.proposal.token}` },
       });
     }
   } catch (e) {
@@ -233,7 +236,8 @@ export async function runReminders(now: Date = new Date()): Promise<RunSummary> 
         entityId: p.id,
         referenceDate: p.sentAt,
         recipient: p.contactEmail,
-        ctaUrl: `${APP_URL}/p/${p.token}`,
+        // Tracked link (logs a "clicked" event, then redirects to /p/{token}).
+        ctaUrl: `${APP_URL}/api/proposals/track/${p.token}`,
         ctx: { proposal: p, repName: repNameFor(p) },
         rep: repFor(p),
       }, now, summary);

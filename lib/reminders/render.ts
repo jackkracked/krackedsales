@@ -36,7 +36,7 @@ export interface RenderResult {
 export function renderEmail(
   template: RenderableTemplate,
   values: Record<string, string>,
-  opts: { ctaUrl: string | null },
+  opts: { ctaUrl: string | null; pixelUrl?: string | null },
 ): RenderResult {
   const subject = fillTokens(template.subject, values, { escape: false });
   let body = fillTokens(template.bodyTemplate, values, { escape: true });
@@ -44,6 +44,10 @@ export function renderEmail(
   const label = fillTokens(template.ctaLabel, values, { escape: true }).trim();
   if (label && opts.ctaUrl) {
     body += ctaButton(opts.ctaUrl, label);
+  }
+  // Invisible open-tracking pixel (classified server-side; Apple pre-fetch is filtered out).
+  if (opts.pixelUrl) {
+    body += `<img src="${opts.pixelUrl}" width="1" height="1" alt="" style="display:none;width:1px;height:1px;" />`;
   }
 
   return { subject, html: emailShell(body) };

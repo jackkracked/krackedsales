@@ -684,6 +684,26 @@ export const proposals = pgTable("proposals", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+/**
+ * Prospect engagement on a proposal, for the tracking timeline. The reliable signals
+ * are `viewed` (they loaded the /p/{token} page, server-side, unspoofable) and `clicked`
+ * (they clicked the email link). `email_opened` is the pixel, kept but CLASSIFIED so
+ * Apple Mail's pre-fetch never counts as a real open (classification: "genuine" =
+ * trustworthy human open, "apple_proxy"/"prefetch" = delivered-not-opened).
+ */
+export const proposalEvents = pgTable("proposal_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  proposalId: uuid("proposal_id").notNull(),
+  token: text("token"),
+  type: text("type").notNull(), // "viewed" | "clicked" | "email_opened"
+  classification: text("classification"), // email_opened only: "genuine" | "apple_proxy" | "prefetch"
+  ip: text("ip"),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  byProposal: index("proposal_events_proposal_id_idx").on(t.proposalId),
+}));
+
 export const proposalInstalments = pgTable("proposal_instalments", {
   id: uuid("id").primaryKey().defaultRandom(),
   proposalId: uuid("proposal_id").notNull().references(() => proposals.id, { onDelete: "cascade" }),

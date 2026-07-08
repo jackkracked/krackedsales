@@ -33,11 +33,13 @@ export async function renderTransactional(
     }
 
     const values = resolveVars({ proposal, repName });
-    const ctaUrl = key === "proposal_sent" ? `${APP_URL}/p/${proposal.token}` : proposal.stripeHostedUrl ?? null;
+    // proposal_sent: tracked link + open pixel so first-touch views/clicks/opens are captured.
+    const ctaUrl = key === "proposal_sent" ? `${APP_URL}/api/proposals/track/${proposal.token}` : proposal.stripeHostedUrl ?? null;
+    const pixelUrl = key === "proposal_sent" ? `${APP_URL}/api/proposals/track/open/${proposal.token}` : null;
     return renderEmail(
       { subject: template.subject, bodyTemplate: template.bodyTemplate, ctaLabel: template.ctaLabel },
       values,
-      { ctaUrl },
+      { ctaUrl, pixelUrl },
     );
   } catch (e) {
     console.error(`[reminders/transactional] render(${key}) failed, falling back:`, e);

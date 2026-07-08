@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { proposals, proposalInstalments, agreementTemplates } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { logProposalEvent } from "@/lib/proposals/track";
 
 export const dynamic = "force-dynamic";
 
@@ -125,6 +126,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
 
     if (!proposal) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
+
+    // Log a reliable "viewed" event — the prospect actually loaded the proposal page.
+    // Skip previews and any request carrying a staff session cookie (internal views).
+    const isStaff = !!req.cookies.get("kracked_session");
+    if (!preview && !isStaff) {
+      logProposalEvent(proposal.id, token, "viewed", req).catch(() => {});
     }
 
     // Return status info for non-sent proposals (unless preview mode)
