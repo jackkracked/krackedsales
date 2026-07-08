@@ -759,6 +759,26 @@ export const emailTemplates = pgTable("email_templates", {
 });
 
 /**
+ * Internal Slack notification rules — the "Notifications control center". One row per
+ * notification type; each is toggleable, its message is an editable Slack-mrkdwn template
+ * with {{variables}}, and it targets the rep and/or Gage. New notification types are just
+ * new rows (seeded from code defaults). Reuses the reminders interpolation engine.
+ */
+export const notificationRules = pgTable("notification_rules", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  key: text("key").notNull().unique(),
+    // "proposal_stalling" | "call_outcome_missing" | "call_upcoming" | "task_due"
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  recipients: text("recipients").notNull().default("both"), // "rep" | "gage" | "both"
+  messageTemplate: text("message_template").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  updatedBy: uuid("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/**
  * At-most-once ledger for automated reminders. One row per (entity, template, step)
  * actually sent, so a daily cron re-run / retry / double-fire can NEVER re-email a
  * client. entity_id is a proposalId (proposal reminders) or an instalmentId (invoice

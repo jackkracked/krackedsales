@@ -61,6 +61,50 @@ Big one. Client-facing money comms. Must be phenomenally beautiful, on-brand (lo
 ## 7. Gate 5 (template-injection sanitize + auth) + Gate 6 (dedup/no-double-send/additive) + code review -> deploy.
 ## Need: Gage Flesher's Slack member ID for a real <@ID> mention (fetch via Slack users.lookupByEmail).
 
+# ★ TASK (2026-07-08): Rep/Gage Slack reminders + proposal tracking + call-outcome reminders (PLAN)
+Research done (Resend has built-in open/click tracking; email-OPEN is ~80% false positives via Apple MPP
+so page-view is the reliable signal). Deliverable = plan for Jack approval, THEN build + GIFs to #kracked-software.
+
+## F1 — Slack reminders to the REP + Gage (alongside customer reminders)
+- When a reminder sends, ALSO post to #kracked-ai-sales @-mentioning the proposal's REP (createdBy->users.email->
+  slackMentionForEmail) AND @Gage. Add slackMentionForRep(name,email): email lookup, fallback to users.list name
+  match (reps named same in Slack). email_templates.notifyRep already exists; reword UI toggle.
+- CADENCE DECISION (ask): per-send vs first+last escalation vs daily digest. (noise control)
+
+## F2 — Proposal tracking (VIEW/CLICK reliable; email-open noisy)
+- NEW table proposal_events (proposalId, token, type: sent|viewed|clicked|email_opened|signed|paid, ip, ua, meta, at).
+- VIEWED (star, reliable): log server-side in app/api/proposals/public/[token] GET on page load.
+- CLICKED (reliable): email CTA -> /api/proposals/track/[token] (logs clicked) -> 302 to /p/{token}.
+- EMAIL_OPENED (approximate, optional): Resend webhook /api/webhooks/resend (svix-verified) + tag emails w/ proposal_id;
+  label "approx" in UI (Apple MPP). ASK: include it or skip.
+- UI: (a) proposals list = compact engagement indicator per row (Sent->Viewed->Signed + last-seen); (b) detail
+  slide-over = per-prospect ACTIVITY TIMELINE (sent/viewed×N/clicked/signed/paid w/ timestamps); (c) optional recent-activity feed.
+
+## F3 — Call-outcome + task reminders to the rep (Slack)
+- NEW cron /api/cron/rep-reminders (daily, or 2×): find TAKEN calls (isTakenCall) >2h ago w/ NO disposition
+  (LEFT JOIN call_dispositions IS NULL) -> Slack @rep "set the outcome for {contact}" + dashboard link. Dedup via a
+  ledger (reuse sent_reminders idiom or notifications entityId). ASK scope: just outcome-missing vs + due-soon/task-due.
+
+## DECISIONS (Jack, 2026-07-08): F1 cadence = PER-SEND (rep+Gage each reminder). Email-open = YES but
+## ACCURATE (research done): pixel logs IP+UA+timing -> CLASSIFY prefetch (Apple 17.0.0.0/8 ASN, <Ns after
+## send, generic Mozilla UA => "inbox-delivered", NOT open) vs GENUINE (later / non-Apple IP / real UA /
+## repeat => real open); page-view + click are certain ground truth that trump the pixel. F3 = all 3 triggers
+## (outcome-missing, call-soon, task-due) + a NOTIFICATIONS CONTROL CENTER in Settings.
+
+## NOTIFICATIONS FRAMEWORK (new, reuses reminders template/interpolate/preview engine):
+## - table notification_rules: key, name, enabled, channel('slack'), recipients('rep'|'gage'|'both'),
+##   message_template (Slack mrkdwn + {{vars}}), updated_by/at. Seed 4 rules (proposal_stalling,
+##   call_outcome_missing, call_upcoming, task_due). Extensible (add rows).
+## - Settings -> Notifications page: per-rule toggle + editable message (vars + live Slack preview) + recipients.
+## - lib/notifications/: dispatch(ruleKey, ctx) -> resolve recipients (slackMentionForRep name/email fallback +
+##   Gage) -> interpolate -> postToSalesChannel. Dedup where needed.
+
+## BUILD ORDER: 1 notif framework+settings page · 2 F1 rep+Gage per-send · 3 F2 tracking backend
+## (proposal_events + viewed/clicked/classified-pixel + Resend tag/webhook optional) · 4 F2 tracking UI
+## (list engagement indicator + per-prospect timeline) · 5 F3 rep reminders crons · 6 sweep+gates+deploy+GIFs.
+## GATES: /impeccable shape both UIs (notifications center + tracking timeline) before JSX -> craft -> polish
+## -> harden -> Gate5(pixel/webhook auth, no open-redirect on track link) + Gate6 -> code review -> deploy.
+
 ## STATUS 2026-07-07: v1 SHIPPED + swept + deployed. Engine (dedup/floor/no-Stripe/escaping) + 3-zone
 ## editor + daily cron LIVE. Proposal reminders ON (floor verified: 0 blast of 12 sent-unsigned).
 ## Invoice PAUSED. Reviews passed (staff-eng plan + security SHIP-WITH-FIXES all applied incl. lost/void

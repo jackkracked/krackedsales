@@ -23,6 +23,7 @@ import { resolveVars, type ResolveContext } from "@/lib/reminders/variables";
 import { renderEmail, type RenderableTemplate } from "@/lib/reminders/render";
 import { sendRenderedEmail } from "@/lib/email/resend";
 import { postToSalesChannel, slackMentionForEmail } from "@/lib/proposals/slack-notify";
+import { dispatchNotification } from "@/lib/notifications/dispatch";
 import type { ScheduleStep } from "@/lib/reminders/defaults";
 
 type TemplateRow = typeof emailTemplates.$inferSelect;
@@ -70,6 +71,7 @@ interface StepTarget {
   recipient: string;
   ctaUrl: string | null;
   ctx: ResolveContext;
+  rep?: { name: string | null; email: string | null } | null;
 }
 
 /**
@@ -123,6 +125,15 @@ async function sendStep(t: StepTarget, stepNumber: number, stepKey: string, tpl:
     await sendRenderedEmail(t.recipient, subject, html);
     await db().update(sentReminders).set({ status: "sent", sentAt: new Date() }).where(eq(sentReminders.id, rowId));
     summary.sent++;
+
+    // F1: alert the rep + Gage in Slack that this proposal is stalling (per-send).
+    // Best-effort, gated by the notification rule's own on/off. Proposal reminders only.
+    if (t.template.key === "proposal_reminder") {
+      await dispatchNotification("proposal_stalling", {
+        rep: t.rep ?? null,
+        values: { ...values, "reminder.step": String(stepNumber + 1), "proposal.link": t.ctaUrl ?? `${APP_URL}/p/${t.ctx.proposal.token}` },
+      });
+    }
   } catch (e) {
     await db().update(sentReminders).set({ status: "failed", error: String(e).slice(0, 500) }).where(eq(sentReminders.id, rowId));
     summary.failures++;
@@ -151,9 +162,10 @@ async function processEntity(t: StepTarget, now: Date, summary: RunSummary): Pro
       await sendStep(t, i, stepKey, tpl, summary);
     }
 
-    // After the last step's day, if the entity is still unresolved (it wouldn't be in
-    // the query otherwise), nudge the rep once. step_number -1 is the dedup sentinel.
-    if (t.template.notifyRep) {
+    // After the last step's day, if still unresolved, nudge the rep once (dedup sentinel
+    // step_number -1). Proposal reminders are handled per-send by the "proposal_stalling"
+    // notification rule (F1), so this final nudge is only for invoice reminders.
+    if (t.template.notifyRep && t.template.key !== "proposal_reminder") {
       const lastDue = addDaysStr(refStr, Number(schedule[schedule.length - 1].delayDays) || 0);
       if (today >= lastDue) await nudgeRep(t, summary);
     }
@@ -194,10 +206,14 @@ export async function runReminders(now: Date = new Date()): Promise<RunSummary> 
   const templates = await getAllTemplates();
   const byKey = new Map(templates.map((t) => [t.key, t]));
 
-  // rep-name lookup for context / value resolution
-  const userRows = await db().select({ id: users.id, name: users.name }).from(users);
-  const userName = new Map(userRows.map((u) => [u.id, u.name] as const));
-  const repNameFor = (p: ProposalRow) => (p.createdBy ? userName.get(p.createdBy) ?? null : null);
+  // rep lookup for context / value resolution + Slack @mention
+  const userRows = await db().select({ id: users.id, name: users.name, email: users.email }).from(users);
+  const userById = new Map(userRows.map((u) => [u.id, u] as const));
+  const repNameFor = (p: ProposalRow) => (p.createdBy ? userById.get(p.createdBy)?.name ?? null : null);
+  const repFor = (p: ProposalRow) => {
+    const u = p.createdBy ? userById.get(p.createdBy) : null;
+    return u ? { name: u.name, email: u.email } : null;
+  };
 
   // ── Proposal reminders (sent, still unsigned) ────────────────────────────────
   const propTpl = byKey.get("proposal_reminder");
@@ -219,6 +235,7 @@ export async function runReminders(now: Date = new Date()): Promise<RunSummary> 
         recipient: p.contactEmail,
         ctaUrl: `${APP_URL}/p/${p.token}`,
         ctx: { proposal: p, repName: repNameFor(p) },
+        rep: repFor(p),
       }, now, summary);
     }
   }

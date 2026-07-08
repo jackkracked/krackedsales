@@ -132,6 +132,52 @@ export async function slackMentionForEmail(email: string, fallbackName: string):
   }
 }
 
+/**
+ * Resolve a rep's Slack mention: try their email first (users.lookupByEmail), then fall
+ * back to matching their NAME against the workspace directory (reps are named identically
+ * in Slack). The directory is fetched once and cached per process. Returns a plain "@name"
+ * only if Slack is unconfigured or nothing matches, so the message always reads sensibly.
+ */
+let _dirCache: { at: number; byName: Map<string, string> } | null = null;
+
+async function slackDirectory(botToken: string): Promise<Map<string, string>> {
+  if (_dirCache && Date.now() - _dirCache.at < 10 * 60 * 1000) return _dirCache.byName;
+  const byName = new Map<string, string>();
+  try {
+    let cursor = "";
+    for (let i = 0; i < 10; i++) {
+      const url = `https://slack.com/api/users.list?limit=200${cursor ? `&cursor=${cursor}` : ""}`;
+      const json = await fetch(url, { headers: { Authorization: `Bearer ${botToken}` } }).then((r) => r.json());
+      if (!json.ok) break;
+      for (const m of json.members ?? []) {
+        if (m.deleted || m.is_bot) continue;
+        const names = [m.profile?.real_name, m.profile?.display_name, m.real_name, m.name].filter(Boolean);
+        for (const n of names) byName.set(String(n).trim().toLowerCase(), m.id);
+      }
+      cursor = json.response_metadata?.next_cursor || "";
+      if (!cursor) break;
+    }
+  } catch { /* best effort */ }
+  _dirCache = { at: Date.now(), byName };
+  return byName;
+}
+
+export async function slackMentionForRep(name: string | null | undefined, email: string | null | undefined): Promise<string> {
+  const slack = await getEnabledSlack();
+  const fallback = `@${(name || "rep").split(" ")[0]}`;
+  if (!slack) return fallback;
+  if (email) {
+    const byEmail = await slackMentionForEmail(email, name || "rep");
+    if (byEmail.startsWith("<@")) return byEmail; // real id resolved
+  }
+  if (name) {
+    const dir = await slackDirectory(slack.botToken);
+    const id = dir.get(name.trim().toLowerCase());
+    if (id) return `<@${id}>`;
+  }
+  return fallback;
+}
+
 /** Post to Slack. Returns true on success; logs and returns false on any failure. */
 export async function postToSalesChannel(text: string): Promise<boolean> {
   const slack = await getEnabledSlack();
