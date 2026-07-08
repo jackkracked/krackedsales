@@ -21,7 +21,7 @@ export default async function NotificationsSettingsPage() {
 
   return (
     <div className="h-full overflow-y-auto bg-background">
-      <div className="mx-auto max-w-4xl px-6 py-8">
+      <div className="px-6 py-8">
         <Link href="/settings" className="mb-5 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground">
           <ArrowLeft className="h-3.5 w-3.5" /> Back to settings
         </Link>

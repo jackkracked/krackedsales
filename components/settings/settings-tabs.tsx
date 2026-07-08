@@ -120,9 +120,7 @@ function SettingsTabsInner() {
 
         {activeTab === "notifications" && (
           <div className="p-6">
-            <div className="max-w-4xl">
-              <NotificationsClient />
-            </div>
+            <NotificationsClient />
           </div>
         )}
 
