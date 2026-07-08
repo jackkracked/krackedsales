@@ -2,9 +2,10 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { Users, DollarSign, Zap, BarChart2, CalendarDays } from "lucide-react";
+import { Users, DollarSign, Zap, BarChart2, CalendarDays, BellRing } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { TeamSettings } from "@/components/settings/team-settings";
+import { NotificationsClient } from "@/components/settings/notifications-client";
 import { SoftwareCosts } from "@/components/settings/software-costs";
 import { CostSettings } from "@/components/settings/cost-settings";
 import { DemoTargets } from "@/components/settings/demo-targets";
@@ -18,6 +19,7 @@ const TABS = [
   { id: "costs",        label: "Costs",        icon: DollarSign,    description: "Software subscriptions and demo costs" },
   { id: "demo",         label: "Demo Tracker", icon: BarChart2,     description: "Target turnaround times per stage" },
   { id: "calendars",    label: "Calendars",    icon: CalendarDays,  description: "Team calendars and booking automation rules" },
+  { id: "notifications", label: "Notifications", icon: BellRing,    description: "The Slack alerts your team gets" },
   { id: "integrations", label: "Integrations", icon: Zap,           description: "Manage your connected services and automations" },
 ] as const;
 
@@ -112,6 +114,14 @@ function SettingsTabsInner() {
             <div className="max-w-3xl space-y-6">
               <CallCalendarsSettings />
               <UserCalendarsSettings />
+            </div>
+          </div>
+        )}
+
+        {activeTab === "notifications" && (
+          <div className="p-6">
+            <div className="max-w-4xl">
+              <NotificationsClient />
             </div>
           </div>
         )}
