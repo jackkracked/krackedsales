@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils/cn";
 import { useUserTimezone } from "@/providers/timezone-provider";
 import { toZonedDate } from "@/lib/utils/timezone";
 import { ProposalStatusBadge } from "./proposal-status-badge";
+import { ActivityTimeline } from "./engagement";
 import { discountInfo, clientSentence, type BillingTerms } from "@/lib/proposals/billing";
 
 interface Instalment {
@@ -467,6 +468,14 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
               </div>
             ))}
           </div>
+
+          {/* Prospect activity timeline (opens / clicks / views) */}
+          <ActivityTimeline
+            proposalId={proposal.id}
+            sentAt={proposal.sentAt}
+            signedAt={proposal.signedAt}
+            paidAt={proposal.paidAt ?? null}
+          />
 
           {/* Service description */}
           {proposal.serviceDescription && (

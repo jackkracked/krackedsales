@@ -11,6 +11,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { ProposalStatusBadge } from "./proposal-status-badge";
 import { ProposalCreateModal } from "./proposal-create-modal";
 import { ProposalDetailSlideOver } from "./proposal-detail-slide-over";
+import { EngagementCell, type EngagementSummary } from "./engagement";
 import { OpportunityModal } from "@/components/pipeline/opportunity-modal";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 
@@ -393,6 +394,13 @@ export function ProposalsClient() {
     staleTime: 30 * 1000,
   });
 
+  const { data: tracking } = useQuery<{ summary: Record<string, EngagementSummary> }>({
+    queryKey: ["proposals-tracking"],
+    queryFn: () => fetch("/api/proposals/tracking-summary").then((r) => r.json()),
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+  });
+
   const { data: me } = useQuery<{ role: string }>({
     queryKey: ["me"],
     queryFn: () => fetch("/api/me").then((r) => r.json()),
@@ -527,6 +535,7 @@ export function ProposalsClient() {
                 <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sent</th>
                 <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Signed</th>
                 <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Paid</th>
+                <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Activity</th>
                 <th data-r10n-th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Amount</th>
                 <th className="px-4 py-2.5" />
               </tr>
@@ -536,7 +545,7 @@ export function ProposalsClient() {
                 Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} />)
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-16 text-center">
+                  <td colSpan={11} className="px-4 py-16 text-center">
                     <FileText className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
                     <p data-r10n-proposal-empty-text className="text-sm text-muted-foreground">
                       {filter === "All"
@@ -622,6 +631,9 @@ export function ProposalsClient() {
                     </td>
                     <td data-r10n-proposal-cell-date className="px-4 py-3 text-sm text-muted-foreground tabular-nums">
                       {fmtDate(proposal.paidAt, tz) ?? <span className="text-muted-foreground/40">—</span>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <EngagementCell summary={tracking?.summary[proposal.id]} />
                     </td>
                     <td data-r10n-proposal-amount className="px-4 py-3 text-right tabular-nums">
                       {(() => {
