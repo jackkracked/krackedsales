@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const { token } = await params;
   try {
     const [p] = await db().select({ id: proposals.id }).from(proposals).where(eq(proposals.token, token)).limit(1);
-    if (p) await logProposalEvent(p.id, token, "clicked", req);
+    if (p) await logProposalEvent(p.id, token, "clicked", req, { dedupMs: 30 * 60_000 });
   } catch { /* best effort */ }
   return NextResponse.redirect(`${APP_URL}/p/${encodeURIComponent(token)}`, 302);
 }

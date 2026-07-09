@@ -74,6 +74,17 @@ export function ActivityTimeline({ proposalId, sentAt, signedAt, paidAt }: {
 
   items.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()); // newest first
 
+  // Collapse a burst of the same event (e.g. several page loads from one open) into one row.
+  const grouped: (typeof items[number] & { count: number })[] = [];
+  for (const it of items) {
+    const prev = grouped[grouped.length - 1];
+    if (prev && prev.label === it.label && Math.abs(new Date(prev.at).getTime() - new Date(it.at).getTime()) < 10 * 60_000) {
+      prev.count += 1;
+    } else {
+      grouped.push({ ...it, count: 1 });
+    }
+  }
+
   const fmt = (iso: string) => {
     try { return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); }
     catch { return iso; }
@@ -88,9 +99,9 @@ export function ActivityTimeline({ proposalId, sentAt, signedAt, paidAt }: {
         <p className="text-sm text-muted-foreground/60">Nothing yet. Opens and clicks will show here once the proposal is sent.</p>
       ) : (
         <ol className="relative space-y-0">
-          {items.map((it, i) => {
+          {grouped.map((it, i) => {
             const Icon = it.icon;
-            const last = i === items.length - 1;
+            const last = i === grouped.length - 1;
             return (
               <li key={it.key} className="relative flex gap-3 pb-4">
                 {!last && <span className="absolute left-[13px] top-7 h-full w-px bg-border" aria-hidden />}
@@ -98,7 +109,10 @@ export function ActivityTimeline({ proposalId, sentAt, signedAt, paidAt }: {
                   <Icon className="h-3.5 w-3.5" />
                 </span>
                 <div className="min-w-0 pt-1">
-                  <p className="text-sm font-medium text-foreground">{it.label}</p>
+                  <p className="text-sm font-medium text-foreground">
+                    {it.label}
+                    {it.count > 1 && <span className="ml-1.5 text-xs font-normal text-muted-foreground">{it.count}×</span>}
+                  </p>
                   <p className="text-xs text-muted-foreground tabular-nums">{fmt(it.at)}</p>
                 </div>
               </li>

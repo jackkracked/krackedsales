@@ -132,7 +132,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     // Skip previews and any request carrying a staff session cookie (internal views).
     const isStaff = !!req.cookies.get("kracked_session");
     if (!preview && !isStaff) {
-      logProposalEvent(proposal.id, token, "viewed", req).catch(() => {});
+      // Dedupe: one "viewed" per device per 30 min (a single open triggers several fetches).
+      logProposalEvent(proposal.id, token, "viewed", req, { dedupMs: 30 * 60_000 }).catch(() => {});
     }
 
     // Return status info for non-sent proposals (unless preview mode)

@@ -17,8 +17,13 @@ const PIXEL = Buffer.from("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==", "b
 export async function GET(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   try {
-    const [p] = await db().select({ id: proposals.id }).from(proposals).where(eq(proposals.token, token)).limit(1);
-    if (p) await logProposalEvent(p.id, token, "email_opened", req, classifyOpen(req));
+    const [p] = await db().select({ id: proposals.id, sentAt: proposals.sentAt }).from(proposals).where(eq(proposals.token, token)).limit(1);
+    if (p) {
+      await logProposalEvent(p.id, token, "email_opened", req, {
+        classification: classifyOpen(req, p.sentAt),
+        dedupMs: 10 * 60_000,
+      });
+    }
   } catch { /* best effort */ }
   return new Response(PIXEL, {
     headers: {
