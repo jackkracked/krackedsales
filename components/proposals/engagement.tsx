@@ -63,11 +63,15 @@ export function ActivityTimeline({ proposalId, sentAt, signedAt, paidAt }: {
     if (at) items.push({ key, label, at, kind, icon, tone });
   };
 
+  // Email opens are pulled OUT of the ordered timeline: the pixel reports late/proxied, so
+  // its timestamp is unreliable and would show "email opened" after the proposal was viewed.
+  // We surface it as a separate approximate signal instead (below).
+  const emailOpens = (data?.events ?? []).filter((e) => e.type === "email_opened" && e.classification === "genuine");
+
   push("sent", "Proposal sent", sentAt, "sent", Send, "text-muted-foreground");
   (data?.events ?? []).forEach((e, i) => {
     if (e.type === "viewed") push(`v${i}`, "Opened the proposal", e.createdAt, "engage", Eye, "text-primary");
     else if (e.type === "clicked") push(`c${i}`, "Clicked from the email", e.createdAt, "engage", MousePointerClick, "text-primary");
-    else if (e.type === "email_opened" && e.classification === "genuine") push(`o${i}`, "Opened the email", e.createdAt, "engage", Mail, "text-primary");
   });
   push("signed", "Signed", signedAt, "won", PenLine, "text-success");
   push("paid", "Paid", paidAt, "won", CreditCard, "text-success");
@@ -119,6 +123,16 @@ export function ActivityTimeline({ proposalId, sentAt, signedAt, paidAt }: {
             );
           })}
         </ol>
+      )}
+
+      {emailOpens.length > 0 && (
+        <div className="mt-3 flex items-center gap-2 border-t border-border pt-3 text-xs text-muted-foreground">
+          <Mail className="h-3.5 w-3.5 shrink-0" />
+          <span>
+            Email opened <span className="font-semibold text-foreground">{emailOpens.length}×</span>
+            {" "}<span className="text-muted-foreground/70">· timing approximate</span>
+          </span>
+        </div>
       )}
     </div>
   );
