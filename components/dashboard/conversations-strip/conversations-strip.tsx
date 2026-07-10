@@ -131,7 +131,7 @@ function SelectControls({
         aria-pressed={selected}
         className={cn(
           "absolute z-20 flex h-5 w-5 items-center justify-center rounded-[6px] border shadow-sm transition-all duration-150 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-          variant === "tile" ? "left-2 top-2" : "left-2 top-1/2 -translate-y-1/2",
+          variant === "tile" ? "left-3 top-3" : "left-2 top-1/2 -translate-y-1/2",
           selected
             ? "border-primary bg-primary text-primary-foreground opacity-100"
             : "border-border bg-card text-transparent opacity-0 group-hover/conv:opacity-100",
@@ -148,7 +148,7 @@ function SelectControls({
         title="Mark read"
         className={cn(
           "absolute z-20 flex items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-sm transition-all duration-150 hover:border-success/60 hover:text-success group-hover/conv:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-          variant === "tile" ? "right-2 top-2 h-6 w-6" : "right-3 top-1/2 h-7 w-7 -translate-y-1/2",
+          variant === "tile" ? "right-3 top-3 h-6 w-6" : "right-3 top-1/2 h-7 w-7 -translate-y-1/2",
         )}
       >
         <CheckCheck className={variant === "tile" ? "h-3.5 w-3.5" : "h-4 w-4"} />
@@ -511,7 +511,7 @@ export function ConversationsStrip() {
                       }
                     }}
                   >
-                    <ConversationTile item={item} onReply={() => handleReply(item)} isLoading={loadingId === item.id} />
+                    <ConversationTile item={item} onReply={() => handleReply(item)} isLoading={loadingId === item.id} dimMeta={selected.has(item.id)} />
                     <SelectControls
                       item={item}
                       selected={selected.has(item.id)}
@@ -534,7 +534,7 @@ export function ConversationsStrip() {
                     exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.9 }}
                     transition={{ duration: reduce ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}
                   >
-                    <ConversationTile item={item} onReply={() => handleReply(item)} isLoading={loadingId === item.id} />
+                    <ConversationTile item={item} onReply={() => handleReply(item)} isLoading={loadingId === item.id} dimMeta={selected.has(item.id)} />
                     <SelectControls
                       item={item}
                       selected={selected.has(item.id)}

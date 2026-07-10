@@ -68,9 +68,11 @@ interface ConversationTileProps {
   item: QueueItem;
   onReply: () => void;
   isLoading?: boolean;
+  /** Fade the badge/time row (mark-read controls take its place on hover / when selected). */
+  dimMeta?: boolean;
 }
 
-export function ConversationTile({ item, onReply, isLoading }: ConversationTileProps) {
+export function ConversationTile({ item, onReply, isLoading, dimMeta }: ConversationTileProps) {
   const channelKey = getChannelKey(item);
   const badge = CHANNEL_BADGE[channelKey] ?? CHANNEL_BADGE.in;
   const timeAgo = shortRelativeTime(new Date(item.updatedAt));
@@ -108,8 +110,9 @@ export function ConversationTile({ item, onReply, isLoading }: ConversationTileP
           <Loader2 className="w-5 h-5 animate-spin text-primary" />
         </div>
       )}
-      {/* Top row: badge + dot + time */}
-      <div className="flex items-center gap-1.5 mb-2.5 min-w-0">
+      {/* Top row: badge + dot + time. Fades out on hover / when selected so the mark-read
+          controls take its place in the same corners without colliding. */}
+      <div className={cn("flex items-center gap-1.5 mb-2.5 min-w-0 transition-opacity duration-150 group-hover/conv:opacity-0", dimMeta && "opacity-0")}>
         <span
           data-r10n-convo-channel
           className={cn(

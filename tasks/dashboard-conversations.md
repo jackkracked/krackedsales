@@ -35,10 +35,10 @@ dual-writes app + GHL. Below is the granular execution plan.
       edits (ContactModal/CreateDemoModal used as-is → zero breakage risk). No writes on open.
 - [x] ReplyModal deleted (was only used here).
 
-## Phase 4 — Verify + ship
-- [ ] tsc clean after each phase.
-- [ ] GATE: apply migration 0032 to prod (additive/idempotent — confirm with Jack first).
-- [ ] vercel --prod; verify live on the dashboard.
+## Phase 4 — Verify + ship — DONE
+- [x] tsc clean after each phase.
+- [x] Migration 0032 applied to prod (verified: table + unique index present).
+- [x] Deployed to prod (commit 1cf1a7e). SHIPPED 2026-07-10.
 
 ## Notes / open confirmations
 - GHL mark-read field is best-effort (PUT /conversations/{id} {unreadCount:0}); degrade to
