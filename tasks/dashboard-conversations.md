@@ -1,38 +1,46 @@
-# Dashboard Conversations — Unify Modal + Mark-as-Read
+# Dashboard Conversations — Unified Modal + Mark-as-Read
 
-Two features on the dashboard `ConversationsStrip`. Both are UI: run the impeccable
-shape gate + get approval before building. Must be phenomenally beautiful + 100% functional.
+Shape brief APPROVED by Jack 2026-07-10 ("build both"). Register: product. Read-state
+dual-writes app + GHL. Below is the granular execution plan.
 
-## Feature C — one modal for every conversation
-Decided 2026-07-10 (Jack). Every conversation click opens the FULL modal (like the
-opportunity / contact modal), never the stripped "Reply to this message" box.
-- Populate what we can from available data (name, platform, message thread, profile).
-- **NO writes to GHL or our DB just from opening.** A conversation is NOT a lead until a
-  demo is booked. Don't clog the system with non-leads.
-- The **"Create demo"** quick action (exists in multiple places across the app) is the
-  promotion point: pressing it creates the lead in BOTH GHL **and** our local DB
-  (dual-write), future-proofing the eventual migration off GoHighLevel.
-- Kill the basic `ReplyModal` (only used in ConversationsStrip → safe to remove).
-- Today's branch: `components/dashboard/conversations-strip/conversations-strip.tsx:218-260`
-  (`handleReply`). Full modal = `components/pipeline/opportunity-modal.tsx`; basic =
-  `components/dashboard/conversations-strip/reply-modal.tsx`. Opp lookup =
-  `app/api/ghl/contacts/[contactId]/opportunity/route.ts`.
+## Decisions locked
+- Every conversation click opens the full modal (opportunity modal for opps, contact modal
+  for contacts, contact-style shell for social/no-record). NO writes on open. "Create Demo"
+  is the promote-to-lead action and ALREADY dual-writes (promoteMetaLeadToGhl + socialLeads
+  mirror) — just surface it.
+- Mark-as-read = "handled, clear it": hover ✓ quick-clear + hover-checkbox multi-select +
+  floating bulk bar + undo toast (sonner). Persisted to a new conversation_reads table AND
+  best-effort pushed to GHL. A new inbound message re-surfaces the conversation.
 
-- [ ] Shape the "no pipeline record yet" full-modal state (contact view + thread + reply +
-      an "Add to pipeline / Create demo" CTA), including social leads with no GHL contact
-- [ ] Route ALL clicks to the full modal; populate from available data; no writes on open
-- [ ] Wire "Create demo" → dual-write GHL + local leads (the promotion-to-lead moment)
-- [ ] Remove ReplyModal once nothing routes to it
+## Phase 1 — Backend: read-state foundation
+- [x] Migration `db/migrations/0032_conversation_reads.sql` — table conversation_reads
+      (channel, conversation_id, read_at, read_by) + unique(channel, conversation_id). Additive.
+- [x] Drizzle: add `conversationReads` to lib/db/schema.ts.
+- [x] `POST /api/inbox/queue/mark-read` — auth + upsert/delete conversation_reads + best-effort
+      GHL push + undo (read:false). DONE.
+- [x] Queue filter in app/api/inbox/queue/route.ts — read_at vs last-message time; new inbound
+      re-surfaces. DONE.
 
-## Feature D — mark conversations as read from the list (no open)
-Jack wants to mark read WITHOUT opening a conversation. His direction (explicitly "not
-gospel"): hover reveals a multi-select, then bulk "mark as read". Research best-practice
-UX/UI first and propose.
-- [ ] Research best-practice patterns (hover affordance vs always-visible, checkbox multi-
-      select, bulk action bar, single-click mark-read, keyboard) — pick the strongest
-- [ ] Confirm the read/unread data model + an API to mark read exists (or must be built);
-      check the inbox/queue source (`/api/inbox/queue`) for an unread flag
-- [ ] Shape + approval, then build
+## Phase 2 — Frontend: mark-as-read UX (match existing tile/tokens/r10n)
+- [x] Mark-as-read UX DONE — SelectControls (hover ✓ quick-clear + checkbox multi-select as
+      absolute siblings, no nested buttons), selection ring, keyboard `E`, floating bulk bar,
+      optimistic dismiss + POST + sonner undo + error revert, motion exit w/ useReducedMotion.
+      Wired on BOTH the strip tiles and the drawer rows. tsc clean.
 
-## Status
-- Not started. Next step: impeccable shape for both, then approval, then build.
+## Phase 3 — Frontend: unify the modal — DONE (tsc clean)
+- [x] handleReply routes every click to a full modal: opp → OpportunityModal (AI draft);
+      GHL contact no-opp → HYDRATE (reuse existing GET /api/ghl/contacts/[contactId], build a
+      UnifiedContact client-side via buildContactFromQueue) → ContactModal; raw social lead
+      (no contactId) → CreateDemoModal (promote-to-lead). NO new endpoint, NO shared-component
+      edits (ContactModal/CreateDemoModal used as-is → zero breakage risk). No writes on open.
+- [x] ReplyModal deleted (was only used here).
+
+## Phase 4 — Verify + ship
+- [ ] tsc clean after each phase.
+- [ ] GATE: apply migration 0032 to prod (additive/idempotent — confirm with Jack first).
+- [ ] vercel --prod; verify live on the dashboard.
+
+## Notes / open confirmations
+- GHL mark-read field is best-effort (PUT /conversations/{id} {unreadCount:0}); degrade to
+  app-only if GHL rejects. App-side clear is what drives the board regardless.
+- Migrations are plain SQL applied directly to the DB (no npm runner).

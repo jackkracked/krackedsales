@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { platformReplies, users, localConversations } from "@/lib/db/schema";
+import { platformReplies, users, localConversations, conversationReads } from "@/lib/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { meta } from "@/lib/meta/client";
@@ -254,6 +254,29 @@ export async function GET(req: NextRequest) {
   // Rank: stalest first (most urgent)
   items.sort((a, b) => b.staleDays - a.staleDays);
 
+  // Hide conversations the user has marked "read / handled" — until a NEWER message
+  // arrives (read_at is compared against the last message time), which re-surfaces them.
+  let unread = items;
+  if (items.length > 0) {
+    try {
+      const reads = await db()
+        .select({
+          channel: conversationReads.channel,
+          conversationId: conversationReads.conversationId,
+          readAt: conversationReads.readAt,
+        })
+        .from(conversationReads)
+        .where(inArray(conversationReads.conversationId, items.map((it) => it.id)));
+      const readMap = new Map(reads.map((r) => [`${r.channel}:${r.conversationId}`, r.readAt]));
+      unread = items.filter((it) => {
+        const readAt = readMap.get(`${it.channel}:${it.id}`);
+        return !readAt || new Date(it.updatedAt) > new Date(readAt);
+      });
+    } catch (err) {
+      console.error("[inbox/queue] read-filter failed:", err);
+    }
+  }
+
   // Personalised dashboard view (scope=mine). A rep sees the shared pool +
   // their own book: conversations assigned to them, OR that they were the last
   // to personally respond to, OR that are unassigned (the claimable pool that
@@ -265,13 +288,13 @@ export async function GET(req: NextRequest) {
   const me = user.ghlUserId;
   const visibleItems =
     scope === "mine" && isRep && me
-      ? items.filter(
+      ? unread.filter(
           (it) =>
             it.assignedToId === me || // assigned to me
             it.lastResponderId === me || // I last responded
             (!it.assignedToId && !it.lastResponderId) // truly unclaimed → shared pool
         )
-      : items;
+      : unread;
 
   return NextResponse.json({ items: visibleItems, total: visibleItems.length });
 }

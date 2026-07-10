@@ -1152,6 +1152,26 @@ export const localConversations = pgTable("local_conversations", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+/**
+ * Per-conversation "read/handled" marker for the dashboard awaiting-reply strip (all
+ * channels). A conversation is hidden from the strip while readAt is newer than its last
+ * inbound message; a new inbound message re-surfaces it. Unique per (channel, conversationId).
+ */
+export const conversationReads = pgTable(
+  "conversation_reads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    channel: text("channel").notNull(),
+    conversationId: text("conversation_id").notNull(),
+    readAt: timestamp("read_at").defaultNow().notNull(),
+    readBy: text("read_by"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    channelConvKey: uniqueIndex("conversation_reads_channel_conv_key").on(t.channel, t.conversationId),
+  }),
+);
+
 /** Local copy of GHL messages — synced via /api/ghl/sync */
 export const localMessages = pgTable("local_messages", {
   id: text("id").primaryKey(),

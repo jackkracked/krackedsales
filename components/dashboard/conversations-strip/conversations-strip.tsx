@@ -1,20 +1,85 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { MessageSquare, CheckCheck, X, LayoutGrid } from "lucide-react";
+import { MessageSquare, CheckCheck, X, LayoutGrid, Check } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils/cn";
 import { ConversationTile } from "./conversation-tile";
-import { ReplyModal } from "./reply-modal";
 import type { QueueItem } from "@/app/api/inbox/queue/route";
 import { OpportunityModal } from "@/components/pipeline/opportunity-modal";
+import { ContactModal } from "@/components/contacts/contact-modal";
+import { CreateDemoModal } from "@/components/shared/create-demo-modal";
 import type { GHLOpportunity } from "@/lib/ghl/types";
+import type { UnifiedContact } from "@/lib/contacts/types";
 import { differenceInHours } from "date-fns";
 
 interface OppState {
   opportunity: GHLOpportunity;
   stageName: string;
   draft: string;
+}
+
+interface GhlContactDetail {
+  id?: string;
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+  email?: string;
+  phone?: string;
+  tags?: string[];
+}
+
+/**
+ * Build a UnifiedContact for the full ContactModal from a lightweight queue item + the GHL
+ * contact detail. Real core fields; safe defaults for the rest (the modal's tabs self-fetch
+ * by ghlContactId). Read-only — opening a conversation never creates or mutates anything.
+ */
+function buildContactFromQueue(item: QueueItem, c: GhlContactDetail, website: string | null): UnifiedContact {
+  const platform: UnifiedContact["platform"] =
+    item.platform === "instagram" ? "instagram"
+      : item.platform === "facebook" ? "facebook"
+      : item.channel === "TikTok" ? "tiktok"
+      : null;
+  return {
+    uid: `ghl_${item.contactId}`,
+    source: "ghl",
+    name: item.contactName || c.fullName || [c.firstName, c.lastName].filter(Boolean).join(" ") || "Unknown",
+    email: c.email ?? null,
+    phone: c.phone ?? null,
+    website: website ?? null,
+    platform,
+    ghlContactId: item.contactId ?? null,
+    opportunityId: null,
+    stage: null,
+    stageId: null,
+    pipelineId: null,
+    opportunityStatus: null,
+    monetaryValue: null,
+    tags: c.tags ?? [],
+    commentLeadId: null,
+    commentText: null,
+    brandCategory: null,
+    hasDemo: false,
+    hasProposal: false,
+    proposalStatus: null,
+    hasAudit: false,
+    auditStatus: null,
+    awaitingReply: true,
+    lastChannel: item.channel === "GHL" ? (item.type ?? null) : item.channel,
+    daysSinceLastTouch: item.staleDays,
+    daysInCurrentStage: null,
+    lastActivityAt: item.updatedAt,
+    createdAt: item.updatedAt,
+    assignedTo: item.assignedToId ?? null,
+    dnd: false,
+    responseStatus: "awaiting_reply",
+    reachableChannels: [],
+    autoSequence: false,
+    autoSequenceAt: null,
+    followupScheduledAt: null,
+  };
 }
 
 type FilterKey = "all" | "sms" | "email" | "instagram" | "facebook" | "tiktok" | "late";
@@ -41,6 +106,57 @@ function matchesFilter(item: QueueItem, filter: FilterKey): boolean {
   return true;
 }
 
+// ─── Select + quick-clear controls (shared by strip tiles and drawer rows) ──────
+// Rendered as absolutely-positioned SIBLINGS of the clickable element (never nested
+// inside it) so the markup stays valid and each control is independently clickable.
+
+function SelectControls({
+  item, selected, onToggle, onMarkRead, variant,
+}: {
+  item: QueueItem;
+  selected: boolean;
+  onToggle: () => void;
+  onMarkRead: () => void;
+  variant: "tile" | "row";
+}) {
+  return (
+    <>
+      {selected && <div className="pointer-events-none absolute inset-0 z-10 rounded-[12px] ring-2 ring-primary" />}
+
+      {/* Multi-select checkbox */}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onToggle(); }}
+        aria-label={selected ? `Deselect ${item.contactName}` : `Select ${item.contactName}`}
+        aria-pressed={selected}
+        className={cn(
+          "absolute z-20 flex h-5 w-5 items-center justify-center rounded-[6px] border shadow-sm transition-all duration-150 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+          variant === "tile" ? "left-2 top-2" : "left-2 top-1/2 -translate-y-1/2",
+          selected
+            ? "border-primary bg-primary text-primary-foreground opacity-100"
+            : "border-border bg-card text-transparent opacity-0 group-hover/conv:opacity-100",
+        )}
+      >
+        <Check className="h-3 w-3" strokeWidth={3} />
+      </button>
+
+      {/* Single quick-clear */}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onMarkRead(); }}
+        aria-label={`Mark ${item.contactName} read`}
+        title="Mark read"
+        className={cn(
+          "absolute z-20 flex items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-sm transition-all duration-150 hover:border-success/60 hover:text-success group-hover/conv:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+          variant === "tile" ? "right-2 top-2 h-6 w-6" : "right-3 top-1/2 h-7 w-7 -translate-y-1/2",
+        )}
+      >
+        <CheckCheck className={variant === "tile" ? "h-3.5 w-3.5" : "h-4 w-4"} />
+      </button>
+    </>
+  );
+}
+
 // ─── Bottom drawer ────────────────────────────────────────────────────────────
 
 interface InboxDrawerProps {
@@ -48,9 +164,12 @@ interface InboxDrawerProps {
   total: number;
   onReply: (item: QueueItem) => void;
   onClose: () => void;
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+  onMarkRead: (item: QueueItem) => void;
 }
 
-function InboxDrawer({ items, total, onReply, onClose }: InboxDrawerProps) {
+function InboxDrawer({ items, total, onReply, onClose, selected, onToggle, onMarkRead }: InboxDrawerProps) {
   const [filter, setFilter] = useState<FilterKey>("all");
 
   const filtered = items.filter((i) => matchesFilter(i, filter));
@@ -58,10 +177,7 @@ function InboxDrawer({ items, total, onReply, onClose }: InboxDrawerProps) {
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
       {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
       {/* Sheet — fixed height, never resizes */}
       <div className="relative bg-card border-t border-border rounded-t-[24px] shadow-2xl h-[72vh] flex flex-col z-10">
@@ -74,10 +190,7 @@ function InboxDrawer({ items, total, onReply, onClose }: InboxDrawerProps) {
         <div className="flex items-center justify-between px-6 pb-3 shrink-0">
           <div className="flex items-center gap-2.5">
             <MessageSquare className="w-4 h-4 text-muted-foreground" />
-            <h3
-              className="text-[15px] font-bold text-foreground"
-              style={{ fontFamily: "var(--font-heading)" }}
-            >
+            <h3 className="text-[15px] font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>
               Inbox
             </h3>
             <span data-r10n-unread-badge className="text-[10px] font-bold bg-destructive text-destructive-foreground px-2 py-0.5 rounded-full tabular-nums leading-none">
@@ -93,10 +206,7 @@ function InboxDrawer({ items, total, onReply, onClose }: InboxDrawerProps) {
         </div>
 
         {/* Filter pills */}
-        <div
-          className="flex gap-2 px-6 pb-3 overflow-x-auto shrink-0"
-          style={{ scrollbarWidth: "none" }}
-        >
+        <div className="flex gap-2 px-6 pb-3 overflow-x-auto shrink-0" style={{ scrollbarWidth: "none" }}>
           {FILTER_LABELS.map(({ key, label }) => {
             const count = key === "all" ? items.length : items.filter((i) => matchesFilter(i, key)).length;
             return (
@@ -107,14 +217,11 @@ function InboxDrawer({ items, total, onReply, onClose }: InboxDrawerProps) {
                   "shrink-0 flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[12px] font-semibold transition-all duration-150",
                   filter === key
                     ? "bg-foreground text-background shadow-sm"
-                    : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
               >
                 {label}
-                <span className={cn(
-                  "text-[10px] font-bold tabular-nums",
-                  filter === key ? "opacity-60" : "opacity-50"
-                )}>
+                <span className={cn("text-[10px] font-bold tabular-nums", filter === key ? "opacity-60" : "opacity-50")}>
                   {count}
                 </span>
               </button>
@@ -139,6 +246,7 @@ function InboxDrawer({ items, total, onReply, onClose }: InboxDrawerProps) {
             <div className="space-y-1">
               {filtered.map((item) => {
                 const isLate = differenceInHours(new Date(), new Date(item.updatedAt)) >= 24;
+                const isSelected = selected.has(item.id);
                 const channelLabel = item.platform
                   ? item.platform.charAt(0).toUpperCase() + item.platform.slice(1)
                   : item.channel;
@@ -151,38 +259,42 @@ function InboxDrawer({ items, total, onReply, onClose }: InboxDrawerProps) {
                 })();
 
                 return (
-                  <button
+                  <div
                     key={item.id}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => { onReply(item); onClose(); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onReply(item); onClose(); }
+                      else if (e.key === "e" || e.key === "E") { e.preventDefault(); onMarkRead(item); }
+                    }}
                     className={cn(
-                      "w-full text-left px-4 py-3.5 rounded-[12px] transition-all duration-150 group",
-                      "hover:bg-muted/50",
-                      isLate ? "bg-destructive/[0.06]" : ""
+                      "group/conv relative w-full cursor-pointer text-left pl-9 pr-12 py-3.5 rounded-[12px] transition-all duration-150",
+                      "hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                      isSelected ? "bg-primary/[0.06]" : isLate ? "bg-destructive/[0.06]" : "",
                     )}
                   >
                     <div className="flex items-center gap-2 mb-1">
-                      <span className={cn(
-                        "text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded",
-                        "bg-muted text-muted-foreground"
-                      )}>
+                      <span className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                         {channelLabel}
                       </span>
                       {isLate && (
-                        <span className="text-[9px] font-bold text-destructive uppercase tracking-wide">
-                          Late
-                        </span>
+                        <span className="text-[9px] font-bold text-destructive uppercase tracking-wide">Late</span>
                       )}
-                      <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">
-                        {timeStr}
-                      </span>
+                      <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">{timeStr}</span>
                     </div>
-                    <p className="text-[13.5px] font-semibold text-foreground truncate leading-snug">
-                      {item.contactName}
-                    </p>
+                    <p className="text-[13.5px] font-semibold text-foreground truncate leading-snug">{item.contactName}</p>
                     <p className="text-[12px] text-muted-foreground truncate mt-0.5 leading-snug">
                       {item.lastMessage || <span className="italic opacity-50">No preview</span>}
                     </p>
-                  </button>
+                    <SelectControls
+                      item={item}
+                      selected={isSelected}
+                      onToggle={() => onToggle(item.id)}
+                      onMarkRead={() => onMarkRead(item)}
+                      variant="row"
+                    />
+                  </div>
                 );
               })}
             </div>
@@ -197,9 +309,12 @@ function InboxDrawer({ items, total, onReply, onClose }: InboxDrawerProps) {
 
 export function ConversationsStrip() {
   const queryClient = useQueryClient();
-  const [replyItem, setReplyItem] = useState<QueueItem | null>(null);
+  const reduce = useReducedMotion();
+  const [contactState, setContactState] = useState<UnifiedContact | null>(null);
+  const [demoItem, setDemoItem] = useState<QueueItem | null>(null);
   const [oppState, setOppState] = useState<OppState | null>(null);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
 
@@ -214,6 +329,67 @@ export function ConversationsStrip() {
   const allItems = data?.items ?? [];
   const items = allItems.filter((i) => !dismissedIds.has(i.id));
   const total = data?.total ?? items.length;
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Mark one or more conversations read/handled. Optimistic (dismiss immediately),
+  // persisted server-side (+ best-effort GHL), with an Undo. Reverts on failure.
+  const markRead = useCallback(
+    async (targets: QueueItem[]) => {
+      if (!targets.length) return;
+      const ids = targets.map((t) => t.id);
+      const payload = targets.map((t) => ({ channel: t.channel, id: t.id }));
+
+      setDismissedIds((prev) => new Set([...prev, ...ids]));
+      setSelected(new Set());
+
+      try {
+        const res = await fetch("/api/inbox/queue/mark-read", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: payload, read: true }),
+        });
+        if (!res.ok) throw new Error("mark-read failed");
+        queryClient.invalidateQueries({ queryKey: ["inbox-queue-dashboard"] });
+
+        toast(targets.length === 1 ? "Marked read" : `${targets.length} marked read`, {
+          description: targets.length === 1 ? targets[0].contactName : undefined,
+          duration: 5000,
+          action: {
+            label: "Undo",
+            onClick: () => {
+              setDismissedIds((prev) => {
+                const next = new Set(prev);
+                ids.forEach((id) => next.delete(id));
+                return next;
+              });
+              fetch("/api/inbox/queue/mark-read", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ items: payload, read: false }),
+              }).finally(() => queryClient.invalidateQueries({ queryKey: ["inbox-queue-dashboard"] }));
+            },
+          },
+        });
+      } catch {
+        // Revert the optimistic dismiss so nothing is silently lost.
+        setDismissedIds((prev) => {
+          const next = new Set(prev);
+          ids.forEach((id) => next.delete(id));
+          return next;
+        });
+        toast.error("Couldn't mark read");
+      }
+    },
+    [queryClient],
+  );
 
   async function handleReply(item: QueueItem) {
     if (item.channel === "GHL" && item.contactId) {
@@ -238,32 +414,38 @@ export function ConversationsStrip() {
       let oppData: { opportunity?: unknown; stageName?: string } | null = null;
       try {
         oppData = await fetch(
-          `/api/ghl/contacts/${item.contactId}/opportunity?name=${encodeURIComponent(item.contactName)}`
+          `/api/ghl/contacts/${item.contactId}/opportunity?name=${encodeURIComponent(item.contactName)}`,
         ).then((r) => r.json());
       } catch {
         oppData = null;
       }
 
-      setLoadingId(null);
-
       if (oppData?.opportunity) {
-        // Open modal immediately with empty draft, populate draft when AI responds
+        // Has an opportunity → the gold opportunity modal (with AI-draft composer).
+        setLoadingId(null);
         setOppState({ opportunity: oppData.opportunity as OppState["opportunity"], stageName: oppData.stageName ?? "", draft: "" });
         draftPromise.then((draft) => {
-          if (draft) setOppState((prev) => prev ? { ...prev, draft } : prev);
+          if (draft) setOppState((prev) => (prev ? { ...prev, draft } : prev));
         });
+        return;
+      }
+
+      // GHL contact with no opportunity → hydrate the full contact modal (no writes on open).
+      let cd: { contact?: GhlContactDetail; website?: string | null } | null = null;
+      try {
+        cd = await fetch(`/api/ghl/contacts/${item.contactId}`).then((r) => r.json());
+      } catch {
+        cd = null;
+      }
+      setLoadingId(null);
+      if (cd?.contact) {
+        setContactState(buildContactFromQueue(item, cd.contact, cd.website ?? null));
         return;
       }
     }
 
-    setReplyItem(item);
-  }
-
-  function handleSent(item: QueueItem) {
-    setDismissedIds((prev) => new Set([...prev, item.id]));
-    setReplyItem(null);
-    setOppState(null);
-    queryClient.invalidateQueries({ queryKey: ["inbox-queue-dashboard"] });
+    // No GHL record yet (raw social lead) → promote to a lead via Create Demo.
+    setDemoItem(item);
   }
 
   return (
@@ -302,10 +484,7 @@ export function ConversationsStrip() {
         {isLoading ? (
           <div className="flex gap-3">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div
-                key={i}
-                className="h-[170px] w-[210px] shrink-0 rounded-[12px] bg-muted/40 animate-pulse"
-              />
+              <div key={i} className="h-[170px] w-[210px] shrink-0 rounded-[12px] bg-muted/40 animate-pulse" />
             ))}
           </div>
         ) : items.length === 0 ? (
@@ -317,26 +496,89 @@ export function ConversationsStrip() {
         ) : (
           <>
             {/* Desktop: horizontal scroll */}
-            <div
-              className="hidden sm:flex gap-3 overflow-x-auto scroll-smooth pb-2"
-              style={{ scrollbarWidth: "thin" }}
-            >
-              {items.map((item) => (
-                <div key={item.id} className="shrink-0">
-                  <ConversationTile item={item} onReply={() => handleReply(item)} isLoading={loadingId === item.id} />
-                </div>
-              ))}
+            <div className="hidden sm:flex gap-3 overflow-x-auto scroll-smooth pb-2" style={{ scrollbarWidth: "thin" }}>
+              <AnimatePresence initial={false}>
+                {items.map((item) => (
+                  <motion.div
+                    key={item.id}
+                    className="group/conv relative shrink-0"
+                    exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.9 }}
+                    transition={{ duration: reduce ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}
+                    onKeyDown={(e) => {
+                      if ((e.key === "e" || e.key === "E") && !e.metaKey && !e.ctrlKey) {
+                        e.preventDefault();
+                        markRead([item]);
+                      }
+                    }}
+                  >
+                    <ConversationTile item={item} onReply={() => handleReply(item)} isLoading={loadingId === item.id} />
+                    <SelectControls
+                      item={item}
+                      selected={selected.has(item.id)}
+                      onToggle={() => toggleSelect(item.id)}
+                      onMarkRead={() => markRead([item])}
+                      variant="tile"
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
             </div>
 
             {/* Mobile: 2-column grid */}
             <div className="grid grid-cols-2 gap-2 sm:hidden">
-              {items.map((item) => (
-                <ConversationTile key={item.id} item={item} onReply={() => handleReply(item)} isLoading={loadingId === item.id} />
-              ))}
+              <AnimatePresence initial={false}>
+                {items.map((item) => (
+                  <motion.div
+                    key={item.id}
+                    className="group/conv relative"
+                    exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.9 }}
+                    transition={{ duration: reduce ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    <ConversationTile item={item} onReply={() => handleReply(item)} isLoading={loadingId === item.id} />
+                    <SelectControls
+                      item={item}
+                      selected={selected.has(item.id)}
+                      onToggle={() => toggleSelect(item.id)}
+                      onMarkRead={() => markRead([item])}
+                      variant="tile"
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
             </div>
           </>
         )}
       </div>
+
+      {/* Floating bulk action bar */}
+      <AnimatePresence>
+        {selected.size > 0 && (
+          <motion.div
+            initial={reduce ? { opacity: 0 } : { opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, y: 20 }}
+            transition={{ duration: reduce ? 0 : 0.2, ease: [0.22, 1, 0.36, 1] }}
+            className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-3 rounded-full border border-border bg-card px-3 py-2 shadow-xl"
+          >
+            <span className="pl-2 text-sm font-semibold text-foreground tabular-nums">{selected.size} selected</span>
+            <div className="h-5 w-px bg-border" />
+            <button
+              type="button"
+              onClick={() => markRead(items.filter((i) => selected.has(i.id)))}
+              className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              <CheckCheck className="h-4 w-4" /> Mark read
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelected(new Set())}
+              className="rounded-full px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              Cancel
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* See all drawer */}
       {drawerOpen && (
@@ -345,6 +587,9 @@ export function ConversationsStrip() {
           total={total}
           onReply={handleReply}
           onClose={() => setDrawerOpen(false)}
+          selected={selected}
+          onToggle={toggleSelect}
+          onMarkRead={(item) => markRead([item])}
         />
       )}
 
@@ -358,12 +603,34 @@ export function ConversationsStrip() {
         />
       )}
 
-      {/* Fallback reply modal */}
-      {replyItem && (
-        <ReplyModal
-          item={replyItem}
-          onSent={() => handleSent(replyItem)}
-          onClose={() => setReplyItem(null)}
+      {/* GHL contact with no opportunity → the full contact modal */}
+      {contactState && (
+        <ContactModal
+          contact={contactState}
+          onClose={() => {
+            setContactState(null);
+            queryClient.invalidateQueries({ queryKey: ["inbox-queue-dashboard"] });
+          }}
+        />
+      )}
+
+      {/* Raw social lead (no GHL record yet) → promote to a lead via Create Demo */}
+      {demoItem && (
+        <CreateDemoModal
+          contactName={demoItem.contactName}
+          opportunitySource={demoItem.platform ?? demoItem.channel}
+          platform={
+            demoItem.platform === "instagram" || demoItem.platform === "facebook"
+              ? demoItem.platform
+              : demoItem.channel === "TikTok"
+                ? "tiktok"
+                : undefined
+          }
+          participantId={demoItem.recipientId}
+          onClose={() => {
+            setDemoItem(null);
+            queryClient.invalidateQueries({ queryKey: ["inbox-queue-dashboard"] });
+          }}
         />
       )}
     </>
