@@ -121,15 +121,8 @@ async function getEnabledSlack(): Promise<{ botToken: string; channelId: string 
 export async function slackMentionForEmail(email: string, fallbackName: string): Promise<string> {
   const slack = await getEnabledSlack();
   if (!slack) return `@${fallbackName}`;
-  try {
-    const res = await fetch(`https://slack.com/api/users.lookupByEmail?email=${encodeURIComponent(email)}`, {
-      headers: { Authorization: `Bearer ${slack.botToken}` },
-    });
-    const json = await res.json();
-    return json.ok && json.user?.id ? `<@${json.user.id}>` : `@${fallbackName}`;
-  } catch {
-    return `@${fallbackName}`;
-  }
+  const id = await slackUserIdFor(slack.botToken, email, fallbackName);
+  return id ? `<@${id}>` : `@${fallbackName}`;
 }
 
 /**
@@ -196,6 +189,70 @@ export async function postToSalesChannel(text: string): Promise<boolean> {
     return true;
   } catch (err) {
     console.error("[slack-notify] chat.postMessage threw:", err);
+    return false;
+  }
+}
+
+/**
+ * Resolve a Slack user id for a person: try their email (users.lookupByEmail), then fall
+ * back to matching their name against the workspace directory (exact, then first-name).
+ * This matters because a teammate's Slack login can differ from their work email (e.g.
+ * Gage's Slack is under a personal address). Null if nothing matches.
+ */
+async function slackUserIdFor(botToken: string, email?: string | null, name?: string | null): Promise<string | null> {
+  if (email) {
+    try {
+      const res = await fetch(`https://slack.com/api/users.lookupByEmail?email=${encodeURIComponent(email)}`, {
+        headers: { Authorization: `Bearer ${botToken}` },
+      });
+      const json = await res.json();
+      if (json.ok && json.user?.id) return json.user.id as string;
+    } catch { /* fall through to name match */ }
+  }
+  if (name) {
+    const key = name.trim().toLowerCase();
+    const dir = await slackDirectory(botToken);
+    // Exact full-name match, else a first-name match ("Gage" -> "gage flesher"). The
+    // trailing space guards against matching a substring inside a longer name.
+    for (const [n, id] of dir) if (n === key || n.startsWith(`${key} `)) return id;
+  }
+  return null;
+}
+
+/**
+ * Send a DIRECT MESSAGE to a person (resolved by email, then name). Opens (or reuses) the
+ * IM via conversations.open, then posts to it. Returns true on success, false on ANY failure
+ * so the caller can fall back to a channel post — an internal nudge is never silently dropped.
+ * Requires the bot's `im:write` scope; without it conversations.open errors and we return
+ * false (→ channel fallback).
+ */
+export async function sendSlackDM(person: { email?: string | null; name?: string | null }, text: string): Promise<boolean> {
+  const slack = await getEnabledSlack();
+  if (!slack) return false;
+  try {
+    const userId = await slackUserIdFor(slack.botToken, person.email, person.name);
+    if (!userId) return false;
+    const open = await fetch("https://slack.com/api/conversations.open", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${slack.botToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ users: userId }),
+    }).then((r) => r.json());
+    if (!open.ok || !open.channel?.id) {
+      console.error("[slack-notify] conversations.open failed:", open.error);
+      return false;
+    }
+    const res = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${slack.botToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ channel: open.channel.id as string, text, unfurl_links: false }),
+    }).then((r) => r.json());
+    if (!res.ok) {
+      console.error("[slack-notify] DM chat.postMessage failed:", res.error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("[slack-notify] sendSlackDM threw:", err);
     return false;
   }
 }

@@ -22,8 +22,9 @@ import { getAllTemplates } from "@/lib/reminders/store";
 import { resolveVars, type ResolveContext } from "@/lib/reminders/variables";
 import { renderEmail, type RenderableTemplate } from "@/lib/reminders/render";
 import { sendRenderedEmail } from "@/lib/email/resend";
-import { postToSalesChannel, slackMentionForEmail } from "@/lib/proposals/slack-notify";
+import { postToSalesChannel, sendSlackDM, slackMentionForEmail } from "@/lib/proposals/slack-notify";
 import { dispatchNotification } from "@/lib/notifications/dispatch";
+import { claimNotification } from "@/lib/notifications/claim";
 import type { ScheduleStep } from "@/lib/reminders/defaults";
 
 type TemplateRow = typeof emailTemplates.$inferSelect;
@@ -34,6 +35,7 @@ const BUSINESS_TZ = "America/Los_Angeles";
 const LOOKBACK_DAYS = 45;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://kracked-sales.vercel.app";
 const GAGE_EMAIL = "gage@krackedretention.com";
+const OWNER_EMAIL = "jack@krackedretention.com"; // Jack rides along on admin reminder DMs for visibility
 
 export interface RunSummary {
   sent: number;
@@ -128,14 +130,26 @@ async function sendStep(t: StepTarget, stepNumber: number, stepKey: string, tpl:
     await db().update(sentReminders).set({ status: "sent", sentAt: new Date() }).where(eq(sentReminders.id, rowId));
     summary.sent++;
 
-    // F1: alert the rep + Gage in Slack that this proposal is stalling (per-send).
+    // F1: alert the rep + Gage in Slack that this proposal is stalling (at most once per
+    // step, ever — claimed on the same ledger so a send retry never re-pings). Isolated in
+    // its own try/catch: a claim/post failure must NEVER bubble to the outer catch, which
+    // would flip this already-sent email row to "failed" and re-send the email next run.
     // Best-effort, gated by the notification rule's own on/off. Proposal reminders only.
     if (t.template.key === "proposal_reminder") {
-      await dispatchNotification("proposal_stalling", {
-        rep: t.rep ?? null,
-        // Direct link for the rep (not the tracked one — a rep click shouldn't pollute prospect tracking).
-        values: { ...values, "reminder.step": String(stepNumber + 1), "proposal.link": `${APP_URL}/p/${t.ctx.proposal.token}` },
-      });
+      try {
+        if (await claimNotification(t.entityId, "proposal_stalling", stepKey)) {
+          await dispatchNotification("proposal_stalling", {
+            rep: t.rep ?? null,
+            // DM the rep + admin (Gage, copying Jack) directly; falls back to the channel if
+            // a DM can't be delivered.
+            deliver: "dm",
+            // Direct link for the rep (not the tracked one — a rep click shouldn't pollute prospect tracking).
+            values: { ...values, "reminder.step": String(stepNumber + 1), "proposal.link": `${APP_URL}/p/${t.ctx.proposal.token}` },
+          });
+        }
+      } catch (e) {
+        console.error(`[reminders] proposal_stalling nudge failed for ${t.entityId}:`, e);
+      }
     }
   } catch (e) {
     await db().update(sentReminders).set({ status: "failed", error: String(e).slice(0, 500) }).where(eq(sentReminders.id, rowId));
@@ -188,14 +202,22 @@ async function nudgeRep(t: StepTarget, summary: RunSummary): Promise<void> {
 
   const rowId = claimed[0].id;
   try {
-    const mention = await slackMentionForEmail(GAGE_EMAIL, "Gage");
     const isInvoice = t.template.key === "invoice_reminder";
     const client = t.ctx.proposal.contactName;
     const what = isInvoice ? "still hasn't paid" : "still hasn't signed";
     const link = isInvoice ? (isHttpsUrl(t.ctaUrl) ? t.ctaUrl : "") : `${APP_URL}/p/${t.ctx.proposal.token}`;
-    await postToSalesChannel(
-      `${mention} *${client}* ${what} after all reminders. Might be worth a personal follow-up.${link ? `\n${link}` : ""}`,
-    );
+    const dmBody = `*${client}* ${what} after all reminders. Might be worth a personal follow-up.${link ? `\n${link}` : ""}`;
+    // Internal reminder nudge → DM the admin (Gage) + owner (Jack) for visibility. Fall back
+    // to the channel (with @mention) for anyone who can't be DM'd, so a nudge is never lost.
+    const admins = [{ email: GAGE_EMAIL, name: "Gage" }, { email: OWNER_EMAIL, name: "Jack" }];
+    const fellBack: typeof admins = [];
+    for (const a of admins) {
+      if (!(await sendSlackDM(a, dmBody))) fellBack.push(a);
+    }
+    if (fellBack.length) {
+      const mentions = await Promise.all(fellBack.map((a) => slackMentionForEmail(a.email, a.name)));
+      await postToSalesChannel(`${mentions.join(" ")} ${dmBody}`);
+    }
     await db().update(sentReminders).set({ status: "sent", sentAt: new Date() }).where(eq(sentReminders.id, rowId));
     summary.repNudges++;
   } catch (e) {

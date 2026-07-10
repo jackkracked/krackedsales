@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Save, Loader2, Check, AlertCircle, Hash, FileText, PhoneMissed, PhoneCall, CheckSquare, Bell } from "lucide-react";
+import { Save, Loader2, Check, AlertCircle, Hash, Lock, FileText, PhoneMissed, PhoneCall, CheckSquare, Bell } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
 interface NotifVar { token: string; label: string; sample: string }
@@ -36,6 +36,24 @@ function mentionPreview(recipients: Rule["recipients"], vars: NotifVar[]): strin
   return `@${rep}  @Gage`;
 }
 
+// Rules the engine delivers as private DMs (see lib/reminders/engine.ts `deliver: "dm"`).
+// Admin alerts additionally copy the owner (Jack), matching lib/notifications/dispatch.ts.
+const DM_RULES = new Set(["proposal_stalling"]);
+
+/** First names a DM-delivered alert reaches; the owner ("you") is copied on admin alerts. */
+function dmRecipientNames(recipients: Rule["recipients"], vars: NotifVar[]): string[] {
+  const rep = (vars.find((v) => v.token === "rep.name")?.sample ?? "Alice").split(" ")[0];
+  const names: string[] = [];
+  if (recipients === "rep" || recipients === "both") names.push(rep);
+  if (recipients === "gage" || recipients === "both") names.push("Gage", "you");
+  return names;
+}
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+}
+
 export function NotificationsClient() {
   const { data, isLoading, isError } = useQuery<ApiData>({
     queryKey: ["notification-rules"],
@@ -66,6 +84,8 @@ function NotificationCard({ rule, variables }: { rule: Rule; variables: NotifVar
   const [message, setMessage] = useState(rule.messageTemplate);
   const dirty = enabled !== rule.enabled || recipients !== rule.recipients || message !== rule.messageTemplate;
   const Icon = RULE_ICON[rule.key] ?? Bell;
+  const isDm = DM_RULES.has(rule.key);
+  const adminIncluded = recipients === "gage" || recipients === "both";
 
   const save = useMutation({
     mutationFn: async () => {
@@ -129,6 +149,9 @@ function NotificationCard({ rule, variables }: { rule: Rule; variables: NotifVar
                 </button>
               ))}
             </div>
+            {isDm && adminIncluded && (
+              <p className="mt-2 text-[11px] text-muted-foreground">You&apos;re copied on every admin alert.</p>
+            )}
           </div>
 
           <div>
@@ -149,13 +172,23 @@ function NotificationCard({ rule, variables }: { rule: Rule; variables: NotifVar
 
         {/* Right: a real Slack window, filling the column height */}
         <div className="flex flex-col bg-muted/25 px-6 py-5">
-          <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Preview in Slack</label>
+          <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {isDm ? "Preview · private DM" : "Preview in Slack"}
+          </label>
           <div className="flex min-h-[220px] flex-1 flex-col overflow-hidden rounded-[12px] border border-black/10 bg-white shadow-sm">
-            {/* channel bar */}
-            <div className="flex items-center gap-1.5 border-b border-black/5 px-4 py-2.5">
-              <Hash className="h-3.5 w-3.5 text-[#8a8a8a]" />
-              <span className="text-[13px] font-bold text-[#1D1C1D]">kracked-ai-sales</span>
-            </div>
+            {/* conversation bar: a private DM vs the sales channel */}
+            {isDm ? (
+              <div className="flex items-center gap-1.5 border-b border-black/5 px-4 py-2.5">
+                <Lock className="h-3 w-3 shrink-0 text-[#616061]" />
+                <span className="shrink-0 text-[13px] font-bold text-[#1D1C1D]">Direct message</span>
+                <span className="min-w-0 truncate text-[12px] text-[#616061]">to {joinNames(dmRecipientNames(recipients, variables))}</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 border-b border-black/5 px-4 py-2.5">
+                <Hash className="h-3.5 w-3.5 text-[#8a8a8a]" />
+                <span className="text-[13px] font-bold text-[#1D1C1D]">kracked-ai-sales</span>
+              </div>
+            )}
             {/* message */}
             <div className="flex flex-1 items-start gap-2.5 px-4 py-4">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[#0A0A0B]">
@@ -167,13 +200,17 @@ function NotificationCard({ rule, variables }: { rule: Rule; variables: NotifVar
                   <span className="ml-1.5 text-[11px] font-normal text-[#9a9a9a]">just now</span>
                 </p>
                 <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-[#1D1C1D]">
-                  <span className="rounded bg-[#1264A3]/10 px-1 font-semibold text-[#1264A3]">{mentionPreview(recipients, variables)}</span>{"  "}
+                  {!isDm && (
+                    <><span className="rounded bg-[#1264A3]/10 px-1 font-semibold text-[#1264A3]">{mentionPreview(recipients, variables)}</span>{"  "}</>
+                  )}
                   {interpolate(message, variables)}
                 </p>
               </div>
             </div>
           </div>
-          <p className="mt-2 text-[11px] text-muted-foreground">Shown with sample data.</p>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            {isDm ? "Sample data. Each person gets their own private DM." : "Shown with sample data."}
+          </p>
         </div>
       </div>
 
