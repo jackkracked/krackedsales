@@ -93,7 +93,7 @@ export async function GET(req: NextRequest) {
         // Outcome not set: the call is >2h in the past and has no disposition.
         if (outcomeRule?.enabled && start.getTime() < now.getTime() - 2 * 3_600_000 && !dispositioned.has(e.id)) {
           if (await claimNotification(e.id, "call_outcome_missing", "once")) {
-            await dispatchNotification("call_outcome_missing", { rep, values: {
+            await dispatchNotification("call_outcome_missing", { deliver: "dm", rep, values: {
               "contact.name": contact, "rep.name": e.repName, "call.when": whenPhrase(start, now), "call.link": `${APP_URL}/calls`,
             } });
             summary.outcome++;
@@ -103,7 +103,7 @@ export async function GET(req: NextRequest) {
         // Coming up: a future call happening today.
         if (upcomingRule?.enabled && start.getTime() > now.getTime() && start.getTime() <= endOfToday.getTime()) {
           if (await claimNotification(e.id, "call_upcoming", "once")) {
-            await dispatchNotification("call_upcoming", { rep, values: {
+            await dispatchNotification("call_upcoming", { deliver: "dm", rep, values: {
               "contact.name": contact, "rep.name": e.repName, "call.when": whenPhrase(start, now), "call.link": `${APP_URL}/calls`,
             } });
             summary.upcoming++;
@@ -129,6 +129,7 @@ export async function GET(req: NextRequest) {
         const overdue = t.dueDate.getTime() < startOfToday.getTime();
         if (await claimNotification(t.id, "task_due", bucket)) {
           await dispatchNotification("task_due", {
+            deliver: "dm",
             rep: { name: t.userName ?? u?.name ?? null, email: u?.email ?? null },
             values: {
               "task.title": t.title, "rep.name": t.userName ?? u?.name ?? "",

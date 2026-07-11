@@ -21,8 +21,9 @@ export interface DispatchCtx {
   values: Record<string, string>;
   rep?: { name?: string | null; email?: string | null } | null;
   /**
-   * "dm"      → private DM to each recipient (admin alerts also copy the owner). Falls back
-   *             to a channel post for anyone who can't be DM'd, so a nudge is never lost.
+   * "dm"      → private DM to each recipient (admin alerts also copy the owner). NEVER falls
+   *             back to the sales channel — reps aren't in it and it must not be polluted; an
+   *             unreachable recipient is logged, not broadcast.
    * "channel" → one channel post that @-mentions the recipients (default).
    */
   deliver?: "dm" | "channel";
@@ -56,19 +57,13 @@ export async function dispatchNotification(key: string, ctx: DispatchCtx): Promi
       if (adminIncluded) targets.push({ email: OWNER_EMAIL, name: "Jack", mention: await slackMentionForEmail(OWNER_EMAIL, "Jack") });
 
       let delivered = false;
-      const fellBack: Recipient[] = [];
       for (const r of targets) {
         const ok = (r.email || r.name) ? await sendSlackDM({ email: r.email, name: r.name }, body) : false;
         if (ok) delivered = true;
-        else fellBack.push(r);
+        else console.warn(`[notifications] dispatch(${key}): couldn't DM ${r.name ?? r.email ?? "recipient"}; NOT posting to the channel`);
       }
-      // Anyone we couldn't DM (no email, missing scope, etc.) still gets a channel post so
-      // a nudge is never lost.
-      if (fellBack.length) {
-        const prefix = fellBack.map((r) => r.mention).join(" ");
-        const chOk = await postToSalesChannel(`${prefix ? prefix + " " : ""}${body}`);
-        delivered = delivered || chOk;
-      }
+      // Deliberately NO channel fallback: these reminders must never land in the sales
+      // channel (reps aren't in it). An unreachable recipient is logged, not broadcast.
       return delivered;
     }
 
