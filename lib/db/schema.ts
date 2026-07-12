@@ -1172,6 +1172,19 @@ export const conversationReads = pgTable(
   }),
 );
 
+/**
+ * Unit-economics dashboard assumptions — the whole editable "dials" object (packages, hours
+ * grid, rates, fees, retention, overhead) as one validated JSONB blob, single row. schema_version
+ * lets us migrate the blob forward safely as the shape evolves. Money data (audited by updated_by).
+ */
+export const unitEconomicsSettings = pgTable("unit_economics_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  assumptions: jsonb("assumptions").notNull(),
+  schemaVersion: integer("schema_version").notNull().default(1),
+  updatedBy: text("updated_by"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 /** Local copy of GHL messages — synced via /api/ghl/sync */
 export const localMessages = pgTable("local_messages", {
   id: text("id").primaryKey(),

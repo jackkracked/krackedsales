@@ -27,6 +27,7 @@ import {
   Workflow,
   LayoutGrid,
   BellRing,
+  Wallet,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { NotificationBell } from "@/components/layout/notification-bell";
@@ -58,6 +59,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     label: "Measure",
     items: [
       { href: "/kpis",         label: "KPIs",          icon: Target },
+      { href: "/money",        label: "Money",         icon: Wallet, adminOnly: true },
       { href: "/demo-tracker", label: "Demo Tracker",   icon: BarChart3 },
       { href: "/analytics",    label: "Analytics",      icon: TrendingUp },
       { href: "/activity",     label: "Activity",       icon: Activity, adminOnly: true },
