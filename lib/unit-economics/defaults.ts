@@ -119,4 +119,13 @@ export const SEED_ASSUMPTIONS: Assumptions = {
     insurance: 4000,
     otherAdmin: 4750,
   },
+  // Whole-company monthly actuals (§9 validated averages). Seeded so the P&L reproduces §9
+  // EXACTLY on first load: 98,580 revenue − (500 + 1,500 + 500) variable − 83,750 overhead =
+  // 12,330 net (12.5%). These are Gage's real totals — editable monthly, flagged as estimates.
+  companyActuals: {
+    revenue: 98580,
+    adSpend: 500,
+    commission: 1500,
+    processing: 500,
+  },
 };

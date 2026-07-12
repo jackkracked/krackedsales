@@ -2,12 +2,13 @@
 
 import { Fragment, useEffect, useMemo, useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Sliders, Check, Loader2, X, TrendingUp, TrendingDown, AlertCircle, Info } from "lucide-react";
+import { Sliders, Check, Loader2, X, TrendingUp, AlertCircle, ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { Bridge, type BridgeStep } from "./bridge";
+import { Tip } from "./tip";
 import { fmtMoney, fmtMoneyK, fmtPct, fmtRatio, fmtMonths, fmtHours } from "./format";
 import {
-  computeTiers, blendedTargetCac, blendedBreakevenCac, realizedCac, paybackMonths,
+  computeTiers, blendedTargetCac, blendedBreakevenCac, paybackMonths,
   computeCompanyPnL, sumOverhead, ROLES, ROLE_LABELS,
   type Assumptions, type TierEconomics, type Role,
 } from "@/lib/unit-economics/model";
@@ -18,13 +19,15 @@ import {
 function Est({ children, on = true }: { children: React.ReactNode; on?: boolean }) {
   return <span className={cn(on && "border-b border-dotted border-muted-foreground/50")}>{children}</span>;
 }
-function SectionHeader({ eyebrow, title, sub }: { eyebrow?: string; title: string; sub?: string }) {
+function SectionHeader({ eyebrow, title, sub, tip }: { eyebrow?: string; title: string; sub?: string; tip?: React.ReactNode }) {
   return (
     <div className="mb-4 flex items-baseline gap-3">
       <span className="h-3.5 w-0.5 shrink-0 rounded bg-primary" />
       <div className="min-w-0">
         {eyebrow && <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{eyebrow}</p>}
-        <h2 className="text-[15px] font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{title}</h2>
+        <h2 className="flex items-center gap-1.5 text-[15px] font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>
+          {title}{tip && <Tip>{tip}</Tip>}
+        </h2>
       </div>
       {sub && <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{sub}</span>}
     </div>
@@ -38,6 +41,7 @@ interface LiveData {
   realized: { cac: number | null; adSpend: number; newClients: number; adSpendAvailable: boolean; clientsAvailable: boolean };
   month: { label?: string; revenue: number; revenueAvailable: boolean; adSpend: number; adSpendAvailable: boolean; newClients: number; commissionEstimate: number; processingEstimate: number };
 }
+interface ClientRow { name: string; acquiredAt: string; firstType: string; firstAmount: number }
 
 // ══════════════════════════════════════════════════════════════════════════════
 export function MoneyClient() {
@@ -46,10 +50,8 @@ export function MoneyClient() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [win, setWin] = useState<WindowDays>(30);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [clientsOpen, setClientsOpen] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  // Company-P&L commission is an editable actual (recurring cash doesn't re-pay commission);
-  // default 0 + flagged, so the demo net reconciles and Gage types the real figure.
-  const [commissionActual, setCommissionActual] = useState<number>(0);
 
   const { data: aData } = useQuery<{ assumptions: Assumptions }>({
     queryKey: ["unit-economics", "assumptions"],
@@ -62,6 +64,12 @@ export function MoneyClient() {
   const { data: live } = useQuery<LiveData>({
     queryKey: ["unit-economics", "live", win],
     queryFn: () => fetch(`/api/unit-economics/live?window=${win}`).then((r) => r.json()),
+    staleTime: 60_000,
+  });
+  const { data: clientList } = useQuery<{ clients: ClientRow[] }>({
+    queryKey: ["unit-economics", "clients", win],
+    queryFn: () => fetch(`/api/unit-economics/clients?window=${win}`).then((r) => r.json()),
+    enabled: clientsOpen,
     staleTime: 60_000,
   });
 
@@ -94,25 +102,37 @@ export function MoneyClient() {
     );
   }
 
-  // ── company P&L (real totals) ─────────────────────────────────────────────────
-  const revenue = live?.month.revenue ?? 0;
-  const monthAdSpend = live?.month.adSpend ?? 0;
-  const processing = live?.month.processingEstimate ?? 0;
+  // ── whole-company P&L — from Gage's real monthly ACTUALS (§6.4), never a partial feed ──
+  const pnl = computeCompanyPnL(draft.companyActuals, draft);
   const overheadTotal = sumOverhead(draft.overhead);
-  const pnl = computeCompanyPnL({ revenue, adSpend: monthAdSpend, commission: commissionActual, processing }, draft);
-  const revenueLive = !!live?.month.revenueAvailable;
+  const liveRevenue = live?.month.revenue ?? 0; // last complete month from Stripe cash — CROSS-CHECK only
+  const liveRevenueAvailable = !!live?.month.revenueAvailable;
+  const pnlMonth = live?.month.label;
 
-  // ── acquisition headline ──────────────────────────────────────────────────────
+  // ── acquisition (question 1) — Contribution basis, NEVER fixed overhead ───────
   const realized = live?.realized.cac ?? null;
   const rollAdSpend = live?.realized.adSpend ?? 0;
   const rollClients = live?.realized.newClients ?? 0;
+  const clientsAvailable = !!live?.realized.clientsAvailable;
   const mixTotal = Math.max(1, econ.reduce((s, e) => s + e.expectedMonthlyCount, 0));
-  const blendedLtvPerClient = econ.reduce((s, e) => s + e.ltvContribution * e.expectedMonthlyCount, 0) / mixTotal;
-  const ltvCacRatio = realized && realized > 0 ? blendedLtvPerClient / realized : null;
-  const monthlyBlendedContribution = econ.reduce((s, e) => s + e.monthlyContribution * e.expectedMonthlyCount, 0) / mixTotal;
-  const payback = realized != null ? paybackMonths(realized, monthlyBlendedContribution) : null;
+  const contribPerClient = econ.reduce((s, e) => s + e.contribution * e.expectedMonthlyCount, 0) / mixTotal; // guaranteed $/client, blended
+  const ltvPerClient = econ.reduce((s, e) => s + e.ltvContribution * e.expectedMonthlyCount, 0) / mixTotal;
+  const monthlyContribPerClient = econ.reduce((s, e) => s + e.monthlyContribution * e.expectedMonthlyCount, 0) / mixTotal;
+  const ltvCacRatio = realized && realized > 0 ? ltvPerClient / realized : null;
+  const payback = realized != null ? paybackMonths(realized, monthlyContribPerClient) : null;
   const cacUnder = realized != null && realized <= blendedTarget;
-  const pnlMonth = live?.month.label; // the last COMPLETE calendar month the P&L covers
+
+  // What the spend is BUILT to return at our validated target CAC (the honest model answer
+  // while realized closes are still settling).
+  const impliedClients = blendedTarget > 0 ? rollAdSpend / blendedTarget : 0;
+  const impliedProfit = impliedClients * contribPerClient;
+  // Realized closes lag the spend that produced them. Only trust the realized cost-per-client
+  // once enough have settled vs what the spend implies (the ramp gate) — otherwise a timing /
+  // under-count artifact reads as a catastrophic CAC.
+  const acqTrustworthy = clientsAvailable && rollClients >= 3 && rollClients >= impliedClients * 0.4;
+  const realizedProfit = rollClients * contribPerClient;
+  const acqNet = realizedProfit - rollAdSpend;
+  const acqReturn = rollAdSpend > 0 && acqTrustworthy ? realizedProfit / rollAdSpend : null;
 
   return (
     <div className="h-full overflow-y-auto">
@@ -121,7 +141,7 @@ export function MoneyClient() {
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>Money</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">What we spend to grow, and what we keep.</p>
+          <p className="mt-0.5 text-sm text-muted-foreground">What we spend to grow, and what we keep. Two questions, kept separate.</p>
         </div>
         <div className="flex items-center gap-2">
           {dirty && (
@@ -139,41 +159,108 @@ export function MoneyClient() {
         </div>
       </div>
 
-      {/* ── Verdict line ─────────────────────────────────────────────────────── */}
-      <div className={cn(card, "mb-4 px-6 py-5")}>
-        <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-          Last full month{pnlMonth ? ` · ${pnlMonth}` : ""}
-        </p>
-        <p className="mt-1.5 text-lg leading-snug text-foreground sm:text-xl">
-          {pnlMonth ? `In ${pnlMonth} we` : "We"} spent{" "}
-          <b className="text-2xl font-bold tabular-nums text-destructive sm:text-[28px]" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(monthAdSpend)}</b>{" "}
-          on ads and, after every cost, the company{" "}
-          {revenueLive ? (
-            <>kept <b className={cn("text-2xl font-bold tabular-nums sm:text-[28px]", pnl.net >= 0 ? "text-success" : "text-destructive")} style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(pnl.net)}</b>{" "}
-              <span className="text-muted-foreground">({fmtPct(pnl.netPct)}).</span></>
+      {/* ═══ QUESTION 1 — Is our ad spend worth it? (Contribution basis, no overhead) ═══ */}
+      <div className={cn(card, "mb-4 overflow-hidden")}>
+        <div className="border-b border-border bg-muted/20 px-6 py-2.5">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+            Question 1 — is our ad spend worth it?
+            <Tip>The only costs counted here are the costs of serving a client (their team&apos;s hours, commission, card fees). Fixed bills like salaries and rent are deliberately left out — that&apos;s Question 2 below. Mixing them is the classic mistake this page is built to avoid.</Tip>
+          </p>
+        </div>
+        <div className="px-6 py-5">
+          {acqTrustworthy ? (
+            <p className="text-lg leading-snug text-foreground sm:text-xl">
+              We spent{" "}
+              <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(rollAdSpend)}</b>{" "}
+              on ads in the last {win} days and brought in{" "}
+              <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{rollClients} client{rollClients === 1 ? "" : "s"}</b>{" "}
+              at <b className="tabular-nums">{realized != null ? fmtMoney(realized) : "—"}</b> each. They&apos;re worth about{" "}
+              <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(realizedProfit)}</b>{" "}
+              in guaranteed profit, so after the ad spend we&apos;re up{" "}
+              <b className={cn("text-2xl font-bold tabular-nums sm:text-[26px]", acqNet >= 0 ? "text-success" : "text-destructive")} style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(acqNet)}</b>
+              {acqReturn != null && <span className="text-muted-foreground"> — a {fmtRatio(acqReturn)} return, before any renewals.</span>}
+            </p>
           ) : (
-            <span className="text-muted-foreground">kept — <span className="text-xs">connect Stripe to show revenue.</span></span>
+            <p className="text-lg leading-snug text-foreground sm:text-xl">
+              We spent{" "}
+              <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(rollAdSpend)}</b>{" "}
+              on ads in the last {win} days. Each client we bring in is worth about{" "}
+              <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(contribPerClient)}</b>{" "}
+              in guaranteed profit, and we can afford up to{" "}
+              <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(blendedTarget)}</b>{" "}
+              to get one. At that rate this spend is built to return about{" "}
+              <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{impliedClients.toFixed(0)} clients</b>{" "}
+              (~<b className="tabular-nums">{fmtMoney(impliedProfit)}</b> guaranteed).{" "}
+              <span className="text-muted-foreground">
+                <b className="tabular-nums text-foreground">{rollClients}</b> ha{rollClients === 1 ? "s" : "ve"} settled so far, so the true cost-per-client is still landing.
+              </span>
+            </p>
           )}
-        </p>
+          {/* the three numbers that make the answer, at a glance */}
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <KeyNum label="Worth per client" tip="What one new client is worth to us in guaranteed profit over their 3-month minimum — counting only the cost of serving them, not fixed bills." value={fmtMoney(contribPerClient)} sub="guaranteed, first 3 months" estimate />
+            <KeyNum label="Most we'll pay to get one" tip="Our target ceiling to acquire a client and still keep a 3:1 safety margin on the guaranteed term. Bring clients in under this and every ad dollar makes money." value={fmtMoney(blendedTarget)} sub="target cost-per-client" />
+            <KeyNum label={`Cost per client · ${win}d`} tip="What we actually paid in ads per new client over this window (ad spend ÷ new clients). Needs enough settled closes to trust." value={realized != null ? fmtMoney(realized) : "—"}
+              sub={acqTrustworthy ? (cacUnder ? "under target — good" : "over target") : "still settling"}
+              tone={!acqTrustworthy ? "muted" : cacUnder ? "good" : "bad"} estimate={!acqTrustworthy} />
+          </div>
+        </div>
       </div>
 
       {/* ── At-a-glance strip ────────────────────────────────────────────────── */}
       <div className={cn(card, "mb-6 grid grid-cols-2 divide-x divide-y divide-border sm:grid-cols-3 lg:grid-cols-5 lg:divide-y-0")}>
-        <Stat label={`Realized CAC · ${win}d`} value={realized != null ? fmtMoney(realized) : "—"} accent
-          badge={realized != null ? { text: cacUnder ? "under target" : "over target", ok: cacUnder } : undefined}
-          sub={`vs ${fmtMoney(blendedTarget)} target`} estimate={!live?.realized.adSpendAvailable} />
+        <Stat label={`Cost per client · ${win}d`} value={realized != null ? fmtMoney(realized) : "—"} accent
+          tip="Realized CAC — total ad spend ÷ new clients in this window."
+          badge={realized != null ? { text: acqTrustworthy ? (cacUnder ? "under target" : "over target") : "settling", ok: acqTrustworthy ? cacUnder : undefined } : undefined}
+          sub={`vs ${fmtMoney(blendedTarget)} target`} estimate={!acqTrustworthy} />
         <Stat label="LTV : CAC" value={ltvCacRatio != null ? fmtRatio(ltvCacRatio) : "—"} accent
+          tip="For every $1 we spend to get a client, how many dollars they're worth back. 3:1 or higher is healthy. Uses modelled retention, so treat as a hope until churn data matures."
           badge={ltvCacRatio != null ? { text: ltvCacRatio >= 3 ? "healthy" : "thin", ok: ltvCacRatio >= 3 } : undefined}
           sub="3:1 is the health line" estimate />
         <Stat label="CAC payback" value={payback != null ? fmtMonths(payback) : "—"}
+          tip="How many months a new client takes to pay back what we spent to acquire them. Inside the 3-month term is safe."
           sub={`term is ${draft.termMonths} mo`} badge={payback != null ? { text: payback < draft.termMonths ? "inside term" : "past term", ok: payback < draft.termMonths } : undefined} estimate />
-        <Stat label={`New clients · ${win}d`} value={String(rollClients)} sub={`from ${fmtMoney(rollAdSpend)} spend`} />
-        <Stat label="Blended breakeven" value={fmtMoney(breakeven)} sub="max before losing money" />
+        <Stat label={`New clients · ${win}d`} value={String(rollClients)} sub="click to verify who" onClick={() => setClientsOpen((v) => !v)}
+          tip="Distinct new clients in this window, counted once at their first-ever payment (management or project), refunds excluded." />
+        <Stat label="Blended breakeven" value={fmtMoney(breakeven)} sub="max before losing money"
+          tip="The absolute most we could pay to acquire a client and still break even on their guaranteed 3 months, assuming zero renewals." />
       </div>
 
-      {/* ── ① Is our ad money worth it? ──────────────────────────────────────── */}
+      {/* new-client drill-down (click the count to verify) */}
+      {clientsOpen && (
+        <div className={cn(card, "mb-6 p-4")}>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              New clients counted · last {win} days
+              <Tip>Every distinct client whose first-ever payment landed in this window. This is the exact list behind the count above — the number is only as trustworthy as this list.</Tip>
+            </span>
+            <button onClick={() => setClientsOpen(false)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+          </div>
+          {!clientList ? (
+            <div className="h-16 animate-pulse rounded-[8px] bg-muted/40" />
+          ) : clientList.clients.length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">No new clients counted in this window.</p>
+          ) : (
+            <div className="divide-y divide-border/50">
+              {clientList.clients.map((c, i) => (
+                <div key={i} className="flex items-center justify-between py-1.5 text-sm">
+                  <span className="font-medium text-foreground">{c.name}</span>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <span className="rounded bg-muted px-1.5 py-0.5 font-medium uppercase tracking-wide">{c.firstType || "—"}</span>
+                    <span className="tabular-nums">{fmtMoney(c.firstAmount)}</span>
+                    <span className="tabular-nums">{new Date(c.acquiredAt).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── ① Per-package: which packages make the best use of ad money ───────── */}
       <section className={cn(card, "mb-6 p-5")}>
-        <SectionHeader eyebrow="Acquisition" title="Is our ad money worth it?" sub={`rolling ${win}-day`} />
+        <SectionHeader eyebrow="Per package" title="Which packages are worth acquiring?" sub={`rolling ${win}-day`}
+          tip="Each package's guaranteed profit and the most we should pay to acquire one. Everything here counts only the cost of serving a client, never fixed overhead." />
         <div className="mb-4 inline-flex overflow-hidden rounded-[8px] border border-border text-xs">
           {([30, 60, 90] as WindowDays[]).map((d) => (
             <button key={d} onClick={() => setWin(d)}
@@ -187,18 +274,18 @@ export function MoneyClient() {
             <thead>
               <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
                 <th className="py-2 pr-3 text-left font-semibold">Package</th>
-                <th className="px-3 py-2 text-right font-semibold">Profit %</th>
-                <th className="px-3 py-2 text-right font-semibold">Profit (3&nbsp;mo)</th>
-                <th className="px-3 py-2 text-right font-semibold">Payback</th>
-                <th className="px-3 py-2 text-right font-semibold">Max CAC (floor)</th>
-                <th className="px-3 py-2 text-right font-semibold">$/strat&nbsp;hr</th>
-                <th className="py-2 pl-3 text-right font-semibold">vs realized</th>
+                <th className="px-3 py-2 text-right font-semibold"><HeadTip label="Profit %" tip="Contribution margin — the share of a client's payment left after only the costs of serving them (team hours, commission, card fees)." /></th>
+                <th className="px-3 py-2 text-right font-semibold"><HeadTip label="Profit (3 mo)" tip="Guaranteed profit in dollars from one client over their 3-month minimum." /></th>
+                <th className="px-3 py-2 text-right font-semibold"><HeadTip label="Payback" tip="Months for a client to pay back what we spent to acquire them, at the current cost per client." /></th>
+                <th className="px-3 py-2 text-right font-semibold"><HeadTip label="Max CAC (floor)" tip="The most we should pay to acquire this client, based only on their guaranteed 3 months. The safe ceiling; the '+hope' is the extra if they renew." /></th>
+                <th className="px-3 py-2 text-right font-semibold"><HeadTip label="$/strat hr" tip="Guaranteed profit per hour of strategist time — our scarcest resource. Higher = better use of delivery capacity." /></th>
+                <th className="py-2 pl-3 text-right font-semibold"><HeadTip label="vs realized" tip="Whether our actual cost-to-acquire is under (clears) or over this package's safe ceiling." /></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
               {econ.map((e) => {
                 const pb = paybackMonths(realized ?? 0, e.monthlyContribution);
-                const over = realized != null && realized > e.recommendedMaxCacFloor;
+                const over = acqTrustworthy && realized != null && realized > e.recommendedMaxCacFloor;
                 const isOpen = expanded === e.id;
                 return (
                   <Fragment key={e.id}>
@@ -212,12 +299,12 @@ export function MoneyClient() {
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums font-medium"><Est>{fmtPct(e.contributionPct)}</Est></td>
                       <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-foreground"><Est>{fmtMoney(e.contribution)}</Est></td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{pb != null ? fmtMonths(pb) : "—"}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{acqTrustworthy && pb != null ? fmtMonths(pb) : "—"}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums font-medium"><Est>{fmtMoney(e.recommendedMaxCacFloor)}</Est>
                         <span className="ml-1 text-[10px] text-muted-foreground">(+{fmtMoneyK(e.recommendedMaxCacHope)} hope)</span></td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground"><Est>{e.contributionPerStrategistHour != null ? fmtMoney(e.contributionPerStrategistHour) : "—"}</Est></td>
                       <td className="py-2.5 pl-3 text-right">
-                        {realized == null ? <span className="text-muted-foreground">—</span> :
+                        {!acqTrustworthy || realized == null ? <span className="text-muted-foreground">—</span> :
                           <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold", over ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success")}>
                             {over ? <TrendingUp className="h-3 w-3" /> : <Check className="h-3 w-3" />}{over ? "over" : "clears"}</span>}
                       </td>
@@ -232,77 +319,121 @@ export function MoneyClient() {
             </tbody>
           </table>
         </div>
-        <p className="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <Info className="h-3 w-3" /> Profit leads with the <b className="font-semibold">guaranteed 3-month floor</b>; the retention "hope" is shown separately (some clients have churned in 4–8 weeks). Dotted numbers are estimates until real hours land.
+        <p className="mt-3 flex items-start gap-1.5 text-[11px] text-muted-foreground">
+          <span className="mt-px">Profit leads with the <b className="font-semibold text-foreground">guaranteed 3-month floor</b>; the retention &quot;hope&quot; is shown separately (some clients have churned in 4&ndash;8 weeks). Dotted numbers are estimates until real logged hours land. Click any row to see how its profit is built.</span>
         </p>
       </section>
 
-      {/* ── ② Did the company keep money? ────────────────────────────────────── */}
-      <section className={cn(card, "mb-6 p-5")}>
-        <SectionHeader eyebrow="Whole business" title="Did the company keep money?" sub={pnlMonth ? `${pnlMonth} (last full month)` : "last full month"} />
-        {revenueLive ? (
-          <Bridge steps={pnlSteps(pnl, commissionActual === 0)} height={210} />
-        ) : (
-          <div className="flex items-center gap-2 rounded-[8px] bg-muted/30 px-4 py-6 text-sm text-muted-foreground">
-            <AlertCircle className="h-4 w-4" /> Connect Stripe to show the company P&L.
-          </div>
-        )}
-        <div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-          <MiniStat label="Revenue" value={fmtMoney(revenue)} estimate={!revenueLive} />
-          <MiniStat label="Contribution" value={fmtMoney(pnl.totalContribution)} accent />
-          <MiniStat label="Fixed overhead" value={fmtMoney(overheadTotal)} estimate />
-          <MiniStat label="Net kept" value={fmtMoney(pnl.net)} accent={pnl.net >= 0} danger={pnl.net < 0} />
+      {/* ═══ the visual firewall between the two questions (§6.5) ═══ */}
+      <div className="mb-6 flex items-center gap-3 px-1">
+        <span className="h-px flex-1 bg-border" />
+        <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          <ArrowDown className="h-3 w-3" /> A completely different question
+        </span>
+        <span className="h-px flex-1 bg-border" />
+      </div>
+
+      {/* ═══ QUESTION 2 — After every bill, does the whole company profit? ═══ */}
+      <section className={cn(card, "mb-6 overflow-hidden")}>
+        <div className="border-b border-border bg-muted/20 px-6 py-2.5">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+            Question 2 — after every bill, does the company profit?
+            <Tip>This counts EVERYTHING the business pays in a month — the whole team, founders, software, ads, fees. A single package can be worth acquiring (Question 1) while the whole company still needs to watch its costs. Never read one as the other.</Tip>
+          </p>
         </div>
-        <p className="mt-3 text-[11px] text-muted-foreground">Commission & processing here are estimates until you enter the real monthly figures in Assumptions. This is the real "can we afford to run" number, kept separate from the per-client view above (never mixed).</p>
+        <div className="px-6 py-5">
+          <p className="mb-4 text-lg leading-snug text-foreground sm:text-xl">
+            In a typical month the company brings in{" "}
+            <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(pnl.revenue)}</b>{" "}
+            and, after paying for absolutely everything, keeps{" "}
+            <b className={cn("text-2xl font-bold tabular-nums sm:text-[26px]", pnl.net >= 0 ? "text-success" : "text-destructive")} style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(pnl.net)}</b>{" "}
+            <span className="text-muted-foreground">— that&apos;s {fmtPct(pnl.netPct)} of every dollar.</span>
+          </p>
+
+          <Bridge steps={pnlSteps(pnl)} height={210} />
+
+          <div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+            <MiniStat label="Money in" tip="All revenue the company brings in during the month, across every service line — not just what settled through one payment processor." value={fmtMoney(pnl.revenue)} estimate />
+            <MiniStat label="What it costs to run" tip="Everything the business pays each month: the whole team, founders' pay, software, insurance, ads and fees." value={fmtMoney(pnl.variableTotal + overheadTotal)} estimate />
+            <MiniStat label="Kept" tip="What's left after every single cost is paid — the real 'can we afford to run' number." value={fmtMoney(pnl.net)} accent={pnl.net >= 0} danger={pnl.net < 0} />
+            <MiniStat label="Margin" tip="Kept as a share of revenue. 12.5% means we keep about 12.5 cents of every dollar." value={fmtPct(pnl.netPct)} accent={pnl.net >= 0} danger={pnl.net < 0} />
+          </div>
+
+          {/* live cross-check + honesty */}
+          <div className="mt-4 flex items-start gap-2 rounded-[8px] border border-border bg-muted/20 px-3 py-2.5 text-[11px] text-muted-foreground">
+            <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span>
+              These are your <b className="text-foreground">confirmed monthly figures</b> (edit them in Assumptions).{" "}
+              {liveRevenueAvailable
+                ? <>Live cross-check: our payment system settled <b className="tabular-nums text-foreground">{fmtMoney(liveRevenue)}</b>{pnlMonth ? ` in ${pnlMonth}` : ""}. If that&apos;s well below your real total, revenue collected off that one system is the gap — confirm the true number so &quot;kept&quot; stays accurate.</>
+                : <>Connect the payment system to show a live cross-check against your confirmed total.</>}
+            </span>
+          </div>
+        </div>
       </section>
 
       {/* ── ③ Planner ────────────────────────────────────────────────────────── */}
       <Planner draft={draft} econ={econ} blendedTarget={blendedTarget} />
 
-      {drawerOpen && <AssumptionsDrawer draft={draft} setDraft={setDraft} onClose={() => setDrawerOpen(false)} econ={econ}
-        commissionActual={commissionActual} setCommissionActual={setCommissionActual} />}
+      {drawerOpen && <AssumptionsDrawer draft={draft} setDraft={setDraft} onClose={() => setDrawerOpen(false)} econ={econ} />}
     </div>
     </div>
   );
 }
 
 // ─── company P&L → bridge steps ───────────────────────────────────────────────
-function pnlSteps(pnl: ReturnType<typeof computeCompanyPnL>, commissionEst: boolean): BridgeStep[] {
+function pnlSteps(pnl: ReturnType<typeof computeCompanyPnL>): BridgeStep[] {
   return [
-    { label: "Revenue", value: pnl.revenue, kind: "anchor" },
-    { label: "− Ad spend", value: pnl.adSpend, kind: "out" },
-    { label: "− Commission", value: pnl.commission, kind: "out", estimate: commissionEst },
-    { label: "− Processing", value: pnl.processing, kind: "out", estimate: true },
-    { label: "= Contribution", value: pnl.totalContribution, kind: "checkpoint" },
-    { label: "− Overhead", value: pnl.totalOverhead, kind: "out", estimate: true },
+    { label: "Money in", value: pnl.revenue, kind: "anchor" },
+    { label: "− Ads", value: pnl.adSpend, kind: "out", estimate: true },
+    { label: "− Commission", value: pnl.commission, kind: "out", estimate: true },
+    { label: "− Card fees", value: pnl.processing, kind: "out", estimate: true },
+    { label: "= After client costs", value: pnl.totalContribution, kind: "checkpoint" },
+    { label: "− Team, founders, software", value: pnl.totalOverhead, kind: "out", estimate: true },
     { label: "= Kept", value: Math.abs(pnl.net), kind: "result" },
   ];
 }
 
-// ─── stat cells ───────────────────────────────────────────────────────────────
-function Stat({ label, value, sub, badge, accent, estimate }: { label: string; value: string; sub?: string; badge?: { text: string; ok: boolean }; accent?: boolean; estimate?: boolean }) {
+// ─── the three headline numbers under the acquisition sentence ─────────────────
+function KeyNum({ label, value, sub, tip, tone, estimate }: { label: string; value: string; sub?: string; tip?: React.ReactNode; tone?: "good" | "bad" | "muted"; estimate?: boolean }) {
   return (
-    <div className="px-4 py-3.5">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className={cn("mt-1 text-lg font-bold tabular-nums", accent ? "text-foreground" : "text-foreground")} style={{ fontFamily: "var(--font-heading)" }}>
+    <div className="rounded-[8px] border border-border bg-background px-3.5 py-3">
+      <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}{tip && <Tip>{tip}</Tip>}</p>
+      <p className={cn("mt-1 text-xl font-bold tabular-nums", tone === "good" ? "text-success" : tone === "bad" ? "text-destructive" : "text-foreground")} style={{ fontFamily: "var(--font-heading)" }}>
+        <Est on={estimate}>{value}</Est>
+      </p>
+      {sub && <p className="mt-0.5 text-[10.5px] text-muted-foreground">{sub}</p>}
+    </div>
+  );
+}
+
+// ─── stat cells ───────────────────────────────────────────────────────────────
+function Stat({ label, value, sub, badge, accent, estimate, tip, onClick }: { label: string; value: string; sub?: string; badge?: { text: string; ok?: boolean }; accent?: boolean; estimate?: boolean; tip?: React.ReactNode; onClick?: () => void }) {
+  return (
+    <div className={cn("px-4 py-3.5", onClick && "cursor-pointer transition-colors hover:bg-muted/40")} onClick={onClick}>
+      <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}{tip && <Tip>{tip}</Tip>}</p>
+      <p className={cn("mt-1 text-lg font-bold tabular-nums text-foreground", onClick && "underline decoration-dotted decoration-muted-foreground/40 underline-offset-2")} style={{ fontFamily: "var(--font-heading)" }}>
         <Est on={estimate}>{value}</Est>
       </p>
       <div className="mt-0.5 flex items-center gap-1.5">
-        {badge && <span className={cn("rounded-full px-1.5 py-px text-[9.5px] font-semibold", badge.ok ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive")}>{badge.text}</span>}
+        {badge && <span className={cn("rounded-full px-1.5 py-px text-[9.5px] font-semibold", badge.ok === undefined ? "bg-muted text-muted-foreground" : badge.ok ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive")}>{badge.text}</span>}
         {sub && <span className="text-[10.5px] text-muted-foreground">{sub}</span>}
       </div>
     </div>
   );
 }
-function MiniStat({ label, value, accent, danger, estimate }: { label: string; value: string; accent?: boolean; danger?: boolean; estimate?: boolean }) {
+function MiniStat({ label, value, accent, danger, estimate, tip }: { label: string; value: string; accent?: boolean; danger?: boolean; estimate?: boolean; tip?: React.ReactNode }) {
   return (
     <div className="rounded-[8px] border border-border bg-background px-3 py-2.5">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}{tip && <Tip>{tip}</Tip>}</p>
       <p className={cn("mt-0.5 text-base font-bold tabular-nums", danger ? "text-destructive" : accent ? "text-success" : "text-foreground")} style={{ fontFamily: "var(--font-heading)" }}>
         <Est on={estimate}>{value}</Est>
       </p>
     </div>
   );
+}
+function HeadTip({ label, tip }: { label: string; tip: React.ReactNode }) {
+  return <span className="inline-flex items-center justify-end gap-1">{label}<Tip>{tip}</Tip></span>;
 }
 
 // ─── recipe (per-package role/fee breakdown — role hours on a waterfall) ────────
@@ -316,7 +447,7 @@ function Recipe({ e, draft }: { e: TierEconomics; draft: Assumptions }) {
   return (
     <div className="max-w-xl">
       <div className="mb-2 flex items-baseline justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">How {e.name}'s profit is built (3 months)</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">How {e.name}&apos;s profit is built (3 months)</span>
         <span className="text-sm font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(e.termRevenue)}</span>
       </div>
       <div className="space-y-1">
@@ -350,7 +481,8 @@ function Planner({ draft, econ, blendedTarget }: { draft: Assumptions; econ: Tie
 
   return (
     <section className={cn(card, "mb-6 p-5")}>
-      <SectionHeader eyebrow="Planner" title="What can we afford?" sub="floor vs hope" />
+      <SectionHeader eyebrow="Planner" title="What can we afford?" sub="floor vs hope"
+        tip="Move the sliders to see what a given ad budget is built to return, at your target cost-per-client. 'Guaranteed' is locked in over the 3-month minimum; 'if retention holds' is the upside if clients stay." />
       <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
         <div className="space-y-4">
           <Field label="Monthly ad spend" value={fmtMoney(spend)}>
@@ -362,12 +494,12 @@ function Planner({ draft, econ, blendedTarget }: { draft: Assumptions; econ: Tie
           <div className="rounded-[8px] bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">Planning at <b className="text-foreground tabular-nums">{fmtMoney(cac)}</b>/client (your blended target).</div>
         </div>
         <div className="grid grid-cols-2 gap-3 self-start sm:grid-cols-3">
-          <BigStat label="Expected clients" value={clients.toFixed(1)} />
-          <BigStat label="Guaranteed profit" value={fmtMoney(guaranteed)} accent sub="the floor" />
-          <BigStat label="If retention holds" value={fmtMoney(hope)} sub="hope" estimate />
-          <BigStat label="Total ad spend" value={fmtMoney(totalSpend)} danger />
-          <BigStat label="Net (guaranteed)" value={fmtMoney(guaranteed - totalSpend)} accent={guaranteed - totalSpend >= 0} danger={guaranteed - totalSpend < 0} sub="after ad spend, before overhead" />
-          <BigStat label="Strategist hours" value={fmtHours(stratHrs)} sub="capacity to serve them" estimate />
+          <BigStat label="Expected clients" value={clients.toFixed(1)} tip="Ad budget ÷ your target cost-per-client." />
+          <BigStat label="Guaranteed profit" value={fmtMoney(guaranteed)} accent sub="the floor" tip="Profit locked in over each client's 3-month minimum, before fixed overhead." />
+          <BigStat label="If retention holds" value={fmtMoney(hope)} sub="hope" estimate tip="Extra profit IF clients stay past their minimum. A hope, not a guarantee." />
+          <BigStat label="Total ad spend" value={fmtMoney(totalSpend)} danger tip="Monthly ad spend × months." />
+          <BigStat label="Net (guaranteed)" value={fmtMoney(guaranteed - totalSpend)} accent={guaranteed - totalSpend >= 0} danger={guaranteed - totalSpend < 0} sub="after ad spend, before overhead" tip="Guaranteed client profit minus the ad spend to acquire them. This is an acquisition number — it does NOT subtract fixed overhead (that's Question 2)." />
+          <BigStat label="Strategist hours" value={fmtHours(stratHrs)} sub="capacity to serve them" estimate tip="Strategist hours those clients would need over the term — a capacity check on our scarcest role." />
         </div>
       </div>
     </section>
@@ -384,25 +516,25 @@ function Field({ label, value, children }: { label: string; value: string; child
     </div>
   );
 }
-function BigStat({ label, value, sub, accent, danger, estimate }: { label: string; value: string; sub?: string; accent?: boolean; danger?: boolean; estimate?: boolean }) {
+function BigStat({ label, value, sub, accent, danger, estimate, tip }: { label: string; value: string; sub?: string; accent?: boolean; danger?: boolean; estimate?: boolean; tip?: React.ReactNode }) {
   return (
     <div className="rounded-[8px] border border-border bg-background px-3 py-3">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}{tip && <Tip>{tip}</Tip>}</p>
       <p className={cn("mt-1 text-xl font-bold tabular-nums", danger ? "text-destructive" : accent ? "text-success" : "text-foreground")} style={{ fontFamily: "var(--font-heading)" }}><Est on={estimate}>{value}</Est></p>
       {sub && <p className="mt-0.5 text-[10.5px] text-muted-foreground">{sub}</p>}
     </div>
   );
 }
 
-// ─── assumptions drawer (dials + hours grid) ────────────────────────────────────
-function AssumptionsDrawer({ draft, setDraft, onClose, econ, commissionActual, setCommissionActual }: {
+// ─── assumptions drawer (dials + hours grid + real monthly actuals) ─────────────
+function AssumptionsDrawer({ draft, setDraft, onClose, econ }: {
   draft: Assumptions; setDraft: (a: Assumptions) => void; onClose: () => void; econ: TierEconomics[];
-  commissionActual: number; setCommissionActual: (n: number) => void;
 }) {
   const setHours = (tierId: string, role: Role, v: number) =>
     setDraft({ ...draft, tiers: draft.tiers.map((t) => t.id === tierId ? { ...t, hours: { ...t.hours, [role]: Math.max(0, v) } } : t) });
   const setSalary = (role: Role, v: number) => setDraft({ ...draft, roleMonthlySalary: { ...draft.roleMonthlySalary, [role]: Math.max(0, v) } });
   const setOverhead = (key: keyof Assumptions["overhead"], v: number) => setDraft({ ...draft, overhead: { ...draft.overhead, [key]: Math.max(0, v) } });
+  const setActual = (key: keyof Assumptions["companyActuals"], v: number) => setDraft({ ...draft, companyActuals: { ...draft.companyActuals, [key]: Math.max(0, v) } });
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -418,8 +550,30 @@ function AssumptionsDrawer({ draft, setDraft, onClose, econ, commissionActual, s
         <div className="flex-1 space-y-6 overflow-y-auto p-5">
           {/* estimate banner */}
           <div className="flex items-start gap-2 rounded-[8px] border border-primary/25 bg-primary/5 px-3 py-2.5 text-[11px] text-foreground">
-            <Info className="mt-px h-3.5 w-3.5 shrink-0 text-primary" />
+            <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0 text-primary" />
             <span>Hours, retention and the contractor fee are <b>reasoned estimates</b> calibrated to your current model, pending real time-tracking. Edit them to your real figures.</span>
+          </div>
+
+          {/* whole-company real monthly actuals (Question 2) */}
+          <div>
+            <p className="mb-2 flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Whole-company monthly actuals <Tip>Your real total figures for a typical month, across every service line. These drive the &quot;after every bill, does the company profit?&quot; section — not a single payment feed.</Tip>
+            </p>
+            <div className="space-y-1.5">
+              {([
+                ["revenue", "Total revenue (all lines)"],
+                ["adSpend", "Ad spend"],
+                ["commission", "Sales commission paid"],
+                ["processing", "Card / processing fees"],
+              ] as const).map(([k, label]) => (
+                <div key={k} className="flex items-center justify-between rounded-[6px] border border-border px-2.5 py-1.5">
+                  <span className="text-[12px] text-foreground">{label}</span>
+                  <div className="flex items-center gap-1"><span className="text-xs text-muted-foreground">$</span>
+                    <input type="number" min={0} value={draft.companyActuals[k]} onChange={(e) => setActual(k, +e.target.value)}
+                      className="w-24 rounded border-b border-transparent bg-transparent text-right text-[13px] tabular-nums text-foreground focus:border-primary/60 focus:outline-none" /></div>
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* hours grid */}
@@ -490,12 +644,6 @@ function AssumptionsDrawer({ draft, setDraft, onClose, econ, commissionActual, s
                       className="w-24 rounded border-b border-transparent bg-transparent text-right text-[13px] tabular-nums text-foreground focus:border-primary/60 focus:outline-none" /></div>
                 </div>
               ))}
-              <div className="flex items-center justify-between rounded-[6px] border border-primary/20 bg-primary/5 px-2.5 py-1.5">
-                <span className="text-[12px] text-foreground">Actual commission paid <span className="text-[10px] text-muted-foreground">(this month)</span></span>
-                <div className="flex items-center gap-1"><span className="text-xs text-muted-foreground">$</span>
-                  <input type="number" min={0} value={commissionActual} onChange={(e) => setCommissionActual(Math.max(0, +e.target.value))}
-                    className="w-24 rounded border-b border-transparent bg-transparent text-right text-[13px] tabular-nums text-foreground focus:border-primary/60 focus:outline-none" /></div>
-              </div>
             </div>
           </div>
         </div>

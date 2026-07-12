@@ -51,6 +51,14 @@ export function normalizeAssumptions(input: unknown): Assumptions {
     otherAdmin: Math.max(0, num(ovIn.otherAdmin, seed.overhead.otherAdmin)),
   };
 
+  const caIn = (o.companyActuals ?? {}) as Record<string, unknown>;
+  const companyActuals = {
+    revenue: Math.max(0, num(caIn.revenue, seed.companyActuals.revenue)),
+    adSpend: Math.max(0, num(caIn.adSpend, seed.companyActuals.adSpend)),
+    commission: Math.max(0, num(caIn.commission, seed.companyActuals.commission)),
+    processing: Math.max(0, num(caIn.processing, seed.companyActuals.processing)),
+  };
+
   return {
     termMonths: Math.max(1, Math.round(num(o.termMonths, seed.termMonths))),
     commissionPct: clampPct(o.commissionPct, seed.commissionPct),
@@ -60,6 +68,7 @@ export function normalizeAssumptions(input: unknown): Assumptions {
     roleMonthlySalary,
     tiers,
     overhead,
+    companyActuals,
   };
 }
 

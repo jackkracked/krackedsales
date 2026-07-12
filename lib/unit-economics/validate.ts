@@ -71,6 +71,11 @@ const pnl = computeCompanyPnL({ revenue: 98580, adSpend: 500, commission: 1500, 
 check(`net ties out (rev − var − overhead), got $${pnl.net.toFixed(0)}`, near(pnl.net, 98580 - 2500 - 83750, 1));
 check("contribution checkpoint = revenue − variable", near(pnl.totalContribution, pnl.revenue - pnl.variableTotal, 0.01));
 
+// The SEEDED companyActuals must reproduce §9 out of the box: net ~$12,330 (12.5%).
+const seededPnl = computeCompanyPnL(SEED_ASSUMPTIONS.companyActuals, SEED_ASSUMPTIONS);
+check(`seeded companyActuals net ≈ $12,330 (got $${seededPnl.net.toFixed(0)})`, near(seededPnl.net, 12330, 1));
+check(`seeded net margin ≈ 12.5% (got ${(seededPnl.netPct * 100).toFixed(1)}%)`, near(seededPnl.netPct * 100, 12.5, 0.2));
+
 console.log("");
 if (failures) { console.log(`❌ ${failures} FAILURE(S)`); process.exit(1); }
 console.log("✅ ALL CHECKS PASS — engine matches §9 and is robust");

@@ -66,6 +66,10 @@ export interface Assumptions {
   roleMonthlySalary: Record<Role, number>;
   tiers: TierInput[];
   overhead: OverheadInput;
+  // Whole-company monthly ACTUALS (§5/§6.4). Real total revenue + real total variable costs —
+  // Gage's confirmed figures, NOT reconstructed from the per-client model or a single Stripe
+  // feed. Seeded to reproduce §9 (net ~$12,330 / 12.5%); editable monthly.
+  companyActuals: CompanyActuals;
 }
 
 // ── Outputs ─────────────────────────────────────────────────────────────────────
