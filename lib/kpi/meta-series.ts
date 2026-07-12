@@ -48,10 +48,14 @@ export function leadsFromActions(actions: MetaAction[] | undefined): number {
   return 0;
 }
 
+export interface CampaignSpend { campaign: string; spend: number }
+
 export interface MetaAdSpend {
   hasData: boolean;
   /** Total spend (dollars) over [start, end). */
   spendInRange: (start: Date, end: Date) => number;
+  /** Per-campaign spend over [start, end), biggest first — the drill-down behind the total. */
+  spendByCampaignInRange: (start: Date, end: Date) => CampaignSpend[];
   /** Spend per bucket, in dollars. */
   spendByBuckets: (buckets: Bucket[]) => number[];
   /** Total Meta lead-form submissions over [start, end). */
@@ -63,6 +67,7 @@ export interface MetaAdSpend {
 const EMPTY: MetaAdSpend = {
   hasData: false,
   spendInRange: () => 0,
+  spendByCampaignInRange: () => [],
   spendByBuckets: (b) => b.map(() => 0),
   leadsInRange: () => 0,
   leadsByBuckets: (b) => b.map(() => 0),
@@ -134,6 +139,17 @@ export async function loadMetaAdSpend(
   const spendInRange = (start: Date, end: Date): number =>
     daily.filter((d) => d.date >= start && d.date < end).reduce((sum, d) => sum + d.spend, 0);
 
+  const spendByCampaignInRange = (start: Date, end: Date): CampaignSpend[] => {
+    const m = new Map<string, number>();
+    for (const d of daily) {
+      if (d.date >= start && d.date < end) {
+        const name = d.campaign || "(unnamed campaign)";
+        m.set(name, (m.get(name) ?? 0) + d.spend);
+      }
+    }
+    return [...m.entries()].map(([campaign, spend]) => ({ campaign, spend })).sort((a, b) => b.spend - a.spend);
+  };
+
   const spendByBuckets = (buckets: Bucket[]): number[] =>
     bucketSum(daily, (d) => d.date, (d) => d.spend, buckets);
 
@@ -143,5 +159,5 @@ export async function loadMetaAdSpend(
   const leadsByBuckets = (buckets: Bucket[]): number[] =>
     bucketSum(daily, (d) => d.date, (d) => d.leads, buckets);
 
-  return { hasData: true, spendInRange, spendByBuckets, leadsInRange, leadsByBuckets };
+  return { hasData: true, spendInRange, spendByCampaignInRange, spendByBuckets, leadsInRange, leadsByBuckets };
 }

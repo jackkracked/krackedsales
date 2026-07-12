@@ -68,6 +68,9 @@ export async function GET(req: NextRequest) {
       newClients: rollClients,
       adSpendAvailable: !!meta?.hasData,
       clientsAvailable: rollClientsR.status === "fulfilled",
+      // The per-campaign split behind the ad-spend total, so a founder can see exactly
+      // where it comes from (three DTC demo campaigns, not one) and verify it vs Meta.
+      byCampaign: meta?.spendByCampaignInRange(rollStart, now) ?? [],
     },
     month: {
       label: pnlLabel, // the last COMPLETE calendar month this P&L covers

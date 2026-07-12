@@ -38,7 +38,7 @@ const card = "bg-card border border-border rounded-[10px]";
 type WindowDays = 30 | 60 | 90;
 interface LiveData {
   window: number;
-  realized: { cac: number | null; adSpend: number; newClients: number; adSpendAvailable: boolean; clientsAvailable: boolean };
+  realized: { cac: number | null; adSpend: number; newClients: number; adSpendAvailable: boolean; clientsAvailable: boolean; byCampaign?: { campaign: string; spend: number }[] };
   month: { label?: string; revenue: number; revenueAvailable: boolean; adSpend: number; adSpendAvailable: boolean; newClients: number; commissionEstimate: number; processingEstimate: number };
 }
 interface ClientRow { name: string; acquiredAt: string; firstType: string; firstAmount: number }
@@ -51,6 +51,7 @@ export function MoneyClient() {
   const [win, setWin] = useState<WindowDays>(30);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [clientsOpen, setClientsOpen] = useState(false);
+  const [spendOpen, setSpendOpen] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   const { data: aData } = useQuery<{ assumptions: Assumptions }>({
@@ -114,6 +115,7 @@ export function MoneyClient() {
   const rollAdSpend = live?.realized.adSpend ?? 0;
   const rollClients = live?.realized.newClients ?? 0;
   const clientsAvailable = !!live?.realized.clientsAvailable;
+  const spendCampaigns = live?.realized.byCampaign ?? [];
   const mixTotal = Math.max(1, econ.reduce((s, e) => s + e.expectedMonthlyCount, 0));
   const contribPerClient = econ.reduce((s, e) => s + e.contribution * e.expectedMonthlyCount, 0) / mixTotal; // guaranteed $/client, blended
   const ltvPerClient = econ.reduce((s, e) => s + e.ltvContribution * e.expectedMonthlyCount, 0) / mixTotal;
@@ -196,6 +198,30 @@ export function MoneyClient() {
               </span>
             </p>
           )}
+          {/* where the ad spend comes from — click to verify, biggest first */}
+          {spendCampaigns.length > 0 && (
+            <div className="mt-3">
+              <button onClick={() => setSpendOpen((v) => !v)}
+                className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground underline decoration-dotted decoration-muted-foreground/40 underline-offset-2 transition-colors hover:text-foreground">
+                {spendOpen ? "Hide" : "See"} where the {fmtMoney(rollAdSpend)} comes from ({spendCampaigns.length} campaign{spendCampaigns.length === 1 ? "" : "s"})
+              </button>
+              {spendOpen && (
+                <div className="mt-2 max-w-xl divide-y divide-border/50 rounded-[8px] border border-border bg-background px-3">
+                  {spendCampaigns.map((c, i) => (
+                    <div key={i} className="flex items-center justify-between gap-3 py-1.5 text-[12.5px]">
+                      <span className="min-w-0 flex-1 truncate text-foreground" title={c.campaign}>{c.campaign}</span>
+                      <span className="shrink-0 font-medium tabular-nums text-foreground">{fmtMoney(c.spend)}</span>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between gap-3 py-1.5 text-[12.5px] font-bold">
+                    <span className="text-muted-foreground">Total · last {win} days</span>
+                    <span className="tabular-nums text-foreground">{fmtMoney(rollAdSpend)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* the three numbers that make the answer, at a glance */}
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <KeyNum label="Worth per client" tip="What one new client is worth to us in guaranteed profit over their 3-month minimum — counting only the cost of serving them, not fixed bills." value={fmtMoney(contribPerClient)} sub="guaranteed, first 3 months" estimate />
