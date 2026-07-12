@@ -30,28 +30,34 @@ export async function GET(req: NextRequest) {
 
   const now = new Date();
   const rollStart = new Date(now.getTime() - windowDays * 86_400_000);
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-  const fetchStart = rollStart < monthStart ? rollStart : monthStart;
-  const fetchEnd = now > monthEnd ? now : monthEnd;
+
+  // The whole-company P&L ("did we keep money?") uses the LAST COMPLETE calendar month,
+  // never the month-in-progress: a partial month of revenue against a full month of overhead
+  // reads as a false catastrophic loss (e.g. 12 days of income vs a whole month of salaries).
+  // Full-month revenue vs full-month overhead is the only apples-to-apples "can we afford to run".
+  const pnlStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  const pnlEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)); // exclusive
+  const pnlLabel = MONTH_NAMES[pnlStart.getUTCMonth()];
+
+  const fetchStart = rollStart < pnlStart ? rollStart : pnlStart;
 
   const a = await loadAssumptions();
 
-  const [metaR, stripeR, rollClientsR, monthClientsR] = await Promise.allSettled([
-    loadMetaAdSpend(fetchStart, fetchEnd),
-    loadStripeKpiSeries(fetchStart, fetchEnd),
+  const [metaR, stripeR, rollClientsR, pnlClientsR] = await Promise.allSettled([
+    loadMetaAdSpend(fetchStart, now),
+    loadStripeKpiSeries(fetchStart, now),
     countNewClients(rollStart, now),
-    countNewClients(monthStart, monthEnd),
+    countNewClients(pnlStart, pnlEnd),
   ]);
 
   const meta = metaR.status === "fulfilled" ? metaR.value : null;
   const stripe = stripeR.status === "fulfilled" ? stripeR.value : null;
   const rollClients = rollClientsR.status === "fulfilled" ? rollClientsR.value : 0;
-  const monthClients = monthClientsR.status === "fulfilled" ? monthClientsR.value : 0;
+  const pnlClients = pnlClientsR.status === "fulfilled" ? pnlClientsR.value : 0;
 
   const rollAdSpend = meta?.spendInRange(rollStart, now) ?? 0;
-  const monthAdSpend = meta?.spendInRange(monthStart, monthEnd) ?? 0;
-  const monthRevenue = stripe?.cashInRange(monthStart, monthEnd) ?? 0;
+  const pnlAdSpend = meta?.spendInRange(pnlStart, pnlEnd) ?? 0;
+  const pnlRevenue = stripe?.cashInRange(pnlStart, pnlEnd) ?? 0;
 
   return NextResponse.json({
     window: windowDays,
@@ -64,14 +70,20 @@ export async function GET(req: NextRequest) {
       clientsAvailable: rollClientsR.status === "fulfilled",
     },
     month: {
-      revenue: monthRevenue,
+      label: pnlLabel, // the last COMPLETE calendar month this P&L covers
+      revenue: pnlRevenue,
       revenueAvailable: !!stripe?.hasData,
-      adSpend: monthAdSpend,
+      adSpend: pnlAdSpend,
       adSpendAvailable: !!meta?.hasData,
-      newClients: monthClients,
+      newClients: pnlClients,
       // Flagged estimates — edit to real actuals in the UI (see file header).
-      commissionEstimate: monthRevenue * a.commissionPct,
-      processingEstimate: monthRevenue * a.processingPct,
+      commissionEstimate: pnlRevenue * a.commissionPct,
+      processingEstimate: pnlRevenue * a.processingPct,
     },
   });
 }
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];

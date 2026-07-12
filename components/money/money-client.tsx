@@ -36,7 +36,7 @@ type WindowDays = 30 | 60 | 90;
 interface LiveData {
   window: number;
   realized: { cac: number | null; adSpend: number; newClients: number; adSpendAvailable: boolean; clientsAvailable: boolean };
-  month: { revenue: number; revenueAvailable: boolean; adSpend: number; adSpendAvailable: boolean; newClients: number; commissionEstimate: number; processingEstimate: number };
+  month: { label?: string; revenue: number; revenueAvailable: boolean; adSpend: number; adSpendAvailable: boolean; newClients: number; commissionEstimate: number; processingEstimate: number };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -87,7 +87,11 @@ export function MoneyClient() {
   }, [draft]);
 
   if (!draft) {
-    return <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6"><div className="h-40 animate-pulse rounded-[10px] bg-muted/40" /></div>;
+    return (
+      <div className="h-full overflow-y-auto">
+        <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6"><div className="h-40 animate-pulse rounded-[10px] bg-muted/40" /></div>
+      </div>
+    );
   }
 
   // ── company P&L (real totals) ─────────────────────────────────────────────────
@@ -108,8 +112,10 @@ export function MoneyClient() {
   const monthlyBlendedContribution = econ.reduce((s, e) => s + e.monthlyContribution * e.expectedMonthlyCount, 0) / mixTotal;
   const payback = realized != null ? paybackMonths(realized, monthlyBlendedContribution) : null;
   const cacUnder = realized != null && realized <= blendedTarget;
+  const pnlMonth = live?.month.label; // the last COMPLETE calendar month the P&L covers
 
   return (
+    <div className="h-full overflow-y-auto">
     <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
       {/* Header */}
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -135,9 +141,11 @@ export function MoneyClient() {
 
       {/* ── Verdict line ─────────────────────────────────────────────────────── */}
       <div className={cn(card, "mb-4 px-6 py-5")}>
-        <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">This month</p>
+        <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+          Last full month{pnlMonth ? ` · ${pnlMonth}` : ""}
+        </p>
         <p className="mt-1.5 text-lg leading-snug text-foreground sm:text-xl">
-          We spent{" "}
+          {pnlMonth ? `In ${pnlMonth} we` : "We"} spent{" "}
           <b className="text-2xl font-bold tabular-nums text-destructive sm:text-[28px]" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(monthAdSpend)}</b>{" "}
           on ads and, after every cost, the company{" "}
           {revenueLive ? (
@@ -231,7 +239,7 @@ export function MoneyClient() {
 
       {/* ── ② Did the company keep money? ────────────────────────────────────── */}
       <section className={cn(card, "mb-6 p-5")}>
-        <SectionHeader eyebrow="Whole business" title="Did the company keep money?" sub="this month" />
+        <SectionHeader eyebrow="Whole business" title="Did the company keep money?" sub={pnlMonth ? `${pnlMonth} (last full month)` : "last full month"} />
         {revenueLive ? (
           <Bridge steps={pnlSteps(pnl, commissionActual === 0)} height={210} />
         ) : (
@@ -253,6 +261,7 @@ export function MoneyClient() {
 
       {drawerOpen && <AssumptionsDrawer draft={draft} setDraft={setDraft} onClose={() => setDrawerOpen(false)} econ={econ}
         commissionActual={commissionActual} setCommissionActual={setCommissionActual} />}
+    </div>
     </div>
   );
 }
