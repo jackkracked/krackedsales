@@ -4,15 +4,16 @@ import { ghl, locationId } from "@/lib/ghl/client";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-// The business reports in Eastern time (the daily summary derives "yesterday"/"this month" in
-// America/New_York). Month boundaries must match, or a call late on the 1st/last day lands in the
-// wrong month. GHL also returns events a few hours outside the requested range, so we re-filter.
+// The business reports in Eastern time (the daily summary derives "this month" in
+// America/New_York). Booking-date boundaries must match, or a booking made late on the
+// 1st/last day of the month lands in the wrong month.
 const BUSINESS_TZ = "America/New_York";
 
 interface GHLCalendar { id: string; name?: string }
 interface GHLCalendarEvent {
   id: string;
   startTime?: string;
+  dateAdded?: string; // when the appointment was BOOKED (created) — the metric's basis
   contactId?: string;
   deleted?: boolean;
   appointmentStatus?: string; // "confirmed" | "cancelled" | "showed" | "noshow" ...
@@ -20,10 +21,18 @@ interface GHLCalendarEvent {
 }
 
 /**
- * Which calendars count as a booked sales call. NAME-based on purpose: the old approach hardcoded
- * a single calendar id in GHL_INTRO_CALL_CALENDAR_ID, which had gone stale (pointed at an
- * abandoned "…Intro Call OLD" calendar) AND carried a trailing "\n", so every lookup 400'd and
- * the summary silently showed 0. Matching on name self-heals when a calendar is replaced or added.
+ * "Booked This Month" counts calls by the date they were BOOKED (GHL `dateAdded`), NOT by when
+ * the call happens — a call booked this month for a slot next month counts THIS month (Jack's
+ * chosen definition). Rules:
+ *   - distinct PROSPECTS (dedupe by contactId): a no-show who rebooks = 1 booked, not 2.
+ *   - exclude cancelled + deleted appointments.
+ *   - booking-date window is in the business timezone (Eastern).
+ *
+ * GHL's /calendars/events API only filters by the call's start time, so to catch everything
+ * booked in the window (including calls scheduled far ahead) we fetch a WIDE start-time range
+ * from the window start to ~18 months out, then filter by dateAdded. A booked call always has
+ * startTime >= dateAdded (you can't book a call in the past), so nothing booked in-window can
+ * have a start time before the window start.
  */
 function isBookedCallCalendar(name: string): boolean {
   const n = name.toLowerCase();
@@ -43,11 +52,18 @@ function tzDayBoundaryMs(ymd: string, endOfDay: boolean): number {
   return guessUtc - (shownUtc - guessUtc); // subtract the tz offset at that instant
 }
 
+const DAY_MS = 86_400_000;
+
 export async function GET(req: NextRequest) {
-  const since = req.nextUrl.searchParams.get("since"); // YYYY-MM-DD (business tz)
-  const until = req.nextUrl.searchParams.get("until"); // YYYY-MM-DD (business tz, inclusive day)
-  const sinceMs = since ? tzDayBoundaryMs(since, false) : new Date().setDate(1);
-  const untilMs = until ? tzDayBoundaryMs(until, true) : Date.now();
+  const since = req.nextUrl.searchParams.get("since"); // YYYY-MM-DD (business tz) — BOOKING date
+  const until = req.nextUrl.searchParams.get("until"); // YYYY-MM-DD (business tz, inclusive) — BOOKING date
+  // Booking-date window (what we count on).
+  const bookSinceMs = since ? tzDayBoundaryMs(since, false) : new Date().setDate(1);
+  const bookUntilMs = until ? tzDayBoundaryMs(until, true) : Date.now();
+  // Wide call-start window we must fetch to catch every event booked in that window (incl. calls
+  // scheduled ahead). Floor a little before the booking-window start; ceiling ~18 months out.
+  const fetchStartMs = bookSinceMs - 2 * DAY_MS;
+  const fetchEndMs = Date.now() + 550 * DAY_MS;
 
   try {
     const loc = locationId();
@@ -58,13 +74,13 @@ export async function GET(req: NextRequest) {
       cals.map(async (cal) => {
         try {
           const data = await ghl.get<{ events?: GHLCalendarEvent[] }>(
-            `/calendars/events?locationId=${loc}&calendarId=${cal.id}&startTime=${sinceMs}&endTime=${untilMs}`,
+            `/calendars/events?locationId=${loc}&calendarId=${cal.id}&startTime=${fetchStartMs}&endTime=${fetchEndMs}`,
           );
           const events = (data.events ?? []).filter((e) => {
-            if (e.deleted === true) return false;                                   // deleted appt never counts
-            if ((e.appointmentStatus ?? e.status ?? "").toLowerCase() === "cancelled") return false; // cancelled never counts
-            const startMs = e.startTime ? new Date(e.startTime).getTime() : NaN;    // GHL returns a few outside the range
-            return Number.isFinite(startMs) && startMs >= sinceMs && startMs <= untilMs;
+            if (e.deleted === true) return false;
+            if ((e.appointmentStatus ?? e.status ?? "").toLowerCase() === "cancelled") return false;
+            const bookedMs = e.dateAdded ? new Date(e.dateAdded).getTime() : NaN; // count by BOOKING date
+            return Number.isFinite(bookedMs) && bookedMs >= bookSinceMs && bookedMs <= bookUntilMs;
           });
           return { id: cal.id, name: cal.name ?? cal.id, events };
         } catch (e) {
@@ -74,28 +90,24 @@ export async function GET(req: NextRequest) {
       }),
     );
 
-    // If ANY matching calendar failed to read, don't under-report a partial number as fact.
+    // If ANY matching calendar failed to read, don't report a partial number as fact.
     if (perCalendar.some((c) => c.events === null)) {
       const failed = perCalendar.filter((c) => c.events === null).map((c) => c.name);
       return NextResponse.json({ count: null, error: `calendar read failed: ${failed.join(", ")}` }, { status: 502 });
     }
 
-    // Count DISTINCT prospects, not appointments: a prospect who no-shows and rebooks (two events,
-    // same contactId) is ONE booked call, not two. Events with no contactId fall back to their own
-    // id so they still count once each.
+    // Distinct prospects, not appointments (rebook = 1). No contactId → fall back to event id.
     const all = perCalendar.flatMap((c) => c.events ?? []);
-    const distinct = new Set(all.map((e) => e.contactId || e.id));
-    const count = distinct.size;
+    const count = new Set(all.map((e) => e.contactId || e.id)).size;
 
-    console.log(`[booked-calls] ${count} distinct prospects (${all.length} appts) across ${cals.length} calendars (${since}..${until})`);
+    console.log(`[booked-calls] ${count} prospects booked (${all.length} appts) in ${since}..${until} across ${cals.length} calendars`);
     return NextResponse.json({
       count,
-      appointments: all.length, // non-deduped, for transparency
+      appointments: all.length,
       byCalendar: perCalendar.map((c) => ({ name: c.name, appointments: c.events?.length ?? 0 })).filter((c) => c.appointments > 0),
     });
   } catch (err) {
     console.error("[/api/ghl/opportunities/booked-calls]", err);
-    // Explicit null (not 0) so the caller shows "—", never a false 0.
     return NextResponse.json({ count: null, error: err instanceof Error ? err.message : String(err) }, { status: 502 });
   }
 }
