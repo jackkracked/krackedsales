@@ -7,6 +7,7 @@ import { RefreshCw, Shield, Settings2, Plus, X, ChevronDown, ChevronRight } from
 import { cn } from "@/lib/utils/cn";
 import { format, startOfMonth, addMonths } from "date-fns";
 import { MetricSection } from "./metric-section";
+import { AcquisitionEconomicsSection } from "./acquisition-economics-section";
 import { MetricCell, fmtCurrency, fmtNumber, type MetricDef, type MetricTarget, type DateWindow, fmtValue } from "./metric-cell";
 import { KpiDetailSheet } from "./KpiDetailSheet";
 import { KpiConfigurator } from "./kpi-configurator";
@@ -504,6 +505,10 @@ export function KpisClient() {
             </button>
           </div>
         )}
+
+        {/* Acquisition economics (CAC / contribution) — admin-only: the same engine also powers
+            the sensitive company P&L, so it stays behind the admin gate. Full model lives on /money. */}
+        {isAdmin && <AcquisitionEconomicsSection />}
       </div>
 
       {detailMetric && (

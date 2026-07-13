@@ -222,6 +222,28 @@ export function blendedTargetCac(econ: TierEconomics[], basis: "floor" | "hope" 
   return count > 0 ? weighted / count : 0;
 }
 
+/** Weighted-by-mix mean of a per-tier field (the one place the mix weighting lives, so
+ *  every "blended per client" number is computed identically and can never drift). */
+function blendedPerClient(econ: TierEconomics[], pick: (e: TierEconomics) => number): number {
+  let weighted = 0;
+  let count = 0;
+  for (const e of econ) { weighted += pick(e) * e.expectedMonthlyCount; count += e.expectedMonthlyCount; }
+  return count > 0 ? weighted / count : 0;
+}
+/** Guaranteed-term contribution $ for the average acquired client, by expected mix (the honest
+ *  "what a client is worth" number the acquisition view leads with). */
+export function blendedContributionPerClient(econ: TierEconomics[]): number {
+  return blendedPerClient(econ, (e) => e.contribution);
+}
+/** LTV (with modelled retention) for the average client — the "hope", by expected mix. */
+export function blendedLtvPerClient(econ: TierEconomics[]): number {
+  return blendedPerClient(econ, (e) => e.ltvContribution);
+}
+/** Monthly guaranteed contribution for the average client, by expected mix (drives payback). */
+export function blendedMonthlyContributionPerClient(econ: TierEconomics[]): number {
+  return blendedPerClient(econ, (e) => e.monthlyContribution);
+}
+
 /** Blended breakeven = weighted conservative (guaranteed) max CAC, no renewals (§9 ~$2,310). */
 export function blendedBreakevenCac(econ: TierEconomics[]): number {
   let weighted = 0;

@@ -6,6 +6,7 @@
 import { SEED_ASSUMPTIONS } from "./defaults";
 import {
   computeTiers, computeTier, blendedTargetCac, blendedBreakevenCac, realizedCac, paybackMonths,
+  blendedContributionPerClient, blendedLtvPerClient,
   computeCompanyPnL, type Assumptions, type TierInput,
 } from "./model";
 
@@ -36,6 +37,10 @@ check(`recommended floor ≈ $312 (got $${t1000.recommendedMaxCacFloor.toFixed(0
 console.log("§9 blended:");
 check(`blended target (floor) ≈ $770 (got $${blendedTargetCac(econ, "floor").toFixed(0)})`, near(blendedTargetCac(econ, "floor"), 770, 12));
 check(`blended breakeven ≈ $2,310 (got $${blendedBreakevenCac(econ).toFixed(0)})`, near(blendedBreakevenCac(econ), 2310, 20));
+// Shared blended-per-client helpers (used by both /money and the /kpis section — must not drift).
+check("blended contribution/client = breakeven (conservative cap, all tiers viable)", near(blendedContributionPerClient(econ), blendedBreakevenCac(econ), 0.01));
+check("blended LTV/client > contribution/client (hope ≥ floor)", blendedLtvPerClient(econ) > blendedContributionPerClient(econ));
+check(`blended target hope > floor (both shown, §6.6): $${blendedTargetCac(econ, "hope").toFixed(0)} > $${blendedTargetCac(econ, "floor").toFixed(0)}`, blendedTargetCac(econ, "hope") > blendedTargetCac(econ, "floor"));
 check(`realized CAC ≈ $729 sample (spend 9477 / 13)`, near(realizedCac(9477, 13)!, 729, 1));
 
 // ── Robustness: NaN/undefined inputs never NaN the output ────────────────────────

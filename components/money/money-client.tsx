@@ -9,6 +9,7 @@ import { Tip } from "./tip";
 import { fmtMoney, fmtMoneyK, fmtPct, fmtRatio, fmtMonths, fmtHours } from "./format";
 import {
   computeTiers, blendedTargetCac, blendedBreakevenCac, paybackMonths,
+  blendedContributionPerClient, blendedLtvPerClient, blendedMonthlyContributionPerClient,
   computeCompanyPnL, sumOverhead, ROLES, ROLE_LABELS,
   type Assumptions, type TierEconomics, type Role,
 } from "@/lib/unit-economics/model";
@@ -116,10 +117,10 @@ export function MoneyClient() {
   const rollClients = live?.realized.newClients ?? 0;
   const clientsAvailable = !!live?.realized.clientsAvailable;
   const spendCampaigns = live?.realized.byCampaign ?? [];
-  const mixTotal = Math.max(1, econ.reduce((s, e) => s + e.expectedMonthlyCount, 0));
-  const contribPerClient = econ.reduce((s, e) => s + e.contribution * e.expectedMonthlyCount, 0) / mixTotal; // guaranteed $/client, blended
-  const ltvPerClient = econ.reduce((s, e) => s + e.ltvContribution * e.expectedMonthlyCount, 0) / mixTotal;
-  const monthlyContribPerClient = econ.reduce((s, e) => s + e.monthlyContribution * e.expectedMonthlyCount, 0) / mixTotal;
+  const contribPerClient = blendedContributionPerClient(econ); // guaranteed $/client, blended by mix
+  const ltvPerClient = blendedLtvPerClient(econ); // with modelled retention (the "hope")
+  const monthlyContribPerClient = blendedMonthlyContributionPerClient(econ);
+  const blendedTargetHope = blendedTargetCac(econ, "hope"); // ceiling if retention holds (§6.6 shows both)
   const ltvCacRatio = realized && realized > 0 ? ltvPerClient / realized : null;
   const payback = realized != null ? paybackMonths(realized, monthlyContribPerClient) : null;
   const cacUnder = realized != null && realized <= blendedTarget;
@@ -176,7 +177,7 @@ export function MoneyClient() {
               <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(rollAdSpend)}</b>{" "}
               on ads in the last {win} days and brought in{" "}
               <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{rollClients} client{rollClients === 1 ? "" : "s"}</b>{" "}
-              at <b className="tabular-nums">{realized != null ? fmtMoney(realized) : "—"}</b> each. They&apos;re worth about{" "}
+              at <b className="tabular-nums">{realized != null ? fmtMoney(realized) : "—"}</b> each. At our average client value they&apos;re worth about{" "}
               <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(realizedProfit)}</b>{" "}
               in guaranteed profit, so after the ad spend we&apos;re up{" "}
               <b className={cn("text-2xl font-bold tabular-nums sm:text-[26px]", acqNet >= 0 ? "text-success" : "text-destructive")} style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(acqNet)}</b>
@@ -190,7 +191,7 @@ export function MoneyClient() {
               <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(contribPerClient)}</b>{" "}
               in guaranteed profit, and we can afford up to{" "}
               <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(blendedTarget)}</b>{" "}
-              to get one. At that rate this spend is built to return about{" "}
+              to get one (guaranteed floor; up to <b className="tabular-nums">{fmtMoney(blendedTargetHope)}</b> if they renew). At that rate this spend is built to return about{" "}
               <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{impliedClients.toFixed(0)} clients</b>{" "}
               (~<b className="tabular-nums">{fmtMoney(impliedProfit)}</b> guaranteed).{" "}
               <span className="text-muted-foreground">
@@ -225,7 +226,7 @@ export function MoneyClient() {
           {/* the three numbers that make the answer, at a glance */}
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <KeyNum label="Worth per client" tip="What one new client is worth to us in guaranteed profit over their 3-month minimum — counting only the cost of serving them, not fixed bills." value={fmtMoney(contribPerClient)} sub="guaranteed, first 3 months" estimate />
-            <KeyNum label="Most we'll pay to get one" tip="Our target ceiling to acquire a client and still keep a 3:1 safety margin on the guaranteed term. Bring clients in under this and every ad dollar makes money." value={fmtMoney(blendedTarget)} sub="target cost-per-client" />
+            <KeyNum label="Most we'll pay to get one" tip="Two ceilings, per the spec: the FLOOR is what we can pay and still profit on the guaranteed 3 months alone (no renewals). The HOPE is the higher ceiling if clients stay past their minimum. We lead with the floor and never bank on the hope." value={fmtMoney(blendedTarget)} sub={`guaranteed floor · up to ${fmtMoney(blendedTargetHope)} if they renew`} />
             <KeyNum label={`Cost per client · ${win}d`} tip="What we actually paid in ads per new client over this window (ad spend ÷ new clients). Needs enough settled closes to trust." value={realized != null ? fmtMoney(realized) : "—"}
               sub={acqTrustworthy ? (cacUnder ? "under target — good" : "over target") : "still settling"}
               tone={!acqTrustworthy ? "muted" : cacUnder ? "good" : "bad"} estimate={!acqTrustworthy} />
@@ -242,7 +243,7 @@ export function MoneyClient() {
         <Stat label="LTV : CAC" value={ltvCacRatio != null ? fmtRatio(ltvCacRatio) : "—"} accent
           tip="For every $1 we spend to get a client, how many dollars they're worth back. 3:1 or higher is healthy. Uses modelled retention, so treat as a hope until churn data matures."
           badge={ltvCacRatio != null ? { text: ltvCacRatio >= 3 ? "healthy" : "thin", ok: ltvCacRatio >= 3 } : undefined}
-          sub="3:1 is the health line" estimate />
+          sub="3:1 healthy · retention hope" estimate />
         <Stat label="CAC payback" value={payback != null ? fmtMonths(payback) : "—"}
           tip="How many months a new client takes to pay back what we spent to acquire them. Inside the 3-month term is safe."
           sub={`term is ${draft.termMonths} mo`} badge={payback != null ? { text: payback < draft.termMonths ? "inside term" : "past term", ok: payback < draft.termMonths } : undefined} estimate />
