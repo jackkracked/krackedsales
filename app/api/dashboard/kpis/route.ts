@@ -12,6 +12,7 @@ import {
   startOfMonth, addDays, subDays, differenceInCalendarDays, format,
 } from "date-fns";
 import { getKpiDef } from "@/lib/dashboard-kpis";
+import { getSessionUser } from "@/lib/auth/session";
 import { kpiHealthLog } from "@/lib/db/schema";
 import { KPI_DEFINITIONS } from "@/lib/kpi-health/definitions";
 import { getAdaptiveBuckets, bucketCount, bucketSum } from "@/lib/kpi/buckets";
@@ -87,13 +88,24 @@ export interface KpiMetricResult {
  * clamped to now (so the current period never trails off into future zeros).
  */
 export async function GET(req: NextRequest) {
+  // Auth + privilege clamp: role and identity come from the SESSION, never the client. A rep
+  // can only ever get rep metrics for THEMSELVES, and admin-only keys are dropped for reps.
+  // (Previously open: any caller could pass role=admin, admin keys, or another rep's id/email.)
+  const user = await getSessionUser().catch(() => null);
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { searchParams } = new URL(req.url);
-  const keys = searchParams.getAll("keys[]");
-  const userId = searchParams.get("userId") ?? "";
-  const ghlUserId = searchParams.get("ghlUserId") ?? "";
-  const repEmail = searchParams.get("email") ?? "";
-  const role = (searchParams.get("role") ?? "admin") as "admin" | "rep";
+  const requestedRole = (searchParams.get("role") ?? "admin") as "admin" | "rep";
+  const role: "admin" | "rep" = user.role === "admin" ? requestedRole : "rep";
+
+  // Admins may look up any rep (oversight); reps are hard-scoped to themselves.
+  const userId = user.role === "admin" ? (searchParams.get("userId") ?? "") : user.id;
+  const ghlUserId = user.role === "admin" ? (searchParams.get("ghlUserId") ?? "") : (user.ghlUserId ?? "");
+  const repEmail = user.role === "admin" ? (searchParams.get("email") ?? "") : (user.email ?? "");
   const preset = searchParams.get("preset") ?? "";
+
+  // Only compute keys this role may see (drops admin-only keys for reps + any unknown key).
+  const keys = searchParams.getAll("keys[]").filter((k) => getKpiDef(k)?.roles.includes(role));
 
   if (!keys.length) return NextResponse.json({ metrics: {} });
 

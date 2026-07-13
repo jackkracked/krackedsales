@@ -63,7 +63,9 @@ function toMonthlyCents(item: Stripe.SubscriptionItem): number {
 export async function GET(req: NextRequest) {
   try {
     const user = await getSessionUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    // Admin-only: this powers the /kpis page (company-wide KPIs incl. revenue/MRR). Reps get
+    // rep-scoped KPIs on their own dashboard via /api/dashboard/kpis and never reach here.
+    if (!user || user.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const { searchParams } = new URL(req.url);
     const range = parseRange(searchParams);

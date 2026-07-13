@@ -7,6 +7,7 @@ import { fetchAllOpportunities } from "@/lib/ghl/paginate";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 import { startOfMonth, endOfMonth, startOfDay, endOfDay, subDays, startOfWeek, startOfYear, addDays, format } from "date-fns";
 import { getRepCommissionEvents, commissionInRange, type PayoutTiming } from "@/lib/kpi/rep-proposal-commission";
+import { getSessionUser } from "@/lib/auth/session";
 
 /**
  * GET /api/kpi/rep-metrics?userId=&ghlUserId=&email=
@@ -22,10 +23,16 @@ import { getRepCommissionEvents, commissionInRange, type PayoutTiming } from "@/
  * - commissionThisWeek / ThisMonth / ThisYear: earned commission amounts
  */
 export async function GET(req: NextRequest) {
+  // Auth + self-scope: identity comes from the SESSION, never the client. A rep can only see
+  // THEIR OWN metrics/commission; admins may look up any rep for oversight. (Was open: any
+  // caller could pass another rep's id/email and read their commission.)
+  const user = await getSessionUser().catch(() => null);
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { searchParams } = new URL(req.url);
-  const userId = searchParams.get("userId") ?? "";
-  const ghlUserId = searchParams.get("ghlUserId") ?? "";
-  const repEmail = searchParams.get("email") ?? "";
+  const userId = user.role === "admin" ? (searchParams.get("userId") ?? "") : user.id;
+  const ghlUserId = user.role === "admin" ? (searchParams.get("ghlUserId") ?? "") : (user.ghlUserId ?? "");
+  const repEmail = user.role === "admin" ? (searchParams.get("email") ?? "") : (user.email ?? "");
 
   const now = new Date();
   const monthStart = startOfMonth(now);
