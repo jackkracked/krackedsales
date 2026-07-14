@@ -59,8 +59,8 @@ export function AcquisitionEconomicsSection() {
             return (
               <div key={d} className="px-4 py-3.5">
                 <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Cost / client · {d}d
-                  {d === 30 && <Tip>Realized CAC — total ad spend ÷ new clients acquired in the window (deduped, first payment). Shown across 30/60/90 days as a trend.</Tip>}
+                  Realized CAC · {d}d
+                  {d === 30 && <Tip>Realized CAC (§4, §6) — total acquisition spend ÷ new client relationships in the window (deduped, first payment). Shown across 30/60/90 days as a rolling trend.</Tip>}
                 </p>
                 <p className="mt-1 text-lg font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>
                   {s.cac != null ? fmtMoney(s.cac) : "—"}
@@ -80,15 +80,15 @@ export function AcquisitionEconomicsSection() {
 
         {/* the numbers that frame it */}
         <div className="grid grid-cols-2 divide-x divide-y divide-border sm:grid-cols-4 sm:divide-y-0">
-          <Cell label="Worth per client" tip="What one new client is worth in guaranteed profit over their 3-month minimum, counting only the cost of serving them (blended across the expected package mix)."
-            value={fmtMoney(contribPerClient)} sub="guaranteed, 3 mo" est />
-          <Cell label="Target to acquire" tip="Two ceilings per the spec: the FLOOR is what we can pay and still profit on the guaranteed term alone; the HOPE is higher if clients renew. We lead with the floor."
-            value={fmtMoney(targetFloor)} sub={`floor · ${fmtMoney(targetHope)} hope`} est />
-          <Cell label="LTV : CAC" tip="Dollars a client is worth back per $1 spent to acquire them. 3:1+ is healthy. Uses modelled retention, so it's a hope until churn data matures."
-            value={primary.ltvCac != null ? fmtRatio(primary.ltvCac) : "—"} sub="3:1 healthy · hope"
+          <Cell label="Contribution Margin / client" tip="Contribution Margin $ (§4): revenue minus only the variable costs of serving a client, over the guaranteed term. Blended across the expected mix. Excludes fixed overhead."
+            value={fmtMoney(contribPerClient)} sub="guaranteed term" est />
+          <Cell label="Blended Target CAC" tip="Blended Target CAC (§4): the mix-weighted Recommended Max CAC. FLOOR = guaranteed-term basis; HOPE = LTV basis. We lead with the floor (§6.6)."
+            value={fmtMoney(targetFloor)} sub={`floor · ${fmtMoney(targetHope)} on LTV`} est />
+          <Cell label="LTV : CAC" tip="LTV Contribution ÷ Realized CAC. 3:1 is the health line (§4). Uses modelled retention, so it's the hope until churn data matures (§8)."
+            value={primary.ltvCac != null ? fmtRatio(primary.ltvCac) : "—"} sub="3:1 line · hope"
             badge={primary.ltvCac != null ? { text: primary.ltvCac >= 3 ? "healthy" : "thin", ok: primary.ltvCac >= 3 } : undefined} est />
-          <Cell label="Breakeven" tip="The absolute most we could pay to acquire a client and still break even on their guaranteed 3 months, zero renewals assumed."
-            value={fmtMoney(breakeven)} sub="max before losing" />
+          <Cell label="Breakeven CAC" tip="Breakeven CAC (blended, §9): mix-weighted Conservative Max CAC = Guaranteed Contribution. Most we could pay and still break even, zero renewals."
+            value={fmtMoney(breakeven)} sub="max, zero renewals" />
         </div>
 
         {/* link to the deep model + company P&L */}
@@ -132,9 +132,9 @@ function SectionShell({ children }: { children: React.ReactNode }) {
       <div className="mb-2 flex items-center gap-3 px-1">
         <div data-r10n-section-accent className="h-3.5 w-0.5 shrink-0 rounded-full" style={{ backgroundColor: "var(--r10n-section-accent, oklch(0.62 0.13 250))" }} />
         <h3 data-r10n-section-title className="shrink-0 text-[11px] font-bold uppercase tracking-widest text-foreground/70" style={{ fontFamily: "var(--font-heading)" }}>
-          Acquisition Economics
+          Acquisition Efficiency
         </h3>
-        <span className="text-[11px] font-medium text-muted-foreground">cost to acquire vs what a client is worth</span>
+        <span className="text-[11px] font-medium text-muted-foreground">Realized CAC vs Blended Target · full model on /money</span>
         <div className="h-px flex-1 bg-border/60" />
       </div>
       {children}

@@ -16,7 +16,7 @@ import {
 
 // ─── tiny shared bits ───────────────────────────────────────────────────────────
 
-/** Dotted-underline "estimate" treatment (CDO): a number that isn't measured-real yet. */
+/** Dotted-underline "estimate" treatment (§8): a number that isn't measured-real yet. */
 function Est({ children, on = true }: { children: React.ReactNode; on?: boolean }) {
   return <span className={cn(on && "border-b border-dotted border-muted-foreground/50")}>{children}</span>;
 }
@@ -104,34 +104,34 @@ export function MoneyClient() {
     );
   }
 
-  // ── whole-company P&L — from Gage's real monthly ACTUALS (§6.4), never a partial feed ──
+  // ── Whole-business health (§4/§5) — from real monthly ACTUALS, never a partial feed ──
   const pnl = computeCompanyPnL(draft.companyActuals, draft);
   const overheadTotal = sumOverhead(draft.overhead);
   const liveRevenue = live?.month.revenue ?? 0; // last complete month from Stripe cash — CROSS-CHECK only
   const liveRevenueAvailable = !!live?.month.revenueAvailable;
   const pnlMonth = live?.month.label;
 
-  // ── acquisition (question 1) — Contribution basis, NEVER fixed overhead ───────
-  const realized = live?.realized.cac ?? null;
+  // ── Acquisition efficiency (§4/§5) — Contribution-Margin basis, NEVER fixed overhead ──
+  const realized = live?.realized.cac ?? null; // Realized CAC
   const rollAdSpend = live?.realized.adSpend ?? 0;
   const rollClients = live?.realized.newClients ?? 0;
   const clientsAvailable = !!live?.realized.clientsAvailable;
   const spendCampaigns = live?.realized.byCampaign ?? [];
-  const contribPerClient = blendedContributionPerClient(econ); // guaranteed $/client, blended by mix
-  const ltvPerClient = blendedLtvPerClient(econ); // with modelled retention (the "hope")
+  const contribPerClient = blendedContributionPerClient(econ); // Contribution Margin $ per client, blended
+  const ltvPerClient = blendedLtvPerClient(econ); // LTV Contribution per client (modelled retention)
   const monthlyContribPerClient = blendedMonthlyContributionPerClient(econ);
-  const blendedTargetHope = blendedTargetCac(econ, "hope"); // ceiling if retention holds (§6.6 shows both)
+  const blendedTargetHope = blendedTargetCac(econ, "hope"); // Blended Target CAC on the LTV basis (§6.6 shows both)
   const ltvCacRatio = realized && realized > 0 ? ltvPerClient / realized : null;
   const payback = realized != null ? paybackMonths(realized, monthlyContribPerClient) : null;
   const cacUnder = realized != null && realized <= blendedTarget;
 
-  // What the spend is BUILT to return at our validated target CAC (the honest model answer
-  // while realized closes are still settling).
+  // What the spend is BUILT to return at the Blended Target CAC (the honest model answer while
+  // realized closes are still settling).
   const impliedClients = blendedTarget > 0 ? rollAdSpend / blendedTarget : 0;
   const impliedProfit = impliedClients * contribPerClient;
-  // Realized closes lag the spend that produced them. Only trust the realized cost-per-client
-  // once enough have settled vs what the spend implies (the ramp gate) — otherwise a timing /
-  // under-count artifact reads as a catastrophic CAC.
+  // Realized closes lag the spend that produced them. Only trust Realized CAC once enough have
+  // settled vs what the spend implies (the ramp gate) — else a timing/under-count artifact reads
+  // as a catastrophic CAC.
   const acqTrustworthy = clientsAvailable && rollClients >= 3 && rollClients >= impliedClients * 0.4;
   const realizedProfit = rollClients * contribPerClient;
   const acqNet = realizedProfit - rollAdSpend;
@@ -144,7 +144,7 @@ export function MoneyClient() {
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground" style={{ fontFamily: "var(--font-heading)" }}>Money</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">What we spend to grow, and what we keep. Two questions, kept separate.</p>
+          <p className="mt-0.5 text-sm text-muted-foreground">Contribution Margin &amp; CAC. Two questions, kept separate, per the spec.</p>
         </div>
         <div className="flex items-center gap-2">
           {dirty && (
@@ -162,12 +162,12 @@ export function MoneyClient() {
         </div>
       </div>
 
-      {/* ═══ QUESTION 1 — Is our ad spend worth it? (Contribution basis, no overhead) ═══ */}
+      {/* ═══ ACQUISITION EFFICIENCY (§5) — Contribution-Margin basis, no overhead ═══ */}
       <div className={cn(card, "mb-4 overflow-hidden")}>
         <div className="border-b border-border bg-muted/20 px-6 py-2.5">
           <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Question 1 — is our ad spend worth it?
-            <Tip>The only costs counted here are the costs of serving a client (their team&apos;s hours, commission, card fees). Fixed bills like salaries and rent are deliberately left out — that&apos;s Question 2 below. Mixing them is the classic mistake this page is built to avoid.</Tip>
+            Acquisition efficiency · Contribution-Margin basis
+            <Tip>Question 1 of the spec: &quot;is this client / ad dollar worth it?&quot; The only costs counted are the VARIABLE costs of serving a client (role hours, commission, processing). Fixed overhead is deliberately excluded — that is Whole-business health below (§2, §6.5).</Tip>
           </p>
         </div>
         <div className="px-6 py-5">
@@ -177,9 +177,9 @@ export function MoneyClient() {
               <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(rollAdSpend)}</b>{" "}
               on ads in the last {win} days and brought in{" "}
               <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{rollClients} client{rollClients === 1 ? "" : "s"}</b>{" "}
-              at <b className="tabular-nums">{realized != null ? fmtMoney(realized) : "—"}</b> each. At our average client value they&apos;re worth about{" "}
+              at a Realized CAC of <b className="tabular-nums">{realized != null ? fmtMoney(realized) : "—"}</b>. Their blended Contribution Margin is about{" "}
               <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(realizedProfit)}</b>{" "}
-              in guaranteed profit, so after the ad spend we&apos;re up{" "}
+              (guaranteed term), so net of ad spend that is{" "}
               <b className={cn("text-2xl font-bold tabular-nums sm:text-[26px]", acqNet >= 0 ? "text-success" : "text-destructive")} style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(acqNet)}</b>
               {acqReturn != null && <span className="text-muted-foreground"> — a {fmtRatio(acqReturn)} return, before any renewals.</span>}
             </p>
@@ -187,15 +187,15 @@ export function MoneyClient() {
             <p className="text-lg leading-snug text-foreground sm:text-xl">
               We spent{" "}
               <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(rollAdSpend)}</b>{" "}
-              on ads in the last {win} days. Each client we bring in is worth about{" "}
+              on ads in the last {win} days. Blended Contribution Margin is about{" "}
               <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(contribPerClient)}</b>{" "}
-              in guaranteed profit, and we can afford up to{" "}
+              per client, and the Blended Target CAC is{" "}
               <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(blendedTarget)}</b>{" "}
-              to get one (guaranteed floor; up to <b className="tabular-nums">{fmtMoney(blendedTargetHope)}</b> if they renew). At that rate this spend is built to return about{" "}
+              (floor; up to <b className="tabular-nums">{fmtMoney(blendedTargetHope)}</b> on the LTV basis). At that CAC this spend is built to acquire about{" "}
               <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{impliedClients.toFixed(0)} clients</b>{" "}
-              (~<b className="tabular-nums">{fmtMoney(impliedProfit)}</b> guaranteed).{" "}
+              (~<b className="tabular-nums">{fmtMoney(impliedProfit)}</b> Contribution).{" "}
               <span className="text-muted-foreground">
-                <b className="tabular-nums text-foreground">{rollClients}</b> ha{rollClients === 1 ? "s" : "ve"} settled so far, so the true cost-per-client is still landing.
+                <b className="tabular-nums text-foreground">{rollClients}</b> ha{rollClients === 1 ? "s" : "ve"} settled so far, so Realized CAC is still landing.
               </span>
             </p>
           )}
@@ -223,50 +223,50 @@ export function MoneyClient() {
             </div>
           )}
 
-          {/* the three numbers that make the answer, at a glance */}
+          {/* the three CAC numbers, at a glance */}
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <KeyNum label="Worth per client" tip="What one new client is worth to us in guaranteed profit over their 3-month minimum — counting only the cost of serving them, not fixed bills." value={fmtMoney(contribPerClient)} sub="guaranteed, first 3 months" estimate />
-            <KeyNum label="Most we'll pay to get one" tip="Two ceilings, per the spec: the FLOOR is what we can pay and still profit on the guaranteed 3 months alone (no renewals). The HOPE is the higher ceiling if clients stay past their minimum. We lead with the floor and never bank on the hope." value={fmtMoney(blendedTarget)} sub={`guaranteed floor · up to ${fmtMoney(blendedTargetHope)} if they renew`} />
-            <KeyNum label={`Cost per client · ${win}d`} tip="What we actually paid in ads per new client over this window (ad spend ÷ new clients). Needs enough settled closes to trust." value={realized != null ? fmtMoney(realized) : "—"}
-              sub={acqTrustworthy ? (cacUnder ? "under target — good" : "over target") : "still settling"}
+            <KeyNum label="Contribution Margin / client" tip="Contribution Margin $ (§4): revenue minus only the variable costs of serving a client (role hours, commission, processing), over the 3-month guaranteed term. Blended across the expected mix. Excludes fixed overhead." value={fmtMoney(contribPerClient)} sub="guaranteed term, blended" estimate />
+            <KeyNum label="Blended Target CAC" tip="Blended Target CAC (§4): the mix-weighted Recommended Max CAC. FLOOR = the guaranteed-term basis (0 renewals); HOPE = the LTV basis. We lead with the floor and never bank on the hope (§6.6)." value={fmtMoney(blendedTarget)} sub={`floor · up to ${fmtMoney(blendedTargetHope)} on LTV basis`} />
+            <KeyNum label={`Realized CAC · ${win}d`} tip="Realized CAC (§4, §6): total acquisition spend ÷ new client relationships in the window. Compared against the Blended Target CAC as an over/under signal." value={realized != null ? fmtMoney(realized) : "—"}
+              sub={acqTrustworthy ? (cacUnder ? "under target" : "over target") : "still settling"}
               tone={!acqTrustworthy ? "muted" : cacUnder ? "good" : "bad"} estimate={!acqTrustworthy} />
           </div>
         </div>
       </div>
 
-      {/* ── At-a-glance strip ────────────────────────────────────────────────── */}
+      {/* ── Acquisition-efficiency KPI strip ─────────────────────────────────── */}
       <div className={cn(card, "mb-6 grid grid-cols-2 divide-x divide-y divide-border sm:grid-cols-3 lg:grid-cols-5 lg:divide-y-0")}>
-        <Stat label={`Cost per client · ${win}d`} value={realized != null ? fmtMoney(realized) : "—"} accent
-          tip="Realized CAC — total ad spend ÷ new clients in this window."
+        <Stat label={`Realized CAC · ${win}d`} value={realized != null ? fmtMoney(realized) : "—"} accent
+          tip="Realized CAC (§4, §6): total acquisition spend ÷ new client relationships, counted per §6 (all lines, deduped)."
           badge={realized != null ? { text: acqTrustworthy ? (cacUnder ? "under target" : "over target") : "settling", ok: acqTrustworthy ? cacUnder : undefined } : undefined}
           sub={`vs ${fmtMoney(blendedTarget)} target`} estimate={!acqTrustworthy} />
         <Stat label="LTV : CAC" value={ltvCacRatio != null ? fmtRatio(ltvCacRatio) : "—"} accent
-          tip="For every $1 we spend to get a client, how many dollars they're worth back. 3:1 or higher is healthy. Uses modelled retention, so treat as a hope until churn data matures."
+          tip="LTV Contribution per client ÷ Realized CAC. 3:1 is the health line (§4). Uses modelled retention, so treat as the hope until churn data matures (§8)."
           badge={ltvCacRatio != null ? { text: ltvCacRatio >= 3 ? "healthy" : "thin", ok: ltvCacRatio >= 3 } : undefined}
-          sub="3:1 healthy · retention hope" estimate />
-        <Stat label="CAC payback" value={payback != null ? fmtMonths(payback) : "—"}
-          tip="How many months a new client takes to pay back what we spent to acquire them. Inside the 3-month term is safe."
+          sub="3:1 health line · retention hope" estimate />
+        <Stat label="CAC Payback" value={payback != null ? fmtMonths(payback) : "—"}
+          tip="Months for a client's Monthly Contribution to repay the Realized CAC. Inside the guaranteed term is safe."
           sub={`term is ${draft.termMonths} mo`} badge={payback != null ? { text: payback < draft.termMonths ? "inside term" : "past term", ok: payback < draft.termMonths } : undefined} estimate />
-        <Stat label={`New clients · ${win}d`} value={String(rollClients)} sub="click to verify who" onClick={() => setClientsOpen((v) => !v)}
-          tip="Distinct new clients in this window, counted once at their first-ever payment (management or project), refunds excluded." />
-        <Stat label="Blended breakeven" value={fmtMoney(breakeven)} sub="max before losing money"
-          tip="The absolute most we could pay to acquire a client and still break even on their guaranteed 3 months, assuming zero renewals." />
+        <Stat label={`New Clients · ${win}d`} value={String(rollClients)} sub="click to verify who" onClick={() => setClientsOpen((v) => !v)}
+          tip="New client relationships (§6): distinct clients, counted once at their first-ever payment across Management + Project, refunds excluded." />
+        <Stat label="Breakeven CAC" value={fmtMoney(breakeven)} sub="max, zero renewals"
+          tip="Breakeven CAC (blended, §9): the mix-weighted Conservative Max CAC = Guaranteed Contribution. The most we could pay and still break even on the guaranteed term, with zero renewals." />
       </div>
 
-      {/* new-client drill-down (click the count to verify) */}
+      {/* new-client drill-down (click the count to verify — §6 trust anchor) */}
       {clientsOpen && (
         <div className={cn(card, "mb-6 p-4")}>
           <div className="mb-2 flex items-center justify-between">
             <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              New clients counted · last {win} days
-              <Tip>Every distinct client whose first-ever payment landed in this window. This is the exact list behind the count above — the number is only as trustworthy as this list.</Tip>
+              New client relationships · last {win} days
+              <Tip>Every distinct client whose first-ever payment landed in this window (§6 counting). This is the exact list behind the count — Realized CAC is only as trustworthy as this list.</Tip>
             </span>
             <button onClick={() => setClientsOpen(false)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
           </div>
           {!clientList ? (
             <div className="h-16 animate-pulse rounded-[8px] bg-muted/40" />
           ) : clientList.clients.length === 0 ? (
-            <p className="py-4 text-center text-sm text-muted-foreground">No new clients counted in this window.</p>
+            <p className="py-4 text-center text-sm text-muted-foreground">No new client relationships counted in this window.</p>
           ) : (
             <div className="divide-y divide-border/50">
               {clientList.clients.map((c, i) => (
@@ -284,10 +284,10 @@ export function MoneyClient() {
         </div>
       )}
 
-      {/* ── ① Per-package: which packages make the best use of ad money ───────── */}
+      {/* ── PER-PACKAGE ECONOMICS (§5) ───────────────────────────────────────── */}
       <section className={cn(card, "mb-6 p-5")}>
-        <SectionHeader eyebrow="Per package" title="Which packages are worth acquiring?" sub={`rolling ${win}-day`}
-          tip="Each package's guaranteed profit and the most we should pay to acquire one. Everything here counts only the cost of serving a client, never fixed overhead." />
+        <SectionHeader eyebrow="Per-package economics (§5)" title="Contribution Margin & Recommended Max CAC, by package" sub={`Realized CAC · rolling ${win}-day`}
+          tip="Per §5: Contribution Margin % and $, Contribution Margin per Strategist Hour, Recommended Max CAC, and Realized CAC vs Recommended (over/under) for each tier. Variable costs only — never fixed overhead (§6.1)." />
         <div className="mb-4 inline-flex overflow-hidden rounded-[8px] border border-border text-xs">
           {([30, 60, 90] as WindowDays[]).map((d) => (
             <button key={d} onClick={() => setWin(d)}
@@ -297,16 +297,16 @@ export function MoneyClient() {
 
         {/* per-package table */}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className="w-full min-w-[680px] text-sm">
             <thead>
               <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
                 <th className="py-2 pr-3 text-left font-semibold">Package</th>
-                <th className="px-3 py-2 text-right font-semibold"><HeadTip label="Profit %" tip="Contribution margin — the share of a client's payment left after only the costs of serving them (team hours, commission, card fees)." /></th>
-                <th className="px-3 py-2 text-right font-semibold"><HeadTip label="Profit (3 mo)" tip="Guaranteed profit in dollars from one client over their 3-month minimum." /></th>
-                <th className="px-3 py-2 text-right font-semibold"><HeadTip label="Payback" tip="Months for a client to pay back what we spent to acquire them, at the current cost per client." /></th>
-                <th className="px-3 py-2 text-right font-semibold"><HeadTip label="Max CAC (floor)" tip="The most we should pay to acquire this client, based only on their guaranteed 3 months. The safe ceiling; the '+hope' is the extra if they renew." /></th>
-                <th className="px-3 py-2 text-right font-semibold"><HeadTip label="$/strat hr" tip="Guaranteed profit per hour of strategist time — our scarcest resource. Higher = better use of delivery capacity." /></th>
-                <th className="py-2 pl-3 text-right font-semibold"><HeadTip label="vs realized" tip="Whether our actual cost-to-acquire is under (clears) or over this package's safe ceiling." /></th>
+                <th className="px-3 py-2 text-right font-semibold"><HeadTip label="Contribution %" tip="Contribution Margin % (§4) = Contribution Margin $ ÷ revenue. Only variable costs are deducted." /></th>
+                <th className="px-3 py-2 text-right font-semibold"><HeadTip label="Contribution $" tip="Contribution Margin $ (§4) = Guaranteed Contribution over the 3-month term." /></th>
+                <th className="px-3 py-2 text-right font-semibold"><HeadTip label="CAC Payback" tip="Months for Monthly Contribution to repay the current Realized CAC." /></th>
+                <th className="px-3 py-2 text-right font-semibold"><HeadTip label="Recommended Max CAC" tip="Recommended Max CAC (§4) = MIN(Conservative Max CAC, Target Max CAC). Floor shown; (+hope) is the LTV basis." /></th>
+                <th className="px-3 py-2 text-right font-semibold"><HeadTip label="Contribution / Strat-hr" tip="Contribution Margin per Strategist Hour (§5): Guaranteed Contribution ÷ strategist hours over the term. Strategist time is the capacity bottleneck." /></th>
+                <th className="py-2 pl-3 text-right font-semibold"><HeadTip label="Realized vs Max" tip="Realized CAC vs Recommended Max CAC (§5), as a simple over/under indicator for this tier." /></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
@@ -322,7 +322,7 @@ export function MoneyClient() {
                         <span className="font-semibold text-foreground">{e.name}</span>
                         <span className="ml-1.5 text-xs text-muted-foreground tabular-nums">{fmtMoney(e.monthlyPrice)}/mo</span>
                         {e.isCustom && <span className="ml-1.5 rounded bg-muted px-1 py-px text-[9px] font-semibold uppercase text-muted-foreground">custom</span>}
-                        {!e.viable && <span className="ml-1.5 rounded bg-destructive/10 px-1 py-px text-[9px] font-semibold uppercase text-destructive">loses money</span>}
+                        {!e.viable && <span className="ml-1.5 rounded bg-destructive/10 px-1 py-px text-[9px] font-semibold uppercase text-destructive">negative CM</span>}
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums font-medium"><Est>{fmtPct(e.contributionPct)}</Est></td>
                       <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-foreground"><Est>{fmtMoney(e.contribution)}</Est></td>
@@ -346,60 +346,67 @@ export function MoneyClient() {
             </tbody>
           </table>
         </div>
+
+        {/* Actual new clients vs expected mix (§5) */}
+        <ExpectedMix econ={econ} actualNewClients={rollClients} window={win} trustworthy={acqTrustworthy} />
+
         <p className="mt-3 flex items-start gap-1.5 text-[11px] text-muted-foreground">
-          <span className="mt-px">Profit leads with the <b className="font-semibold text-foreground">guaranteed 3-month floor</b>; the retention &quot;hope&quot; is shown separately (some clients have churned in 4&ndash;8 weeks). Dotted numbers are estimates until real logged hours land. Click any row to see how its profit is built.</span>
+          <span className="mt-px">Contribution leads with the <b className="font-semibold text-foreground">guaranteed 3-month floor</b>; the retention &quot;hope&quot; is the LTV basis, shown separately (§6.6 — some clients churned in 4&ndash;8 weeks). Dotted numbers are §8 estimates until real logged hours land. Click a row for the Variable-Cost breakdown.</span>
         </p>
       </section>
+
+      {/* ── RETENTION (§5) — modelled now, actuals as data matures ────────────── */}
+      <RetentionSection econ={econ} />
 
       {/* ═══ the visual firewall between the two questions (§6.5) ═══ */}
       <div className="mb-6 flex items-center gap-3 px-1">
         <span className="h-px flex-1 bg-border" />
         <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-          <ArrowDown className="h-3 w-3" /> A completely different question
+          <ArrowDown className="h-3 w-3" /> Whole-business health — a separate question (§6.5)
         </span>
         <span className="h-px flex-1 bg-border" />
       </div>
 
-      {/* ═══ QUESTION 2 — After every bill, does the whole company profit? ═══ */}
+      {/* ═══ WHOLE-BUSINESS HEALTH (§4/§5) — real totals, never per-client margins ═══ */}
       <section className={cn(card, "mb-6 overflow-hidden")}>
         <div className="border-b border-border bg-muted/20 px-6 py-2.5">
           <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Question 2 — after every bill, does the company profit?
-            <Tip>This counts EVERYTHING the business pays in a month — the whole team, founders, software, ads, fees. A single package can be worth acquiring (Question 1) while the whole company still needs to watch its costs. Never read one as the other.</Tip>
+            Whole-business health · Surplus / (Shortfall)
+            <Tip>Question 2 of the spec (§4, §5): Total Monthly Contribution (all lines) minus Total Monthly Fixed Overhead. The real &quot;can we afford to run&quot; number — never computed by summing per-client fully-loaded margins (§6.5).</Tip>
           </p>
         </div>
         <div className="px-6 py-5">
           <p className="mb-4 text-lg leading-snug text-foreground sm:text-xl">
-            In a typical month the company brings in{" "}
+            In a typical month total revenue is{" "}
             <b className="font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(pnl.revenue)}</b>{" "}
-            and, after paying for absolutely everything, keeps{" "}
+            and, after every cost, the surplus is{" "}
             <b className={cn("text-2xl font-bold tabular-nums sm:text-[26px]", pnl.net >= 0 ? "text-success" : "text-destructive")} style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(pnl.net)}</b>{" "}
-            <span className="text-muted-foreground">— that&apos;s {fmtPct(pnl.netPct)} of every dollar.</span>
+            <span className="text-muted-foreground">— a {fmtPct(pnl.netPct)} net margin.</span>
           </p>
 
           <Bridge steps={pnlSteps(pnl)} height={210} />
 
           <div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-            <MiniStat label="Money in" tip="All revenue the company brings in during the month, across every service line — not just what settled through one payment processor." value={fmtMoney(pnl.revenue)} estimate />
-            <MiniStat label="What it costs to run" tip="Everything the business pays each month: the whole team, founders' pay, software, insurance, ads and fees." value={fmtMoney(pnl.variableTotal + overheadTotal)} estimate />
-            <MiniStat label="Kept" tip="What's left after every single cost is paid — the real 'can we afford to run' number." value={fmtMoney(pnl.net)} accent={pnl.net >= 0} danger={pnl.net < 0} />
-            <MiniStat label="Margin" tip="Kept as a share of revenue. 12.5% means we keep about 12.5 cents of every dollar." value={fmtPct(pnl.netPct)} accent={pnl.net >= 0} danger={pnl.net < 0} />
+            <MiniStat label="Total Revenue" tip="Total company revenue, all lines, actual monthly (§5). Real total, not one payment feed." value={fmtMoney(pnl.revenue)} estimate />
+            <MiniStat label="Total Fixed Overhead" tip="Total company fixed overhead, actual monthly (§5): the whole team, founders, software, insurance, admin." value={fmtMoney(overheadTotal)} estimate />
+            <MiniStat label="Surplus / (Shortfall)" tip="Total Monthly Contribution − Total Monthly Fixed Overhead (§4). The real 'can we afford to run' number." value={fmtMoney(pnl.net)} accent={pnl.net >= 0} danger={pnl.net < 0} />
+            <MiniStat label="Net Margin" tip="Surplus ÷ total revenue. Reported here as a mix-health metric, never as an acquisition gate (§2)." value={fmtPct(pnl.netPct)} accent={pnl.net >= 0} danger={pnl.net < 0} />
           </div>
 
           {/* live cross-check + honesty */}
           <div className="mt-4 flex items-start gap-2 rounded-[8px] border border-border bg-muted/20 px-3 py-2.5 text-[11px] text-muted-foreground">
             <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <span>
-              These are your <b className="text-foreground">confirmed monthly figures</b> (edit them in Assumptions).{" "}
+              These are your <b className="text-foreground">confirmed monthly actuals</b> (edit in Assumptions), seeded to the §9 reference (revenue {fmtMoney(98580)} → surplus {fmtMoney(12330)}, 12.5%).{" "}
               {liveRevenueAvailable
-                ? <>Live cross-check: our payment system settled <b className="tabular-nums text-foreground">{fmtMoney(liveRevenue)}</b>{pnlMonth ? ` in ${pnlMonth}` : ""}. If that&apos;s well below your real total, revenue collected off that one system is the gap — confirm the true number so &quot;kept&quot; stays accurate.</>
+                ? <>Live cross-check: the payment system settled <b className="tabular-nums text-foreground">{fmtMoney(liveRevenue)}</b>{pnlMonth ? ` in ${pnlMonth}` : ""}. If that is well below the real total, revenue collected off that one system is the gap — confirm the true figure so the surplus stays accurate.</>
                 : <>Connect the payment system to show a live cross-check against your confirmed total.</>}
             </span>
           </div>
         </div>
       </section>
 
-      {/* ── ③ Planner ────────────────────────────────────────────────────────── */}
+      {/* ── CAC Planner ──────────────────────────────────────────────────────── */}
       <Planner draft={draft} econ={econ} blendedTarget={blendedTarget} />
 
       {drawerOpen && <AssumptionsDrawer draft={draft} setDraft={setDraft} onClose={() => setDrawerOpen(false)} econ={econ} />}
@@ -408,20 +415,20 @@ export function MoneyClient() {
   );
 }
 
-// ─── company P&L → bridge steps ───────────────────────────────────────────────
+// ─── Whole-business health → bridge steps (§4 whole-business formula) ───────────
 function pnlSteps(pnl: ReturnType<typeof computeCompanyPnL>): BridgeStep[] {
   return [
-    { label: "Money in", value: pnl.revenue, kind: "anchor" },
-    { label: "− Ads", value: pnl.adSpend, kind: "out", estimate: true },
+    { label: "Total Revenue", value: pnl.revenue, kind: "anchor" },
+    { label: "− Ad spend", value: pnl.adSpend, kind: "out", estimate: true },
     { label: "− Commission", value: pnl.commission, kind: "out", estimate: true },
-    { label: "− Card fees", value: pnl.processing, kind: "out", estimate: true },
-    { label: "= After client costs", value: pnl.totalContribution, kind: "checkpoint" },
-    { label: "− Team, founders, software", value: pnl.totalOverhead, kind: "out", estimate: true },
-    { label: "= Kept", value: Math.abs(pnl.net), kind: "result" },
+    { label: "− Processing", value: pnl.processing, kind: "out", estimate: true },
+    { label: "= Total Contribution", value: pnl.totalContribution, kind: "checkpoint" },
+    { label: "− Fixed Overhead", value: pnl.totalOverhead, kind: "out", estimate: true },
+    { label: "= Surplus", value: Math.abs(pnl.net), kind: "result" },
   ];
 }
 
-// ─── the three headline numbers under the acquisition sentence ─────────────────
+// ─── the three headline CAC numbers under the acquisition sentence ─────────────
 function KeyNum({ label, value, sub, tip, tone, estimate }: { label: string; value: string; sub?: string; tip?: React.ReactNode; tone?: "good" | "bad" | "muted"; estimate?: boolean }) {
   return (
     <div className="rounded-[8px] border border-border bg-background px-3.5 py-3">
@@ -463,18 +470,84 @@ function HeadTip({ label, tip }: { label: string; tip: React.ReactNode }) {
   return <span className="inline-flex items-center justify-end gap-1">{label}<Tip>{tip}</Tip></span>;
 }
 
-// ─── recipe (per-package role/fee breakdown — role hours on a waterfall) ────────
+// ─── Actual new clients vs expected mix (§5) ────────────────────────────────────
+function ExpectedMix({ econ, actualNewClients, window, trustworthy }: { econ: TierEconomics[]; actualNewClients: number; window: number; trustworthy: boolean }) {
+  const totalMix = econ.reduce((s, e) => s + e.expectedMonthlyCount, 0) || 1;
+  return (
+    <div className="mt-4 rounded-[8px] border border-border bg-background px-3.5 py-3">
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Actual new clients vs expected mix
+          <Tip>§5: the expected per-tier mix (weights used for the Blended Target CAC) against actual new clients closed. Per-tier attribution of the {actualNewClients} actual clients fills in as tier is logged at first payment.</Tip>
+        </span>
+        <span className="text-[11px] text-muted-foreground"><b className="tabular-nums text-foreground">{actualNewClients}</b> actual · {window}d{trustworthy ? "" : " (settling)"}</span>
+      </div>
+      {/* expected-mix bar */}
+      <div className="flex h-2 w-full overflow-hidden rounded-full">
+        {econ.map((e, i) => {
+          const share = e.expectedMonthlyCount / totalMix;
+          const shades = ["bg-primary", "bg-primary/80", "bg-primary/60", "bg-primary/40", "bg-primary/25"];
+          return <div key={e.id} className={cn(shades[i % shades.length])} style={{ width: `${share * 100}%` }} title={`${e.name}: ${(share * 100).toFixed(0)}%`} />;
+        })}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+        {econ.map((e) => (
+          <span key={e.id} className="text-[10.5px] text-muted-foreground">
+            {e.name} <b className="tabular-nums text-foreground">{((e.expectedMonthlyCount / totalMix) * 100).toFixed(0)}%</b>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Retention (§5) — modelled now, actual columns as data matures ──────────────
+function RetentionSection({ econ }: { econ: TierEconomics[] }) {
+  return (
+    <section className={cn(card, "mb-6 p-5")}>
+      <SectionHeader eyebrow="Retention (§5)" title="Retention & LTV Contribution" sub="modelled now · actuals as data matures"
+        tip="§5 retention: actual average months retained by tier (trailing cohort) and actual vs modelled LTV Contribution. Built once data volume supports it (§8) — the modelled basis is shown now, flagged as an estimate." />
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[560px] text-sm">
+          <thead>
+            <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
+              <th className="py-2 pr-3 text-left font-semibold">Package</th>
+              <th className="px-3 py-2 text-right font-semibold"><HeadTip label="Modelled extra months" tip="Additional Months Retained beyond the guaranteed term (§8: 3/3/4/4/6 smallest→largest). An estimate — some 2026 clients churned in 4–8 weeks." /></th>
+              <th className="px-3 py-2 text-right font-semibold"><HeadTip label="LTV Contribution" tip="LTV Contribution (§4) = Guaranteed Contribution + Monthly Contribution × Additional Months Retained. Modelled." /></th>
+              <th className="px-3 py-2 text-right font-semibold">Actual months</th>
+              <th className="py-2 pl-3 text-right font-semibold">Actual vs modelled</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/50">
+            {econ.map((e) => (
+              <tr key={e.id}>
+                <td className="py-2.5 pr-3 font-semibold text-foreground">{e.name}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-foreground"><Est>{e.additionalMonths} mo</Est></td>
+                <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-foreground"><Est>{fmtMoney(e.ltvContribution)}</Est></td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground/60">—</td>
+                <td className="py-2.5 pl-3 text-right tabular-nums text-muted-foreground/60">—</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 text-[11px] text-muted-foreground">Actual columns populate once there is enough client history to trust a trailing cohort (§8). Until then the modelled LTV is the hope, never the floor.</p>
+    </section>
+  );
+}
+
+// ─── recipe (per-package Variable-Cost breakdown — role hours on a waterfall) ───
 function Recipe({ e, draft }: { e: TierEconomics; draft: Assumptions }) {
   const rows: { label: string; sub?: string; amount: number; share: number }[] = [
     ...ROLES.map((r) => ({ label: ROLE_LABELS[r], sub: `${fmtHours(e.labour[r].hours)}/mo`, amount: -e.labour[r].termCost, share: e.labour[r].shareOfPrice })),
     { label: "Contractor fee", sub: fmtPct(draft.contractorFeePct, 0), amount: -e.contractorFeeTerm, share: e.contractorFeeTerm / (e.termRevenue || 1) },
     { label: "Commission", sub: fmtPct(draft.commissionPct, 0), amount: -e.commissionTerm, share: e.commissionTerm / (e.termRevenue || 1) },
-    { label: "Card fee", sub: fmtPct(draft.processingPct, 1), amount: -e.processingTerm, share: e.processingTerm / (e.termRevenue || 1) },
+    { label: "Processing", sub: fmtPct(draft.processingPct, 1), amount: -e.processingTerm, share: e.processingTerm / (e.termRevenue || 1) },
   ];
   return (
     <div className="max-w-xl">
       <div className="mb-2 flex items-baseline justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">How {e.name}&apos;s profit is built (3 months)</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{e.name} — Contribution Margin build (3-mo term)</span>
         <span className="text-sm font-bold tabular-nums text-foreground" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(e.termRevenue)}</span>
       </div>
       <div className="space-y-1">
@@ -486,7 +559,7 @@ function Recipe({ e, draft }: { e: TierEconomics; draft: Assumptions }) {
           </div>
         ))}
         <div className="mt-1 flex items-center gap-2 rounded-[6px] border-t border-primary/40 px-2 pt-2">
-          <span className="flex-1 text-[12.5px] font-bold text-foreground">= Contribution</span>
+          <span className="flex-1 text-[12.5px] font-bold text-foreground">= Contribution Margin</span>
           <span className="text-sm font-bold tabular-nums text-success" style={{ fontFamily: "var(--font-heading)" }}>{fmtMoney(e.contribution)} <span className="text-[11px] text-muted-foreground">({fmtPct(e.contributionPct)})</span></span>
         </div>
       </div>
@@ -494,7 +567,7 @@ function Recipe({ e, draft }: { e: TierEconomics; draft: Assumptions }) {
   );
 }
 
-// ─── planner ──────────────────────────────────────────────────────────────────
+// ─── CAC Planner (what-if) ──────────────────────────────────────────────────────
 function Planner({ draft, econ, blendedTarget }: { draft: Assumptions; econ: TierEconomics[]; blendedTarget: number }) {
   const [spend, setSpend] = useState(10000);
   const [months, setMonths] = useState(3);
@@ -508,8 +581,8 @@ function Planner({ draft, econ, blendedTarget }: { draft: Assumptions; econ: Tie
 
   return (
     <section className={cn(card, "mb-6 p-5")}>
-      <SectionHeader eyebrow="Planner" title="What can we afford?" sub="floor vs hope"
-        tip="Move the sliders to see what a given ad budget is built to return, at your target cost-per-client. 'Guaranteed' is locked in over the 3-month minimum; 'if retention holds' is the upside if clients stay." />
+      <SectionHeader eyebrow="CAC Planner" title="What can we afford?" sub="floor vs hope"
+        tip="Given a monthly ad budget and the Blended Target CAC, projects expected clients and Contribution: the guaranteed floor vs the LTV hope. Acquisition-level — before fixed overhead (§6.5)." />
       <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
         <div className="space-y-4">
           <Field label="Monthly ad spend" value={fmtMoney(spend)}>
@@ -518,15 +591,15 @@ function Planner({ draft, econ, blendedTarget }: { draft: Assumptions; econ: Tie
           <Field label="Months" value={String(months)}>
             <input type="range" min={1} max={12} step={1} value={months} onChange={(e) => setMonths(+e.target.value)} className="w-full accent-primary" />
           </Field>
-          <div className="rounded-[8px] bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">Planning at <b className="text-foreground tabular-nums">{fmtMoney(cac)}</b>/client (your blended target).</div>
+          <div className="rounded-[8px] bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">Planning at the Blended Target CAC of <b className="text-foreground tabular-nums">{fmtMoney(cac)}</b>/client.</div>
         </div>
         <div className="grid grid-cols-2 gap-3 self-start sm:grid-cols-3">
-          <BigStat label="Expected clients" value={clients.toFixed(1)} tip="Ad budget ÷ your target cost-per-client." />
-          <BigStat label="Guaranteed profit" value={fmtMoney(guaranteed)} accent sub="the floor" tip="Profit locked in over each client's 3-month minimum, before fixed overhead." />
-          <BigStat label="If retention holds" value={fmtMoney(hope)} sub="hope" estimate tip="Extra profit IF clients stay past their minimum. A hope, not a guarantee." />
-          <BigStat label="Total ad spend" value={fmtMoney(totalSpend)} danger tip="Monthly ad spend × months." />
-          <BigStat label="Net (guaranteed)" value={fmtMoney(guaranteed - totalSpend)} accent={guaranteed - totalSpend >= 0} danger={guaranteed - totalSpend < 0} sub="after ad spend, before overhead" tip="Guaranteed client profit minus the ad spend to acquire them. This is an acquisition number — it does NOT subtract fixed overhead (that's Question 2)." />
-          <BigStat label="Strategist hours" value={fmtHours(stratHrs)} sub="capacity to serve them" estimate tip="Strategist hours those clients would need over the term — a capacity check on our scarcest role." />
+          <BigStat label="Expected Clients" value={clients.toFixed(1)} tip="Ad budget ÷ Blended Target CAC." />
+          <BigStat label="Guaranteed Contribution" value={fmtMoney(guaranteed)} accent sub="the floor" tip="Contribution locked in over each client's 3-month guaranteed term, before fixed overhead." />
+          <BigStat label="LTV Contribution" value={fmtMoney(hope)} sub="hope" estimate tip="With modelled retention — extra Contribution if clients stay past the term. A hope, not a guarantee (§6.6)." />
+          <BigStat label="Total Ad Spend (CAC)" value={fmtMoney(totalSpend)} danger tip="Monthly ad spend × months — the acquisition cost." />
+          <BigStat label="Contribution after CAC" value={fmtMoney(guaranteed - totalSpend)} accent={guaranteed - totalSpend >= 0} danger={guaranteed - totalSpend < 0} sub="guaranteed, before overhead" tip="Guaranteed Contribution minus ad spend. An acquisition number — it does NOT subtract fixed overhead (that is Whole-business health, §6.5)." />
+          <BigStat label="Strategist Hours" value={fmtHours(stratHrs)} sub="capacity to serve" estimate tip="Strategist hours those clients would consume over the term — a capacity check on the bottleneck role (§5)." />
         </div>
       </div>
     </section>
@@ -578,20 +651,20 @@ function AssumptionsDrawer({ draft, setDraft, onClose, econ }: {
           {/* estimate banner */}
           <div className="flex items-start gap-2 rounded-[8px] border border-primary/25 bg-primary/5 px-3 py-2.5 text-[11px] text-foreground">
             <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0 text-primary" />
-            <span>Hours, retention and the contractor fee are <b>reasoned estimates</b> calibrated to your current model, pending real time-tracking. Edit them to your real figures.</span>
+            <span>Hours, retention and the contractor fee are <b>§8 estimates</b> calibrated to the current model, pending real time-tracking. Edit them to your real figures.</span>
           </div>
 
-          {/* whole-company real monthly actuals (Question 2) */}
+          {/* whole-business monthly actuals */}
           <div>
             <p className="mb-2 flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Whole-company monthly actuals <Tip>Your real total figures for a typical month, across every service line. These drive the &quot;after every bill, does the company profit?&quot; section — not a single payment feed.</Tip>
+              Whole-business monthly actuals <Tip>Real total figures for a typical month, all lines (§5/§6.4). These drive Whole-business health — not a single payment feed.</Tip>
             </p>
             <div className="space-y-1.5">
               {([
                 ["revenue", "Total revenue (all lines)"],
                 ["adSpend", "Ad spend"],
                 ["commission", "Sales commission paid"],
-                ["processing", "Card / processing fees"],
+                ["processing", "Processing fees"],
               ] as const).map(([k, label]) => (
                 <div key={k} className="flex items-center justify-between rounded-[6px] border border-border px-2.5 py-1.5">
                   <span className="text-[12px] text-foreground">{label}</span>
@@ -627,19 +700,19 @@ function AssumptionsDrawer({ draft, setDraft, onClose, econ }: {
                     </tr>
                   ))}
                   <tr className="border-t border-border bg-muted/20 text-[11px]">
-                    <td className="px-2 py-1.5 font-semibold uppercase tracking-wide text-muted-foreground">Profit %</td>
+                    <td className="px-2 py-1.5 font-semibold uppercase tracking-wide text-muted-foreground">Contribution %</td>
                     {econ.map((e) => <td key={e.id} className="px-1.5 py-1.5 text-right font-bold tabular-nums text-primary">{fmtPct(e.contributionPct)}</td>)}
                   </tr>
                 </tbody>
               </table>
             </div>
-            <p className="mt-1.5 text-[10.5px] text-muted-foreground">The small number by each role is its monthly salary (÷160 gives the hourly cost automatically — you never type a rate).</p>
+            <p className="mt-1.5 text-[10.5px] text-muted-foreground">The small number by each role is its monthly salary (÷160 gives the hourly rate automatically — §3, you never type a rate).</p>
           </div>
 
           {/* scalar dials */}
           <div className="grid grid-cols-2 gap-3">
             <Dial label="Commission %" value={draft.commissionPct * 100} onChange={(v) => setDraft({ ...draft, commissionPct: v / 100 })} suffix="%" />
-            <Dial label="Card fee %" value={draft.processingPct * 100} onChange={(v) => setDraft({ ...draft, processingPct: v / 100 })} suffix="%" />
+            <Dial label="Processing %" value={draft.processingPct * 100} onChange={(v) => setDraft({ ...draft, processingPct: v / 100 })} suffix="%" />
             <Dial label="Contractor fee %" value={draft.contractorFeePct * 100} onChange={(v) => setDraft({ ...draft, contractorFeePct: v / 100 })} suffix="%" est />
             <Dial label="LTV:CAC target" value={draft.ltvCacTarget} onChange={(v) => setDraft({ ...draft, ltvCacTarget: v })} suffix="x" />
             <Dial label="Term (months)" value={draft.termMonths} onChange={(v) => setDraft({ ...draft, termMonths: Math.round(v) })} />
@@ -647,7 +720,7 @@ function AssumptionsDrawer({ draft, setDraft, onClose, econ }: {
 
           {/* retention per tier */}
           <div>
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Extra months retained <span className="normal-case text-muted-foreground/70">(estimate)</span></p>
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Additional months retained <span className="normal-case text-muted-foreground/70">(§8 estimate)</span></p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {draft.tiers.map((t) => (
                 <div key={t.id} className="flex items-center justify-between rounded-[6px] border border-border px-2.5 py-1.5">
@@ -659,9 +732,9 @@ function AssumptionsDrawer({ draft, setDraft, onClose, econ }: {
             </div>
           </div>
 
-          {/* overhead */}
+          {/* fixed overhead */}
           <div>
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Fixed monthly overhead <span className="normal-case text-primary tabular-nums">= {fmtMoney(sumOverhead(draft.overhead))}</span></p>
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Total fixed overhead <span className="normal-case text-primary tabular-nums">= {fmtMoney(sumOverhead(draft.overhead))}</span></p>
             <div className="space-y-1.5">
               {(["teamPayroll", "founderComp", "software", "insurance", "otherAdmin"] as const).map((k) => (
                 <div key={k} className="flex items-center justify-between rounded-[6px] border border-border px-2.5 py-1.5">
@@ -678,7 +751,7 @@ function AssumptionsDrawer({ draft, setDraft, onClose, econ }: {
     </div>
   );
 }
-const OVERHEAD_LABELS: Record<string, string> = { teamPayroll: "Team & delivery payroll", founderComp: "Founder pay", software: "Software & tools", insurance: "Insurance & admin", otherAdmin: "Other" };
+const OVERHEAD_LABELS: Record<string, string> = { teamPayroll: "Team & delivery payroll", founderComp: "Founder compensation", software: "Software & tools", insurance: "Insurance & admin", otherAdmin: "Other" };
 function Dial({ label, value, onChange, suffix, est }: { label: string; value: number; onChange: (v: number) => void; suffix?: string; est?: boolean }) {
   return (
     <div className="rounded-[8px] border border-border px-3 py-2">
