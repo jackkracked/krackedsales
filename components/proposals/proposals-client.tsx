@@ -514,8 +514,10 @@ export function ProposalsClient() {
           })}
         </div>
 
-        {/* Table */}
-        <div data-r10n-proposal-table className="bg-card border border-border rounded-[10px] overflow-hidden">
+        {/* Table — shrink-0 so this flex child keeps its full height. Without it, the
+            overflow-hidden here makes the item shrinkable, so flexbox squashes the table to
+            fit the viewport and clips the lower rows instead of letting the page scroll. */}
+        <div data-r10n-proposal-table className="shrink-0 bg-card border border-border rounded-[10px] overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr data-r10n-proposal-table-head className="border-b border-border group">
