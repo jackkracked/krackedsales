@@ -1245,25 +1245,8 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
         </div>
       )}
 
-      {/* Expiry banner — centered, urgency-coloured */}
-      {proposal.expiresAt && (() => {
-        const daysLeft = Math.ceil((new Date(proposal.expiresAt).getTime() - Date.now()) / 86400000);
-        return (
-          <div className="sticky top-0 z-10 border-b px-6 py-2.5 flex items-center justify-center gap-2 bg-slate-50 border-slate-200">
-            <Clock className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-            <span className="text-xs font-semibold tracking-wide text-slate-600">
-              {isDraft ? (
-                <>Expires: <InlineEditDate value={proposal.expiresAt} proposalId={proposal.id} /></>
-              ) : daysLeft <= 0
-                ? `This proposal expires today`
-                : daysLeft === 1
-                ? `This proposal expires tomorrow`
-                : `This proposal expires on ${fmtDate(proposal.expiresAt)}`
-              }
-            </span>
-          </div>
-        );
-      })()}
+      {/* Proposals no longer expire — the expiry banner has been removed so a link never
+          reads as "expired" and clients can always sign. */}
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 lg:py-12">
         <div className="flex flex-col-reverse lg:flex-row gap-6 lg:gap-10 items-start lg:items-stretch">

@@ -3,7 +3,8 @@ import { db } from "@/lib/db";
 import { proposals, proposalInstalments, slackSettings, agreementTemplates } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { hasStripe, stripe } from "@/lib/stripe/client";
-import { clampedTrialEnd } from "@/lib/proposals/deposit-billing";
+import { clampedTrialEnd, issueNextDepositInvoice } from "@/lib/proposals/deposit-billing";
+import { postToSalesChannel } from "@/lib/proposals/slack-notify";
 import { generateAgreementPdf } from "@/lib/pdf/render";
 import { sendSignedAgreementEmail } from "@/lib/email/resend";
 import { dispatchWorkflowEvent } from "@/lib/workflows/triggers";
@@ -102,122 +103,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       process.env.NEXT_PUBLIC_APP_URL ||
       req.headers.get("origin") ||
       "https://kracked-sales.vercel.app";
-    let hostedUrl: string | null = null;
-
-    if (hasStripe()) {
-      if (proposal.paymentStructure === "single" && proposal.stripeInvoiceId) {
-        // Invoice was finalized on send — retrieve the hosted URL
-        const inv = await stripe().invoices.retrieve(proposal.stripeInvoiceId);
-        hostedUrl = inv.hosted_invoice_url ?? null;
-
-      } else if (proposal.paymentStructure === "instalment") {
-        // Point to first instalment's hosted invoice
-        const instalments = await db()
-          .select()
-          .from(proposalInstalments)
-          .where(eq(proposalInstalments.proposalId, id))
-          .orderBy(proposalInstalments.instalmentNumber)
-          .limit(1);
-
-        if (instalments.length > 0 && instalments[0].stripeInvoiceId) {
-          const inv = await stripe().invoices.retrieve(instalments[0].stripeInvoiceId);
-          hostedUrl = inv.hosted_invoice_url ?? null;
-          await db()
-            .update(proposalInstalments)
-            .set({ stripeHostedUrl: hostedUrl ?? undefined })
-            .where(eq(proposalInstalments.id, instalments[0].id));
-        }
-
-      } else if (proposal.paymentStructure === "subscription" && proposal.hasDeposit && proposal.stripeCustomerId) {
-        // Deposit proposal — skip Checkout Session, point to first unpaid deposit invoice
-        const depositInstalments = await db()
-          .select()
-          .from(proposalInstalments)
-          .where(eq(proposalInstalments.proposalId, id))
-          .orderBy(proposalInstalments.instalmentNumber);
-
-        const firstUnpaid = depositInstalments.find(i => i.isDeposit && i.status === "pending");
-        if (firstUnpaid?.stripeInvoiceId) {
-          const inv = await stripe().invoices.retrieve(firstUnpaid.stripeInvoiceId);
-          hostedUrl = inv.hosted_invoice_url ?? null;
-          if (hostedUrl) {
-            await db()
-              .update(proposalInstalments)
-              .set({ stripeHostedUrl: hostedUrl })
-              .where(eq(proposalInstalments.id, firstUnpaid.id));
-          }
-        }
-
-      } else if (proposal.paymentStructure === "subscription" && proposal.stripeCustomerId) {
-        // Create a Stripe Checkout Session for recurring subscription (no deposit)
-        const interval = (proposal.billingInterval ?? "month") as "day" | "week" | "month" | "year";
-        const intervalCount = proposal.billingIntervalCount ?? 1;
-
-        const price = await stripe().prices.create({
-          currency: proposal.currency,
-          unit_amount: Math.round(proposal.totalAmount * 100),
-          recurring: { interval, interval_count: intervalCount },
-          product_data: {
-            name: proposal.title,
-            metadata: { proposal_id: proposal.id },
-          },
-        });
-
-        // If the rep picked a first-charge date, trial the subscription until then so nothing
-        // charges before it. With no date and no deposit, it bills immediately (as before).
-        const subTrialEnd = proposal.subscriptionStartDate
-          ? clampedTrialEnd(new Date(proposal.subscriptionStartDate))
-          : null;
-
-        // Durable Payment Link (preferred): unlike a Checkout Session, it NEVER expires, so a
-        // client who signs today but pays in a few days is never stranded (the Epicured incident).
-        // Payment Links use a RELATIVE trial (days from payment), so convert the absolute
-        // first-charge date to whole days from now, clamped to >= 1.
-        const trialDays = subTrialEnd
-          ? Math.max(1, Math.ceil((subTrialEnd * 1000 - Date.now()) / 86_400_000))
-          : null;
-
-        try {
-          // Subscription-mode Payment Links always create their own customer from the email the
-          // client enters (Stripe does not allow pinning a pre-made customer here). That can make
-          // a duplicate Stripe customer, but reconciliation is by the subscription's proposal_id
-          // metadata (see the webhook), so the proposal still flips to paid correctly.
-          const link = await stripe().paymentLinks.create({
-            line_items: [{ price: price.id, quantity: 1 }],
-            metadata: { proposal_id: proposal.id },
-            subscription_data: {
-              metadata: { proposal_id: proposal.id },
-              ...(trialDays ? { trial_period_days: trialDays } : {}),
-            },
-            after_completion: {
-              type: "redirect",
-              redirect: { url: `${origin}/p/${proposal.token}?payment=success` },
-            },
-            restrictions: { completed_sessions: { limit: 1 } },
-          }, { idempotencyKey: `plink_${proposal.id}` });
-          hostedUrl = link.url;
-        } catch (linkErr) {
-          // The live key may not yet have `payment_links_write`. Fall back to the previous
-          // Checkout Session so signing NEVER breaks. This link expires in 24h (Stripe's cap),
-          // so grant the payment-link permission on the key to get the durable link.
-          console.error("[sign] Payment Link unavailable, falling back to Checkout Session:", linkErr);
-          const session = await stripe().checkout.sessions.create({
-            customer: proposal.stripeCustomerId,
-            mode: "subscription",
-            line_items: [{ price: price.id, quantity: 1 }],
-            success_url: `${origin}/p/${proposal.token}?payment=success`,
-            cancel_url: `${origin}/p/${proposal.token}`,
-            metadata: { proposal_id: proposal.id },
-            subscription_data: {
-              metadata: { proposal_id: proposal.id },
-              ...(subTrialEnd ? { trial_end: subTrialEnd } : {}),
-            },
-          }, { idempotencyKey: `csess_${proposal.id}` });
-          hostedUrl = session.url;
-        }
-      }
-    }
-
+    // ── Record the signature FIRST. A Stripe hiccup must NEVER block a client from signing
+    //    (that is the exact failure that killed July). Payment setup happens next, best-effort.
     await db()
       .update(proposals)
       .set({
@@ -226,10 +113,152 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         signedIp: ip,
         signatureData: signature,
         signerTitle: signerTitle?.trim() || null,
-        stripeHostedUrl: hostedUrl,
         updatedAt: new Date(),
       })
       .where(eq(proposals.id, id));
+
+    // ── Set up the payment path AT SIGN (never on send). Invoices carry a 30-day due date.
+    //    If anything fails we alert #kracked-ai-sales and carry on — the signature is saved and
+    //    the client sees success; the team follows up manually.
+    let hostedUrl: string | null = null;
+    if (hasStripe()) {
+      try {
+        // Ensure a Stripe customer exists (send usually makes it; create here if missing).
+        let customerId = proposal.stripeCustomerId ?? null;
+        if (!customerId && proposal.contactEmail) {
+          const c = await stripe().customers.create({
+            name: proposal.contactName,
+            email: proposal.contactEmail,
+            metadata: { ghl_contact_id: proposal.ghlContactId },
+          });
+          customerId = c.id;
+          await db().update(proposals).set({ stripeCustomerId: customerId }).where(eq(proposals.id, id));
+          proposal.stripeCustomerId = customerId;
+        }
+
+        if (proposal.paymentStructure === "single") {
+          // Single invoice, DUE IN 30 DAYS. Reuse an existing invoice (older proposals), else create.
+          if (proposal.stripeInvoiceId) {
+            const inv = await stripe().invoices.retrieve(proposal.stripeInvoiceId);
+            hostedUrl = inv.hosted_invoice_url ?? null;
+          } else if (customerId) {
+            const invoice = await stripe().invoices.create({
+              customer: customerId,
+              collection_method: "send_invoice",
+              days_until_due: 30,
+              metadata: { ghl_contact_id: proposal.ghlContactId, proposal_id: proposal.id },
+              auto_advance: false,
+            });
+            await stripe().invoiceItems.create({
+              customer: customerId,
+              invoice: invoice.id,
+              amount: Math.round(proposal.totalAmount * 100),
+              currency: proposal.currency,
+              description:
+                proposal.serviceDescription ??
+                `${proposal.type === "management" ? "Management Retainer" : "Project"} — ${proposal.contactName}`,
+            });
+            await stripe().invoices.finalizeInvoice(invoice.id, { auto_advance: false });
+            const fin = await stripe().invoices.retrieve(invoice.id);
+            hostedUrl = fin.hosted_invoice_url ?? null;
+            await db().update(proposals).set({ stripeInvoiceId: invoice.id }).where(eq(proposals.id, id));
+          }
+
+        } else if (proposal.paymentStructure === "instalment") {
+          // First instalment invoice, DUE IN 30 DAYS. Reuse if it exists, else create.
+          const instalments = await db()
+            .select()
+            .from(proposalInstalments)
+            .where(eq(proposalInstalments.proposalId, id))
+            .orderBy(proposalInstalments.instalmentNumber);
+          const first = instalments[0];
+          if (first?.stripeInvoiceId) {
+            const inv = await stripe().invoices.retrieve(first.stripeInvoiceId);
+            hostedUrl = inv.hosted_invoice_url ?? null;
+            if (hostedUrl) {
+              await db().update(proposalInstalments).set({ stripeHostedUrl: hostedUrl }).where(eq(proposalInstalments.id, first.id));
+            }
+          } else if (first && customerId) {
+            const inv = await stripe().invoices.create({
+              customer: customerId,
+              collection_method: "send_invoice",
+              days_until_due: 30,
+              metadata: { ghl_contact_id: proposal.ghlContactId, proposal_id: proposal.id, instalment_number: String(first.instalmentNumber) },
+              auto_advance: false,
+            });
+            await stripe().invoiceItems.create({
+              customer: customerId,
+              invoice: inv.id,
+              amount: Math.round(first.amount * 100),
+              currency: proposal.currency,
+              description: `Instalment ${first.instalmentNumber} of ${instalments.length} — ${proposal.contactName}`,
+            });
+            await stripe().invoices.finalizeInvoice(inv.id, { auto_advance: false });
+            const fin = await stripe().invoices.retrieve(inv.id);
+            hostedUrl = fin.hosted_invoice_url ?? null;
+            await db()
+              .update(proposalInstalments)
+              .set({ stripeInvoiceId: inv.id, stripeHostedUrl: hostedUrl ?? undefined })
+              .where(eq(proposalInstalments.id, first.id));
+          }
+
+        } else if (proposal.paymentStructure === "subscription" && proposal.hasDeposit && customerId) {
+          // First deposit invoice (30-day, set in deposit-billing). Deposits stay sequential via
+          // the webhook; the recurring subscription is created once the full deposit is collected.
+          const res = await issueNextDepositInvoice(id);
+          hostedUrl = res?.hostedUrl ?? null;
+
+        } else if (proposal.paymentStructure === "subscription" && customerId) {
+          // Recurring subscription (no deposit) — a durable Payment Link that never expires, with
+          // a Checkout Session fallback. Paying it creates the real recurring subscription.
+          const interval = (proposal.billingInterval ?? "month") as "day" | "week" | "month" | "year";
+          const intervalCount = proposal.billingIntervalCount ?? 1;
+          const price = await stripe().prices.create({
+            currency: proposal.currency,
+            unit_amount: Math.round(proposal.totalAmount * 100),
+            recurring: { interval, interval_count: intervalCount },
+            product_data: { name: proposal.title, metadata: { proposal_id: proposal.id } },
+          });
+          const subTrialEnd = proposal.subscriptionStartDate ? clampedTrialEnd(new Date(proposal.subscriptionStartDate)) : null;
+          const trialDays = subTrialEnd ? Math.max(1, Math.ceil((subTrialEnd * 1000 - Date.now()) / 86_400_000)) : null;
+          try {
+            const link = await stripe().paymentLinks.create({
+              line_items: [{ price: price.id, quantity: 1 }],
+              metadata: { proposal_id: proposal.id },
+              subscription_data: {
+                metadata: { proposal_id: proposal.id },
+                ...(trialDays ? { trial_period_days: trialDays } : {}),
+              },
+              after_completion: { type: "redirect", redirect: { url: `${origin}/p/${proposal.token}?payment=success` } },
+              restrictions: { completed_sessions: { limit: 1 } },
+            }, { idempotencyKey: `plink_${proposal.id}` });
+            hostedUrl = link.url;
+          } catch (linkErr) {
+            console.error("[sign] Payment Link unavailable, falling back to Checkout Session:", linkErr);
+            const session = await stripe().checkout.sessions.create({
+              customer: customerId,
+              mode: "subscription",
+              line_items: [{ price: price.id, quantity: 1 }],
+              success_url: `${origin}/p/${proposal.token}?payment=success`,
+              cancel_url: `${origin}/p/${proposal.token}`,
+              metadata: { proposal_id: proposal.id },
+              subscription_data: { metadata: { proposal_id: proposal.id }, ...(subTrialEnd ? { trial_end: subTrialEnd } : {}) },
+            }, { idempotencyKey: `csess_${proposal.id}` });
+            hostedUrl = session.url;
+          }
+        }
+
+        if (hostedUrl) {
+          await db().update(proposals).set({ stripeHostedUrl: hostedUrl, updatedAt: new Date() }).where(eq(proposals.id, id));
+        }
+      } catch (payErr) {
+        const emsg = payErr instanceof Error ? payErr.message : String(payErr);
+        console.error("[sign] payment setup failed (signature is saved):", emsg);
+        postToSalesChannel(
+          `:warning: *${proposal.contactName}* signed their proposal (${proposal.title}) but we couldn't set up their payment: ${emsg}. Please set it up manually.`,
+        ).catch(() => {});
+      }
+    }
 
     dispatchWorkflowEvent("proposal.signed", {
       proposalId: id,

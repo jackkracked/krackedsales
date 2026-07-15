@@ -9,6 +9,7 @@ import { sendPaymentReceiptEmail, sendRenderedEmail } from "@/lib/email/resend";
 import { renderTransactional } from "@/lib/reminders/transactional";
 import { dispatchWorkflowEvent, buildProposalPayload } from "@/lib/workflows/triggers";
 import { settleDeposits } from "@/lib/proposals/deposit-billing";
+import { postToSalesChannel } from "@/lib/proposals/slack-notify";
 
 const DEFAULT_MANAGEMENT_TERMS = `**Service Collaboration & Cooperation**
 
@@ -424,11 +425,19 @@ export async function POST(req: NextRequest) {
             .set({ status: "failed" })
             .where(eq(proposalInstalments.stripeInvoiceId, stripeInvoiceId));
         } else {
+          // A declined payment must NOT flip a signed/paid proposal to "failed" — they signed and
+          // can retry the still-open invoice. Keep the status; the Slack alert below notifies us.
           await db()
             .update(proposals)
             .set({ status: "failed", updatedAt: new Date() })
-            .where(eq(proposals.stripeInvoiceId, stripeInvoiceId));
+            .where(and(eq(proposals.stripeInvoiceId, stripeInvoiceId), ne(proposals.status, "paid"), ne(proposals.status, "signed")));
         }
+        // Shout it: a client tried to pay and couldn't. Name, invoice, amount.
+        const who = obj.customer_name || obj.customer_email || "A client";
+        const amt = ((obj.amount_due ?? 0) / 100).toLocaleString("en-US", { style: "currency", currency: (obj.currency ?? "usd").toUpperCase() });
+        postToSalesChannel(
+          `:warning: *${who}* tried to pay invoice ${obj.number ?? stripeInvoiceId} (${amt}) but the payment failed (card declined or did not go through). Follow up.`,
+        ).catch(() => {});
         break;
       }
 

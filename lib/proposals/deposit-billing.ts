@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { proposals, proposalInstalments } from "@/lib/db/schema";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { stripe } from "@/lib/stripe/client";
+import { postToSalesChannel } from "@/lib/proposals/slack-notify";
 import type Stripe from "stripe";
 
 /**
@@ -63,7 +64,7 @@ async function issueDepositInvoice(
   const invoice = await stripe().invoices.create({
     customer: proposal.stripeCustomerId,
     collection_method: "send_invoice",
-    days_until_due: 7,
+    days_until_due: 30,
     metadata: {
       ghl_contact_id: proposal.ghlContactId,
       proposal_id: proposal.id,
@@ -271,7 +272,19 @@ export async function settleDeposits(proposalId: string): Promise<SettleResult> 
   // it. If we lost the race we created a duplicate subscription, so we cancel it. Because
   // the subscription is on a trial (no charge until the first cycle), cancelling the loser
   // means the customer is never double-billed.
-  const subscriptionId = await createDepositSubscription(proposal);
+  // Deposit is fully collected. Creating the subscription is the money-critical step: if it fails,
+  // the client has PAID but has no recurring billing — shout it so a human fixes it immediately.
+  let subscriptionId: string;
+  try {
+    subscriptionId = await createDepositSubscription(proposal);
+  } catch (subErr) {
+    const emsg = subErr instanceof Error ? subErr.message : String(subErr);
+    console.error(`[deposit-billing] CRITICAL: deposit collected but subscription creation FAILED for ${proposalId}:`, emsg);
+    postToSalesChannel(
+      `:rotating_light: *${proposal.contactName}* paid their deposit but the subscription could NOT be created: ${emsg}. Set it up manually in Stripe now.`,
+    ).catch(() => {});
+    throw subErr; // rethrow so the Stripe webhook retries this settlement
+  }
   const claimed = await db()
     .update(proposals)
     .set({

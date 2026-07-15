@@ -206,10 +206,12 @@ export async function POST(req: NextRequest) {
         : null;
 
     const token = crypto.randomBytes(32).toString("hex");
-    // Default expiry: today (rep can change it in the preview)
+    // Proposals never expire. (The old default expired a proposal the SAME day it was created,
+    // which killed links before clients could sign and forced delete+resend.) Kept nullable so
+    // the signing page's expiry banner simply never renders.
     const todayNoon = new Date();
-    todayNoon.setUTCHours(12, 0, 0, 0);
-    const expiresAt = todayNoon;
+    todayNoon.setUTCHours(12, 0, 0, 0); // still the default start date below
+    const expiresAt = null;
 
     const title = `${type === "management" ? "Management Retainer" : "Project"} — ${contactName}`;
 
