@@ -35,6 +35,13 @@ later. Never over-email prospects.
 ## Phase 0 — DONE
 - [x] Stripe key permissions restored + signing verified live.
 
+## Phase 1 + 1.5 — SHIPPED 2026-07-15 (verified sandbox E2E all types + payments-engineer review = SAFE)
+- [x] Send no longer creates invoices; sign creates 30-day invoice / durable sub link; crash-proof
+      (signature saved first); reuse-not-recreate for existing invoices; deposit 30-day; expiry removed.
+- [x] Failure alerts to #kracked-ai-sales: sign-setup fail, payment_failed, deposit-sub-fail, send fail.
+- [x] invoice.payment_failed no longer flips a signed/paid proposal to "failed".
+- 9 existing invoices untouched. Forward-only change.
+
 ## Phase 1 — Simplify the money flow (HIGH RISK, sandbox-test, Jack sign-off)
 - [ ] SEND (`app/api/proposals/[id]/send/route.ts`): stop creating/finalizing Stripe invoices for all
       structures (single, instalment, subscription, deposit). On send = create/attach the Stripe

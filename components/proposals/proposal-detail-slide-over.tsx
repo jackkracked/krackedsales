@@ -9,6 +9,7 @@ import { useUserTimezone } from "@/providers/timezone-provider";
 import { toZonedDate } from "@/lib/utils/timezone";
 import { ProposalStatusBadge } from "./proposal-status-badge";
 import { ActivityTimeline } from "./engagement";
+import { BillingActivity } from "./billing-activity";
 import { discountInfo, clientSentence, type BillingTerms } from "@/lib/proposals/billing";
 
 interface Instalment {
@@ -476,6 +477,9 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
             signedAt={proposal.signedAt}
             paidAt={proposal.paidAt ?? null}
           />
+
+          {/* Billing activity — every invoice / payment / reminder / subscription event */}
+          <BillingActivity proposalId={proposal.id} />
 
           {/* Service description */}
           {proposal.serviceDescription && (
