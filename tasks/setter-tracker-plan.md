@@ -1,6 +1,6 @@
 # Setter tracker + editable months: build plan
 
-Created 2026-09-25. Branch `feat/setter-tracker` (off checkpoint `2da78b7`). Status: BUILT, reviewed, verified on real data. Migration 0063 APPLIED to prod (Jack's go, 2026-09-25). Code NOT deployed. 0064 (setters on) NOT applied.
+Created 2026-09-25. Branch `feat/setter-tracker` (off checkpoint `2da78b7`). Status: DEPLOYED 2026-09-25 15:5x UTC (dpl_2nPFgbzQiMPTEpJbwyGFrTi2a1Cc). 0063 + 0064 applied. Setters ON.
 Requirements: `tasks/commission-tracker-plan.md` (decisions 1-14). UI: `tasks/setter-tracker-shape.md`
 (confirmed by Jack 2026-09-25). Nothing deploys without Jack's explicit go.
 
@@ -72,7 +72,7 @@ R10 Go-live: setter rows start at 2026-09 (so September can be checked against h
 - [x] 14 Proofs: scripts/prove-setter-tracker.ts (pure rules + access rules), live dry run of
       Kelsey's September vs her sheet, closer numbers identical before/after for every closer month.
 - [x] 15 Reviews: staff code review, Gate 5 security, Gate 6 data integrity. Fix, re-prove.
-- [ ] 16 Jack approves → apply migrations, deploy, run sync once, verify in prod.
+- [x] 16 Jack approves → apply migrations, deploy, run sync once, verify in prod.
 
 ## Deliberately not changed
 - Existing outcome route (`/api/dashboard/calls/[eventId]/outcome`) has no ownership check.
@@ -156,3 +156,13 @@ applied before this code deploys, or every dashboard outcome insert fails.
 3. `node scripts/apply-0064-tracker-setters-on.mjs --apply` (setters on).
 4. Hit /api/cron/attribute-bookings once with the CRON_SECRET; confirm `appointments.status: ok`.
 5. Open /tracker as admin for Kelsey and Alice; time the API (<1s expected in iad1).
+
+## Deployed (2026-09-25, ~15:50 UTC, Jack: "deploy")
+- Pre-flight: no settings drift between `users` and month settings (checked every person).
+- `vercel --prod`: dpl_2nPFgbzQiMPTEpJbwyGFrTi2a1Cc, target=production, READY.
+- 0064 applied with `--apply`: setters can open /tracker.
+- Production cron run: attribution ok; appointments ok, 13 calendars, 0 failed, 909 upserted.
+  Without the secret it answers 401.
+- NOT verified by me: a logged-in page view in production. The local SESSION_SECRET does not
+  match production (by design I cannot mint a prod login). Jack/Kelsey opening /tracker is the
+  last check. First Slack nudge goes out on the 13:20 UTC run, 2026-09-26.
