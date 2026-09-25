@@ -32,7 +32,13 @@ export async function GET(req: NextRequest) {
     filters.push(eq(activityEvents.entityType, entityType));
     filters.push(eq(activityEvents.entityId, entityId));
   }
-  if (userId) filters.push(eq(activityEvents.userId, userId));
+  // The team-wide feed (no entity scope) is admin data — clamp non-admins to their OWN events so a
+  // setter/closer can't read the whole team's activity by omitting userId. Entity/contact timelines
+  // legitimately show everyone's events on that record.
+  const isAdmin = user.role === "admin";
+  const entityScoped = !!(entityType && entityId) || !!contactId;
+  const effectiveUserId = entityScoped ? userId : (isAdmin ? userId : user.id);
+  if (effectiveUserId) filters.push(eq(activityEvents.userId, effectiveUserId));
   if (action) filters.push(eq(activityEvents.action, action));
   if (cursor) filters.push(lt(activityEvents.createdAt, new Date(cursor)));
 

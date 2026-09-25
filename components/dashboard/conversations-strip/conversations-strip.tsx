@@ -614,9 +614,17 @@ export function ConversationsStrip() {
         />
       )}
 
-      {/* Raw social lead (no GHL record yet) → promote to a lead via Create Demo */}
+      {/* Create Demo on whichever conversation the button was pressed on.
+          `contactId` is passed through whenever the queue item has one — it is documented as
+          "GHL contactId if available" (app/api/inbox/queue/route.ts:34) and this component
+          already relies on it to fetch that contact's opportunity and details. Without it the
+          modal had no idea who it was for and could not prefill the website or brand.
+          Raw social leads (Instagram/TikTok DMs with no GHL record yet) legitimately have none,
+          so it stays undefined for those and the platform/participant fields identify them
+          instead. */}
       {demoItem && (
         <CreateDemoModal
+          contactId={demoItem.contactId}
           contactName={demoItem.contactName}
           opportunitySource={demoItem.platform ?? demoItem.channel}
           platform={

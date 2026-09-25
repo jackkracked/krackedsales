@@ -6,6 +6,13 @@
  */
 import { ghl, locationId } from "@/lib/ghl/client";
 
+/**
+ * "Insert Miro Link" on the contact (key contact.insert_miro_link). Writing it in GHL fires a
+ * GHL workflow, which is the entire point of the app's Demo Link field. Lives here rather than
+ * in a route so both the reader and the writer share one definition.
+ */
+export const DEMO_LINK_CUSTOM_FIELD_ID = "Kr9sT50pSDCq5TP6ObPT";
+
 export interface CustomFieldDef {
   id: string;
   name: string;

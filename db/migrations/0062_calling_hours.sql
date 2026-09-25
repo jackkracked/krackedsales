@@ -1,0 +1,16 @@
+-- 0062: Editable calling-hours windows for the dialer warning.
+--
+-- Jack, 2026-09-25: "can we save this somewhere in admin settings for the time selectors …
+-- just so we can edit these warning window times going forward."
+--
+-- WHY JSONB AND NOT COLUMNS
+-- The shape is five regions x three day-types x an open and a close, and it will grow as we
+-- sell into more countries. Thirty columns would need a migration every time a rule changes,
+-- which is exactly the friction that leaves a legal window hardcoded and wrong.
+--
+-- NULL MEANS "USE THE LAW AS SHIPPED". The defaults in lib/dialer/calling-hours.ts are the
+-- actual statutory windows (US TCPA, Canada CRTC, Australia ACMA), so an empty setting is the
+-- correct setting. Nothing is stored until an admin deliberately changes something.
+--
+-- Additive, nullable, idempotent.
+ALTER TABLE dialer_settings ADD COLUMN IF NOT EXISTS calling_hours jsonb;

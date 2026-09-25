@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { CheckCircle2, SlidersHorizontal, ArrowRight } from "lucide-react";
 import Link from "next/link";
@@ -10,6 +10,8 @@ import { DialDock, type CallState } from "./dial-dock";
 import { DialerOutcomeModal, type DialerOutcome } from "./dialer-outcome-modal";
 import { CampaignBuilder } from "./campaign-builder";
 import { ChangeStageModal } from "@/components/contacts/change-stage-modal";
+import { CallingHoursWarning } from "@/components/dialer/calling-hours-warning";
+import { checkCallingHours, type CallingWindow, type CallingHoursConfig } from "@/lib/dialer/calling-hours";
 import { useDialer } from "@/providers/dialer-provider";
 import type { CampaignSummary, CampaignDetail, ClaimedContact, DialerContact, DialerCampaign } from "./mock-data";
 
@@ -18,10 +20,14 @@ interface Pipeline { id: string; name: string; stages: Array<{ id: string; name:
 const digits = (p: string | null | undefined) => (p ?? "").replace(/[^\d+]/g, "");
 const mmss = (t: number) => `${Math.floor(t / 60).toString().padStart(2, "0")}:${(t % 60).toString().padStart(2, "0")}`;
 
-export function DialerClient({ role, userName }: { role: "admin" | "rep"; userName: string }) {
+export function DialerClient({ role, userName, userId }: { role: "admin" | "rep"; userName: string; userId: string | null }) {
   const isAdmin = role === "admin";
   const qc = useQueryClient();
   const dialer = useDialer();
+  /** Set when a dial was stopped to ask about the hour. Null the rest of the time. */
+  /** What was checked, captured so "Call anyway" dials the very number the warning was about. */
+  const [hoursWarning, setHoursWarning] =
+    useState<{ window: CallingWindow; number: string; name: string } | null>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -106,7 +112,9 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
   const dockStateRef = useRef(dockState);
   dockStateRef.current = dockState;
   const modalOpenRef = useRef(false);
-  modalOpenRef.current = !!outcomeFor || builderOpen;
+  // `hoursWarning` included: with the keypad live behind the dialog, a stray digit changed
+  // the number and "Call anyway" would then dial something the warning never checked.
+  modalOpenRef.current = !!outcomeFor || builderOpen || !!hoursWarning;
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const el = document.activeElement as HTMLElement | null;
@@ -125,6 +133,7 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
 
   // ── Actions ────────────────────────────────────────────────────────────────
   function selectCampaign(id: string) {
+    setHoursWarning(null);   // never leave a warning up for a contact we have left
     setSelectedId(id); setRunning(false); setCompleted(false); setClaimed(null); setPreviewContactId(null); setNumber("");
   }
   async function startCampaign() {
@@ -138,14 +147,60 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
   function previewContact(contactId: string) { setPreviewContactId(contactId); }
   function backToCampaign() { setPreviewContactId(null); setNumber(""); }
 
+  /** The actual dial. Reached directly, or from "Call anyway" on the hours warning. */
+  /** Admin-set calling windows. Absent or failed means the statutory defaults apply, which is
+   *  the safe direction: the warning keeps working exactly as shipped. */
+  const { data: callingHours } = useQuery<{ callingHours: CallingHoursConfig }>({
+    queryKey: ["calling-hours"],
+    queryFn: () => fetch("/api/settings/calling-hours").then((r) => r.json()),
+    // Short, and re-checked while the dialer sits open. A tightened window is a compliance
+    // change; leaving a rep on a five-minute-old copy for a whole calling session is the wrong
+    // direction. The payload is a few hundred bytes.
+    staleTime: 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  });
+
+  const placeCallRef = useRef<((n: string, name: string) => void) | null>(null);
+  const handleHoursCancel = useCallback(() => setHoursWarning(null), []);
+  const handleHoursCallAnyway = useCallback(() => {
+    setHoursWarning((w) => {
+      // Dial exactly what was checked, never whatever the pad happens to hold now.
+      if (w) placeCallRef.current?.(w.number, w.name);
+      return null;
+    });
+  }, []);
+
+  function contactLabel() {
+    return running && claimed ? claimed.contactName ?? "Contact" : isPreview ? cockpitContact?.name ?? "Contact" : "Manual call";
+  }
+
+  /** The actual dial. `toNumber` is passed explicitly so a bypass dials what was checked. */
+  function placeCall(toNumber: string = number, name: string = contactLabel()) {
+    if (!toNumber) return;
+    inCall.current = true;
+    const campaignContactId = running && claimed ? claimed.id : null;
+    dialedContact.current = { campaignContactId, name };
+    void dialer.dial(toNumber, { contactId: cockpitContactId ?? undefined, campaignContactId: campaignContactId ?? undefined, name });
+  }
+  placeCallRef.current = placeCall;
+
   function startDial() {
     if (!number) return;
     if (dialer.status !== "ready") { fireToast("Connect Twilio in Settings → Telephony first"); return; }
-    inCall.current = true;
-    const campaignContactId = running && claimed ? claimed.id : null;
-    const name = running && claimed ? claimed.contactName ?? "Contact" : isPreview ? cockpitContact?.name ?? "Contact" : "Manual call";
-    dialedContact.current = { campaignContactId, name };
-    void dialer.dial(number, { contactId: cockpitContactId ?? undefined, campaignContactId: campaignContactId ?? undefined, name });
+
+    // IS IT A REASONABLE HOUR WHERE THEY ARE?
+    //
+    // Checked here because this is the only place a call begins, campaign or manual alike, so
+    // the guard cannot be sidestepped by accident. It returns `allowed` whenever the number
+    // cannot be placed confidently, so the overwhelming majority of dials see nothing at all.
+    const hours = checkCallingHours(
+      { phone: number, ghlTimezone: cockpitContact?.timezone ?? null },
+      new Date(),
+      callingHours?.callingHours,
+    );
+    if (!hours.allowed) { setHoursWarning({ window: hours, number, name: contactLabel() }); return; }
+
+    placeCall();
   }
 
   function moveStage(oppId: string, stageId: string, toStage: string, fromStage: string | null, reason: string, name: string) {
@@ -198,15 +253,49 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
 
   async function createCampaign(c: DialerCampaign) {
     try {
-      const data = await fetch("/api/dialer/campaigns", {
+      // ONE call. The server resolves the stage, creates the campaign and writes the queue
+      // together, so there is no window in which a named campaign exists with no contacts.
+      const res = await fetch("/api/dialer/campaigns", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: c.name, maxAttempts: c.maxAttempts }),
-      }).then((r) => r.json());
+        body: JSON.stringify({
+          name: c.name,
+          maxAttempts: c.maxAttempts,
+          ...(c.repUserIds?.length ? { repUserIds: c.repUserIds } : {}),
+          ...(c.stageSource ? { source: c.stageSource } : {}),
+        }),
+      });
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        // Say what actually happened. Reporting "created" for a campaign that does not exist
+        // sends someone looking for it in the rail.
+        fireToast(data?.error ?? "Could not create the campaign");
+        return;
+      }
+
       setBuilderOpen(false);
       await qc.invalidateQueries({ queryKey: ["dialer-campaigns"] });
       if (data.campaign?.id) selectCampaign(data.campaign.id);
-      fireToast(`Campaign “${c.name}” created`);
+
+      // `queued` is the server's count of rows actually written, not what we hoped to send.
+      const skipped = (data.counts?.skippedNoPhone ?? 0) + (data.counts?.skippedDnd ?? 0);
+      fireToast(
+        data.queued
+          ? `“${c.name}” created with ${data.queued} to dial${skipped ? ` · ${skipped} skipped` : ""}`
+          : `Campaign “${c.name}” created`,
+      );
     } catch { fireToast("Could not create the campaign"); }
+  }
+
+  async function deleteCampaign(id: string, name: string) {
+    if (!window.confirm(`Delete “${name}” and its dial queue? Logged calls are kept. This can't be undone.`)) return;
+    try {
+      const res = await fetch(`/api/dialer/campaigns/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("delete failed");
+      if (selectedId === id) { setSelectedId(null); setRunning(false); setClaimed(null); }
+      await qc.invalidateQueries({ queryKey: ["dialer-campaigns"] });
+      fireToast(`Campaign “${name}” deleted`);
+    } catch { fireToast("Could not delete the campaign"); }
   }
 
   const keyframes = "@keyframes dialerFade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}";
@@ -217,7 +306,7 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
       <style>{keyframes}</style>
 
       <aside className="w-[284px] shrink-0 border-r border-border bg-card/50">
-        <CampaignRail campaigns={campaigns} selectedId={selectedId} onSelect={selectCampaign} onNewCampaign={() => setBuilderOpen(true)} loading={campaignsQuery.isLoading} />
+        <CampaignRail campaigns={campaigns} selectedId={selectedId} onSelect={selectCampaign} onNewCampaign={() => setBuilderOpen(true)} loading={campaignsQuery.isLoading} isAdmin={isAdmin} onDeleteCampaign={deleteCampaign} />
       </aside>
 
       <section className="relative flex flex-1 min-w-0 flex-col bg-background">
@@ -268,6 +357,23 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
         />
       </aside>
 
+      {hoursWarning && (
+
+        <CallingHoursWarning
+
+          contactName={hoursWarning.name}
+
+          window={hoursWarning.window}
+
+          onCancel={handleHoursCancel}
+
+          onCallAnyway={handleHoursCallAnyway}
+
+        />
+
+      )}
+
+
       {outcomeFor && (
         <DialerOutcomeModal
           contactName={outcomeFor.name}
@@ -287,7 +393,7 @@ export function DialerClient({ role, userName }: { role: "admin" | "rep"; userNa
         />
       )}
       {builderOpen && (
-        <CampaignBuilder isAdmin={isAdmin} currentUser={{ name: userName || "You", initials: (userName || "You").split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase() }} onClose={() => setBuilderOpen(false)} onCreate={createCampaign} />
+        <CampaignBuilder isAdmin={isAdmin} currentUserId={userId} currentUser={{ name: userName || "You", initials: (userName || "You").split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase() }} onClose={() => setBuilderOpen(false)} onCreate={createCampaign} />
       )}
       {toast && (
         <div className="pointer-events-none fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-full bg-foreground px-4 py-2 text-[12.5px] font-medium text-background shadow-[0_8px_24px_-8px_rgba(28,35,51,0.5)] motion-safe:animate-[dialerFade_180ms_ease-out]">{toast}</div>

@@ -17,10 +17,26 @@ interface RepRow {
   role: string;
   isActive: boolean;
   calls: number;
+  demos: number;
   proposalsSent: number;
   dealsClosed: number;
   closedValue: number;
   openLeads: number;
+
+  // Setter
+  callsBooked: number;
+  callsShowed: number;
+  showRate: number | null;
+
+  // Closer — attributed via proposals.closedBy, so an override moves the credit with the deal
+  dealsClosedAttributed: number;
+  closedValueAttributed: number;
+  closeRate: number | null;
+  avgDealSize: number | null;
+  cohortClosed: number;
+
+  commissionPct: number;
+  commissionEarned: number;
 }
 
 interface DrillItem {
@@ -37,14 +53,43 @@ function StatusDot({ active }: { active: boolean }) {
   return <span className={cn("inline-block w-1.5 h-1.5 rounded-full", active ? "bg-emerald-500" : "bg-muted-foreground/40")} />;
 }
 
-// col key → leaderboard label + the drilldown metric it validates.
-const COLUMNS: { key: keyof RepRow; label: string; drill: string; currency?: boolean }[] = [
-  { key: "calls", label: "Calls", drill: "calls" },
-  { key: "proposalsSent", label: "Proposals", drill: "proposals" },
-  { key: "dealsClosed", label: "Closed", drill: "closed" },
-  { key: "closedValue", label: "$ Closed", drill: "closed", currency: true },
-  { key: "openLeads", label: "Open", drill: "open" },
+type Col = {
+  key: keyof RepRow;
+  label: string;
+  drill: string;
+  currency?: boolean;
+  percent?: boolean;
+  /** Rendered heavier — the number this role is actually judged on. */
+  headline?: boolean;
+  hint?: string;
+};
+
+/**
+ * A setter creates qualified pipeline; a closer converts it to revenue. Ranking them on one set
+ * of columns flatters neither: a setter cannot control close rate, a closer cannot control dial
+ * volume. So each role gets the metrics it is genuinely accountable for, and one headline.
+ */
+const SETTER_COLUMNS: Col[] = [
+  { key: "calls", label: "Calls", drill: "calls", hint: "Calls this rep was on" },
+  { key: "callsBooked", label: "Booked", drill: "booked", headline: true, hint: "Calls they set for a closer" },
+  // Demos CREATED. Attribution starts 2026-08-07 — nothing before that recorded who submitted a
+  // demo, so earlier periods legitimately read 0 for everyone.
+  { key: "demos", label: "Demos", drill: "demos", hint: "Demos submitted through the system" },
+  { key: "showRate", label: "Show", drill: "booked", percent: true, hint: "Of the calls they booked, how many were attended" },
+  { key: "openLeads", label: "Open", drill: "open", hint: "Open opportunities assigned to them" },
 ];
+
+const CLOSER_COLUMNS: Col[] = [
+  { key: "proposalsSent", label: "Proposals", drill: "proposals", hint: "Proposals sent" },
+  { key: "dealsClosedAttributed", label: "Closed", drill: "closed", hint: "Deals closed" },
+  { key: "closedValueAttributed", label: "Revenue", drill: "closed", currency: true, headline: true, hint: "Revenue from deals they closed" },
+  { key: "closeRate", label: "Close", drill: "proposals", percent: true, hint: "Of the proposals they sent this period, how many signed" },
+  { key: "avgDealSize", label: "Avg deal", drill: "closed", currency: true, hint: "Average value of a closed deal" },
+  { key: "commissionEarned", label: "Commission", drill: "closed", currency: true, hint: "Earned at their current rate" },
+];
+
+/** Admins work as closers, so route on what they DO rather than the raw role string. */
+const isSetter = (r: RepRow) => r.role === "setter";
 
 export function RepPerformanceLeaderboard() {
   const defaultRange = useMemo(() => {
@@ -86,57 +131,30 @@ export function RepPerformanceLeaderboard() {
         <DateRangePicker value={dateRange} onChange={setDateRange} />
       </div>
 
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border">
-            <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">Rep</th>
-            {COLUMNS.map((col) => (
-              <th key={col.key} data-r10n-th className="px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground text-right">
-                {col.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {isLoading ? (
-            Array.from({ length: 3 }).map((_, i) => (
-              <tr key={i} className="border-b border-border last:border-0">
-                <td className="px-4 py-3" colSpan={6}><div className="h-4 bg-muted/60 rounded animate-pulse w-full" /></td>
-              </tr>
-            ))
-          ) : (
-            reps.map((rep) => (
-              <tr key={rep.id} className="border-b border-border last:border-0 hover:bg-muted/20 transition-colors">
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2.5">
-                    <Avatar name={rep.name} size={28} variant="rep" />
-                    <div className="flex items-center gap-2 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate leading-tight">{rep.name}</p>
-                      <StatusDot active={rep.isActive} />
-                    </div>
-                  </div>
-                </td>
-                {COLUMNS.map((col) => {
-                  const val = rep[col.key] as number;
-                  const display = col.currency ? fmtCurrency(val) : val;
-                  return (
-                    <td key={col.key} className="px-4 py-2 text-right">
-                      <button
-                        data-demo={`rep-cell-${col.drill}`}
-                        onClick={() => setDrill({ userId: rep.id, rep: rep.name, metric: col.drill, label: col.label })}
-                        className="ml-auto inline-flex items-center rounded-[6px] px-2 py-1 tabular-nums text-sm text-foreground/80 hover:bg-primary/[0.07] hover:text-primary transition-colors cursor-pointer"
-                        title={`See ${rep.name}'s ${col.label.toLowerCase()}`}
-                      >
-                        {display}
-                      </button>
-                    </td>
-                  );
-                })}
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+      {isLoading ? (
+        <div className="px-4 py-4 space-y-2.5">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="h-9 bg-muted/50 rounded-[8px] animate-pulse" style={{ animationDelay: `${i * 70}ms` }} />
+          ))}
+        </div>
+      ) : (
+        <>
+          <RepTable
+            title="Closers"
+            caption="Judged on conversion and revenue"
+            reps={reps.filter((r) => !isSetter(r))}
+            columns={CLOSER_COLUMNS}
+            onDrill={setDrill}
+          />
+          <RepTable
+            title="Setters"
+            caption="Judged on the pipeline they create"
+            reps={reps.filter(isSetter)}
+            columns={SETTER_COLUMNS}
+            onDrill={setDrill}
+          />
+        </>
+      )}
 
       {!isLoading && reps.length === 0 && (
         <div className="px-4 py-6 text-center text-xs text-muted-foreground">No activity in this period.</div>
@@ -236,5 +254,89 @@ function DrilldownDrawer({
       </div>
     </>,
     document.body,
+  );
+}
+
+/** One role's table. Kept as a single component so both roles stay visually identical and can
+ *  never drift apart — only the columns differ, which is the whole point of the split. */
+function RepTable({
+  title,
+  caption,
+  reps,
+  columns,
+  onDrill,
+}: {
+  title: string;
+  caption: string;
+  reps: RepRow[];
+  columns: Col[];
+  onDrill: (d: { userId: string; rep: string; metric: string; label: string }) => void;
+}) {
+  if (reps.length === 0) return null;
+  return (
+    <div className="border-b border-border last:border-0">
+      <div className="px-4 pt-3 pb-1.5 flex items-baseline gap-2">
+        <h4 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground/70">{title}</h4>
+        <span className="text-[10.5px] text-muted-foreground/60">{caption}</span>
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border/70">
+            <th data-r10n-th className="text-left px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">Rep</th>
+            {columns.map((col) => (
+              <th
+                key={String(col.key)}
+                data-r10n-th
+                title={col.hint}
+                className={cn(
+                  "px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-right",
+                  col.headline ? "text-foreground/80" : "text-muted-foreground",
+                )}
+              >
+                {col.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {reps.map((rep) => (
+            <tr key={rep.id} className="border-b border-border/60 last:border-0 hover:bg-muted/20 transition-colors">
+              <td className="px-4 py-2.5">
+                <div className="flex items-center gap-2.5">
+                  <Avatar name={rep.name} size={28} variant="rep" />
+                  <div className="flex items-center gap-2 min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate leading-tight">{rep.name}</p>
+                    <StatusDot active={rep.isActive} />
+                  </div>
+                </div>
+              </td>
+              {columns.map((col) => {
+                const raw = rep[col.key] as number | null;
+                // A rate with no denominator is unknown, not zero — an em dash says so honestly
+                // rather than implying a 0% close rate for someone who sent no proposals.
+                const display =
+                  raw == null ? "—" : col.currency ? fmtCurrency(raw) : col.percent ? `${raw}%` : raw;
+                return (
+                  <td key={String(col.key)} className="px-4 py-1.5 text-right">
+                    <button
+                      data-demo={`rep-cell-${col.drill}`}
+                      onClick={() => onDrill({ userId: rep.id, rep: rep.name, metric: col.drill, label: col.label })}
+                      className={cn(
+                        "ml-auto inline-flex items-center rounded-[6px] px-2 py-1 tabular-nums transition-colors cursor-pointer",
+                        "hover:bg-primary/[0.07] hover:text-primary",
+                        col.headline ? "text-sm font-semibold text-foreground" : "text-sm text-foreground/80",
+                      )}
+                      title={`See ${rep.name}'s ${col.label.toLowerCase()}`}
+                    >
+                      {display}
+                    </button>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

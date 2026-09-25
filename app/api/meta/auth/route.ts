@@ -11,6 +11,12 @@ const SCOPES = [
   "instagram_manage_messages",
   "pages_read_engagement",
   "pages_manage_metadata", // subscribe the page to webhooks (incl. leadgen)
+  // `leads_retrieval` DEPENDS on Ads Management access. Meta's permissions reference lists
+  // ads_management / ads_read / "Ads Management Standard Access" as its dependencies, and
+  // requesting it alone returned "Invalid Scopes: leads_retrieval" on 2026-08-07.
+  "ads_read",
+  "ads_management",
+  "pages_manage_ads", // read lead-form definitions for exact question labels
   "leads_retrieval", // read Lead Ads form submissions for pages we manage
 ].join(",");
 

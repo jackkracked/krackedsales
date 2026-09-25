@@ -16,6 +16,7 @@ import { QualificationPreview } from "@/components/shared/qualification-panel";
 import { OpportunityModal } from "@/components/pipeline/opportunity-modal";
 import type { CalendarEvent } from "./calendar-client";
 import type { GHLOpportunity } from "@/lib/ghl/types";
+import { DemoLinkField } from "@/components/shared/demo-link-field";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -444,6 +445,15 @@ export function EventPanel({
               <div className="h-4 w-32 bg-muted rounded animate-pulse" />
               <div className="h-4 w-48 bg-muted rounded animate-pulse" />
               <div className="h-4 w-36 bg-muted rounded animate-pulse" />
+            </div>
+          )}
+
+          {/* Demo Link — GHL's "Insert Miro Link"; saving fires their workflow */}
+          {contactId && (
+            <div className="px-5 pb-4">
+              <div className="border-t border-border/50 pt-4">
+                <DemoLinkField contactId={contactId} />
+              </div>
             </div>
           )}
 

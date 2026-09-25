@@ -1,6 +1,5 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { format, getHours } from "date-fns";
 import { useUserTimezone } from "@/providers/timezone-provider";
 import { toZonedDate } from "@/lib/utils/timezone";
@@ -14,6 +13,7 @@ import { RepPerformanceLeaderboard } from "@/components/dashboard/rep-performanc
 import { ScrollToTop } from "@/components/layout/scroll-to-top";
 import { FathomNudgeBanner } from "@/components/fathom/fathom-nudge-banner";
 import { useFathomAutoSync } from "@/lib/fathom/use-fathom-sync";
+import { TodayList } from "@/components/dashboard/today/today-list";
 
 function getGreeting(tz: string): string {
   const h = getHours(toZonedDate(new Date(), tz));
@@ -38,12 +38,6 @@ export function AdminDashboard({ userId, userName }: AdminDashboardProps) {
   const today = format(toZonedDate(new Date(), tz), "EEEE, d MMMM yyyy");
   const firstName = userName.split(" ")[0] || "";
 
-  const { data: summaryData } = useQuery<{ summary: { content: string } | null }>({
-    queryKey: ["weekly-summary"],
-    queryFn: () => fetch("/api/dashboard/weekly-summary").then((r) => r.json()),
-    staleTime: 5 * 60 * 1000,
-  });
-
   return (
     <div data-r10n-dashboard className="flex flex-col h-full p-6 gap-5 overflow-y-auto">
       <ScrollToTop />
@@ -59,12 +53,12 @@ export function AdminDashboard({ userId, userName }: AdminDashboardProps) {
           {getGreeting(tz)}{firstName ? `, ${firstName}` : ""}
         </h1>
         <p data-r10n-greeting-date className="text-sm text-muted-foreground mt-0.5">{today}</p>
-        {summaryData?.summary?.content && (
-          <p className="text-sm text-foreground/75 leading-relaxed mt-3">
-            {summaryData.summary.content}
-          </p>
-        )}
       </div>
+
+      {/* Today — replaces the AI paragraph. Gage's DB role is "admin", so THIS is the dashboard
+          he actually sees; replacing it only in rep-dashboard.tsx left him with the old briefing.
+          Both surfaces now render the same list. */}
+      <TodayList />
 
       {/* Tasks strip — full width, above calls */}
       <TasksStrip />

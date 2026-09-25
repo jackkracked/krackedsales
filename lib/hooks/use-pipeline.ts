@@ -38,7 +38,7 @@ export function useOpportunities(pipelineId?: string) {
     // hammering GHL, and rely on refetchOnWindowFocus for instant freshness
     // when the user returns to the tab.
     staleTime: 30 * 1000,
-    refetchInterval: 45 * 1000,
+    refetchInterval: 3 * 60 * 1000, // Pusher pushes stage changes in real time; poll is a slow drift-catch
     refetchOnWindowFocus: true,
     enabled: !!pipelineId,
   });

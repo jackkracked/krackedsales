@@ -21,14 +21,15 @@ function isUrl(str: string): boolean {
 }
 
 interface MessageBodyProps {
-  body: string;
+  body: string | null | undefined;
   className?: string;
   linkClassName?: string;
 }
 
 export function MessageBody({ body, className, linkClassName }: MessageBodyProps) {
-  // Reset regex lastIndex before use
-  URL_REGEX.lastIndex = 0;
+  // Media/story/reaction messages (e.g. Instagram) can arrive with no text body.
+  // Coerce to a string so URL parsing (and body.length below) never dereferences null.
+  const text = typeof body === "string" ? body : "";
 
   const parts: Array<{ text: string; isLink: boolean }> = [];
   let lastIndex = 0;
@@ -37,23 +38,23 @@ export function MessageBody({ body, className, linkClassName }: MessageBodyProps
   // Reset before use
   URL_REGEX.lastIndex = 0;
 
-  while ((match = URL_REGEX.exec(body)) !== null) {
+  while ((match = URL_REGEX.exec(text)) !== null) {
     if (match.index > lastIndex) {
-      parts.push({ text: body.slice(lastIndex, match.index), isLink: false });
+      parts.push({ text: text.slice(lastIndex, match.index), isLink: false });
     }
     parts.push({ text: match[0], isLink: true });
     lastIndex = URL_REGEX.lastIndex;
   }
 
-  if (lastIndex < body.length) {
-    parts.push({ text: body.slice(lastIndex), isLink: false });
+  if (lastIndex < text.length) {
+    parts.push({ text: text.slice(lastIndex), isLink: false });
   }
 
   // If no URLs found, render plain
   if (parts.length === 0 || !parts.some((p) => p.isLink)) {
     return (
       <p className={cn("leading-relaxed whitespace-pre-wrap break-words", className)}>
-        {body}
+        {text}
       </p>
     );
   }

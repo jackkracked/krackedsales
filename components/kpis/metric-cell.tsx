@@ -275,6 +275,9 @@ export function MetricCell({
         <p data-r10n-metric-label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider leading-none truncate">
           {def.label}
         </p>
+        {def.key === "churnedManagementMrr" && (
+          <span data-r10n-cc-pill className="shrink-0 px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[9px] font-bold uppercase tracking-wide leading-none">Prev. month</span>
+        )}
         {status === "stale" && (
           <span
             title="Showing the last value — couldn't refresh from the source just now"
@@ -319,10 +322,11 @@ export function MetricCell({
         </p>
       )}
 
-      {/* Pace badge + hairline meter — direction-aware, only with a numeric value */}
-      {!editing && target && typeof value === "number" && Number.isFinite(value) && (
+      {/* Pace badge + hairline meter — direction-aware, only with a numeric value. Suppressed for
+          churn, whose value is a COMPLETED month (a prorated current-month pace would be misleading). */}
+      {!editing && target && typeof value === "number" && Number.isFinite(value) && def.key !== "churnedManagementMrr" && (
         <div className="mt-1.5">
-          <PaceBadge value={value} target={target} unit={def.unit} window={window} />
+          <PaceBadge value={value} target={target} unit={def.unit} window={window} snapshot={SNAPSHOT_METRIC_KEYS.has(def.key)} />
         </div>
       )}
 
@@ -409,20 +413,31 @@ function PaceMeter({ ratio, tone }: { ratio: number; tone: PaceTone }) {
   );
 }
 
+/** Point-in-time LEVEL metrics — a number you reach/keep (or a rate), paced against the flat target,
+ *  never day-prorated like an accumulating flow. */
+const SNAPSHOT_METRIC_KEYS = new Set([
+  "mrr", "totalMrr", "managementMrr", "managementClients",
+  "activeProjects", "clientRetentionRate",
+  // "...Proposal Value Outstanding" = an as-of-period-end BALANCE, paced flat, never day-prorated.
+  "mgmtProposalValueSent", "projProposalValueSent",
+]);
+
 function PaceBadge({
   value,
   target,
   unit,
   window,
+  snapshot,
 }: {
   value: number;
   target: MetricTarget;
   unit: MetricUnit;
   window?: DateWindow;
+  snapshot?: boolean;
 }) {
   const targets = toCadenceTargets(target);
   const pace = window
-    ? paceForWindow({ value, direction: target.direction, targets, window })
+    ? paceForWindow({ value, direction: target.direction, targets, window, snapshot })
     : null;
 
   // No window (or an empty range) → fall back to the plain value-vs-monthly chip.
@@ -456,10 +471,11 @@ function PaceBadge({
   const refWord = wholePeriod ? "target" : "pace";
   const tone: PaceTone = pace.neutral ? "neutral" : pace.isGood ? "good" : "bad";
 
-  // Caption: "{pace} of {full}" for partial windows, "Target {full}" for whole periods.
+  // Caption: actual progress "{value} of {full}" for partial windows (the pace nuance is carried by
+  // the "% above/below pace" badge + the tooltip), "Target {full}" for whole periods.
   const caption = wholePeriod
     ? `Target ${fmtValue(pace.fullPeriodTarget, unit)}`
-    : `${fmtValue(pace.expected, unit)} of ${fmtValue(pace.fullPeriodTarget, unit)}`;
+    : `${fmtValue(value, unit)} of ${fmtValue(pace.fullPeriodTarget, unit)}`;
 
   // Rich tooltip — the full pacing story, kept out of the dense visible row.
   const title = pace.neutral

@@ -16,7 +16,7 @@ export function useDemoTasks() {
       if (!res.ok) throw new Error("Failed to fetch demo tasks");
       return res.json();
     },
-    staleTime: 0,
-    refetchInterval: 30 * 1000,
+    staleTime: 60 * 1000,
+    refetchInterval: 2 * 60 * 1000, // ClickUp pull is expensive; don't re-run it every 30s
   });
 }

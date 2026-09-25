@@ -116,6 +116,9 @@ interface GHLApptEvent {
   endTime?: string;
   contactName?: string;
   assignedUserId?: string;
+  /** Who booked it. Present as {source, userId} when booked inside GHL; Google-synced
+   *  events carry {source:"google_calendar"} with no userId at all. */
+  createdBy?: { source?: string; userId?: string } | string;
   users?: string[];           // attendee GHL user ids (rep fallback)
   calendarId?: string;
   address?: string;           // the Google Meet/Zoom link
@@ -364,8 +367,24 @@ export async function runSync(): Promise<{ meet: number; dialer: number; calenda
           ? Math.max(0, Math.round((new Date(ev.endTime).getTime() - startedAt.getTime()) / 1000))
           : null;
         // Rep: assigned user → attendee → calendar owner → the contact's owner.
+        // Rep: assigned user → attendee → WHO BOOKED IT → calendar owner → contact owner.
+        //
+        // `createdBy.userId` was missing from this chain, and it is the only signal that
+        // survives on the intro-call calendar: that calendar has `teamMembers: []`, these
+        // events carry no `assignedUserId` and an empty `users` array, and the contacts are
+        // often unassigned — so all four original links failed and 104 calls (22% of every
+        // call in the system) landed with no rep at all. It sits above the calendar owner
+        // because who booked the meeting is a stronger claim than who owns the calendar.
+        //
+        // It does NOT rescue Google-Calendar-synced bookings: those carry
+        // `{source:"google_calendar"}` with no userId, and GoHighLevel genuinely does not
+        // know who they belong to. 99 of the 104 are that. Their real attendee list lives in
+        // Google Calendar (lib/google/client.ts is written for exactly this) but the
+        // GOOGLE_SERVICE_ACCOUNT_* env vars are not configured, so it cannot be read yet.
+        const bookedBy = typeof ev.createdBy === "object" ? ev.createdBy?.userId : undefined;
         let repId = ev.assignedUserId
           ?? ev.users?.find((u) => userByGhlId.has(u))
+          ?? (bookedBy && userByGhlId.has(bookedBy) ? bookedBy : undefined)
           ?? (ev.calendarId ? calOwner.get(ev.calendarId) : undefined)
           ?? calOwner.get(cal.id);
         if (!repId && ev.contactId) {
@@ -393,6 +412,11 @@ export async function runSync(): Promise<{ meet: number; dialer: number; calenda
               durationSeconds,
               meetConferenceId:    `ghlappt_${ev.id}`, // dedup key (unique column)
               calendarId:          ev.calendarId ?? cal.id,
+              // WHO BOOKED IT, stored rather than only used to guess the attendee.
+              // `rep_email` answers "who took this call"; nothing answered "who set it".
+              // Kelsey books for Gage and Alice, so without this her entire setter headline
+              // (calls booked) is uncomputable and her work counts on THEIR rows.
+              bookedByGhlUserId:   bookedBy ?? null,
               transcriptAvailable: false,
               recordingAvailable:  false,
             })
@@ -409,6 +433,10 @@ export async function runSync(): Promise<{ meet: number; dialer: number; calenda
                 repEmail:    sql`coalesce(${rep?.email ?? null}::text, ${calls.repEmail})`,
                 repName:     sql`coalesce(${rep?.name ?? null}::text, ${calls.repName})`,
                 calendarId:  sql`coalesce(${ev.calendarId ?? cal.id ?? null}::text, ${calls.calendarId})`,
+                // Heals historic rows: every re-sync re-reads the appointment, so past calls
+                // acquire their booker without a separate backfill. coalesce keeps a known
+                // value if GHL ever omits createdBy on a later read.
+                bookedByGhlUserId: sql`coalesce(${bookedBy ?? null}::text, ${calls.bookedByGhlUserId})`,
               },
             });
           calendarCount++;

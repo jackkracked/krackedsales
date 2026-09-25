@@ -10,14 +10,35 @@ import { useStageHistoryStore, findStageChange } from "@/store/stage-history-sto
 import { MessageBody } from "@/components/shared/message-body";
 import { SmartBanner, EnrichChip, type AttachTarget } from "@/components/shared/chat-bubble";
 import { extractContactData, scanThread, filterAlreadyOnFile } from "@/lib/utils/extract-contact-data";
+import { ContactAvatar } from "@/components/inbox/channel-avatar";
+import { MessageAttachments } from "@/components/inbox/message-attachments";
 
 interface MessageThreadProps {
   messages: GHLMessage[];
   /** GHL contact for this conversation — enables click-to-attach chips when present. */
   contactId?: string;
+  /** Optional display name for the contact's avatar. Falls back to the fetched
+   *  contact name, then "Contact", when not supplied by the caller. */
+  contactName?: string;
+  /** Contact's real profile photo (e.g. Instagram/Facebook), from the conversation.
+   *  Used on every inbound message avatar, matching the thread header. */
+  contactAvatarUrl?: string | null;
+  /** Optional. Fired after a field is attached from the thread, so a host that keeps its own
+   *  caches can refresh them. The Inbox needs nothing extra; the contact modal uses it to
+   *  refresh its left-hand panel and the contacts list, which this component does not know
+   *  about (it only invalidates ghl-contact-basic and contact-opportunity). */
+  onFieldSaved?: (field: string, value: string) => void;
+  /** Scopes stage-change lookups to ONE opportunity. Without it, findStageChange matches purely
+   *  on timestamp, which mislabels a contact who has several deals. The Inbox shows a contact's
+   *  whole conversation and has no single opportunity, so it omits this; the opportunity modal
+   *  passes the deal it is showing. */
+  opportunityId?: string;
+  /** Fallback label for the most recent stage change when the local store has no record of it,
+   *  e.g. "Moved to Demo Sent". The opportunity modal knows its current stage; the Inbox does not. */
+  currentStageName?: string;
 }
 
-export function MessageThread({ messages, contactId }: MessageThreadProps) {
+export function MessageThread({ messages, contactId, contactName, contactAvatarUrl, onFieldSaved, opportunityId, currentStageName }: MessageThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const stageChanges = useStageHistoryStore((s) => s.changes);
@@ -29,7 +50,8 @@ export function MessageThread({ messages, contactId }: MessageThreadProps) {
   // websiteRaw is the custom field GHL actually reads website from.
   const hasContact = !!contactId;
   const { data: contactData } = useQuery<{
-    contact?: { email?: string; phone?: string } | null;
+    contact?: { email?: string; phone?: string; fullName?: string; firstName?: string; lastName?: string } | null;
+    website?: string | null;
     websiteRaw?: string | null;
   }>({
     queryKey: ["ghl-contact-basic", contactId],
@@ -37,6 +59,23 @@ export function MessageThread({ messages, contactId }: MessageThreadProps) {
     enabled: hasContact,
     staleTime: 60_000,
   });
+
+  // Resolve the contact's display name for the inbound avatar (prop → fetched
+  // name → generic fallback). Outbound messages use a fixed rep identity so the
+  // avatar reads clearly as "us".
+  // Our own brand avatars (connected IG/FB) — the outbound "us" photo, per channel.
+  const { data: brand } = useQuery<{ instagram?: string | null; facebook?: string | null }>({
+    queryKey: ["inbox-identity"],
+    queryFn: () => fetch("/api/inbox/identity").then((r) => r.json()),
+    staleTime: 10 * 60_000,
+  });
+
+  const fetchedName =
+    contactData?.contact?.fullName?.trim() ||
+    [contactData?.contact?.firstName, contactData?.contact?.lastName].filter(Boolean).join(" ").trim() ||
+    "";
+  const contactDisplayName = contactName?.trim() || fetchedName || "Contact";
+  const repDisplayName = "Kracked";
   const attachTarget: AttachTarget | null = hasContact
     ? { kind: "ghl", contactId: contactId! }
     : null;
@@ -44,14 +83,17 @@ export function MessageThread({ messages, contactId }: MessageThreadProps) {
     ? {
         email: contactData?.contact?.email ?? null,
         phone: contactData?.contact?.phone ?? null,
-        website: contactData?.websiteRaw ?? null,
+        // Resolved website (standard field → legacy CF), not just the raw CF, so a site
+        // stored in the standard field still filters out its detection chip.
+        website: contactData?.website ?? contactData?.websiteRaw ?? null,
       }
     : null;
 
-  function handleFieldSaved() {
+  function handleFieldSaved(field?: string, value?: string) {
     if (!contactId) return;
     queryClient.invalidateQueries({ queryKey: ["ghl-contact-basic", contactId] });
     queryClient.invalidateQueries({ queryKey: ["contact-opportunity", contactId] });
+    onFieldSaved?.(field ?? "", value ?? "");
   }
 
   const fetchEmailHtml = useCallback(async (stateId: string, fetchId: string) => {
@@ -125,9 +167,10 @@ export function MessageThread({ messages, contactId }: MessageThreadProps) {
         // ── Activity: centred system pill ────────────────────────────
         if (isActivity) {
           const isCreated = msg.body === "Opportunity created";
-          // Look up from/to stage from local store (matched by timestamp, no opportunityId needed)
+          // Matched by timestamp, and by opportunity when the host supplies one — a contact with
+          // several deals would otherwise pick up another deal's stage change.
           const stored = !isCreated && msg.dateAdded
-            ? findStageChange(stageChanges, msg.dateAdded)
+            ? findStageChange(stageChanges, msg.dateAdded, opportunityId)
             : null;
           const isLatest = !isCreated && msg.id === sorted
             .filter(m => m.messageType === "TYPE_ACTIVITY_OPPORTUNITY" && m.body !== "Opportunity created")
@@ -137,7 +180,7 @@ export function MessageThread({ messages, contactId }: MessageThreadProps) {
             : stored
             ? `🔄 ${stored.fromStage} → ${stored.toStage}`
             : isLatest
-            ? "🔄 Stage updated"
+            ? (currentStageName ? `🔄 Moved to ${currentStageName}` : "🔄 Stage updated")
             : "🔄 Stage changed";
           return (
             <div key={msg.id} className="flex justify-center my-1">
@@ -159,9 +202,15 @@ export function MessageThread({ messages, contactId }: MessageThreadProps) {
           const hasBody = !!msg.body?.trim();
 
           return (
-            <div key={msg.id} className={cn("flex flex-col gap-0.5", sentByUs ? "items-end" : "items-start")}>
+            <div key={msg.id} className={cn("flex items-end gap-2", sentByUs ? "flex-row-reverse" : "flex-row")}>
+              <ContactAvatar
+                name={sentByUs ? repDisplayName : contactDisplayName}
+                channelType="TYPE_EMAIL"
+                variant={sentByUs ? "rep" : "contact"}
+                size={32}
+              />
               <div data-r10n-email-card data-sent={sentByUs} className={cn(
-                "w-[72%] rounded-[10px] border overflow-hidden",
+                "flex-1 max-w-[72%] rounded-[16px] border overflow-hidden",
                 sentByUs ? "border-[#C8A96E]/40" : "border-border"
               )}>
                 {/* Email header strip */}
@@ -263,43 +312,80 @@ export function MessageThread({ messages, contactId }: MessageThreadProps) {
             : null;
         const hasChips =
           !!chips && chips.urls.length + chips.emails.length + chips.phones.length > 0;
+        // Channel type for the avatar badge — matches the conversation list's
+        // known channels; unknown types (call/whatsapp) simply show no badge.
+        const badgeChannel =
+          msg.messageType === "TYPE_SMS" || msg.messageType === "TYPE_EMAIL"
+            ? msg.messageType
+            : msg.messageType === "TYPE_FB"
+            ? "TYPE_FB"
+            : msg.messageType === "TYPE_INSTAGRAM"
+            ? "TYPE_INSTAGRAM"
+            : undefined;
+        // Our reply avatar = our real brand photo for that channel (IG/FB), else initials.
+        // Inbound = the contact's photo.
+        const outboundAvatar =
+          badgeChannel === "TYPE_INSTAGRAM" ? brand?.instagram ?? null
+          : badgeChannel === "TYPE_FB" ? brand?.facebook ?? null
+          : null;
+        // Images/files GHL sent with the message. Rendering these fixes the "blank bubble"
+        // (image-only messages had no text body).
+        const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
+        const hasText = !!msg.body && msg.body.trim().length > 0;
         return (
-          <div key={msg.id} className={cn("flex flex-col gap-1", isOutbound ? "items-end" : "items-start")}>
-            <div data-r10n-bubble data-dir={isOutbound ? "out" : "in"} className={cn(
-              "max-w-[68%] px-3.5 py-2.5 text-sm leading-relaxed",
-              isOutbound
-                ? "bg-primary text-primary-foreground rounded-[16px] rounded-br-[5px] shadow-[0_4px_14px_-8px_rgba(15,58,92,0.5)]"
-                : "bg-card text-foreground border border-border/70 rounded-[16px] rounded-bl-[5px] shadow-[0_2px_8px_-6px_rgba(15,23,42,0.18)]"
-            )}>
-              <MessageBody
-                body={msg.body}
-                linkClassName={isOutbound ? "text-primary-foreground underline" : "text-primary"}
-              />
-              <p data-r10n-bubble-time className={cn(
-                "text-[10px] mt-1.5 text-right tabular-nums",
-                isOutbound ? "text-primary-foreground/65" : "text-muted-foreground"
+          <div key={msg.id} className={cn("flex items-end gap-2", isOutbound ? "flex-row-reverse" : "flex-row")}>
+            <ContactAvatar
+              name={isOutbound ? repDisplayName : contactDisplayName}
+              channelType={badgeChannel}
+              variant={isOutbound ? "rep" : "contact"}
+              size={32}
+              avatarUrl={isOutbound ? outboundAvatar : contactAvatarUrl}
+            />
+            <div className={cn("flex flex-col gap-1 min-w-0 max-w-[76%]", isOutbound ? "items-end" : "items-start")}>
+              <div data-r10n-bubble data-dir={isOutbound ? "out" : "in"} className={cn(
+                "max-w-full w-fit px-3.5 py-2.5 text-sm leading-relaxed",
+                isOutbound
+                  ? "bg-[#EEF4FF] text-[#1C1C21] rounded-[16px] rounded-br-[5px]"
+                  : "bg-card text-[#1C1C21] border border-border rounded-[16px] rounded-bl-[5px]"
               )}>
-                {msg.dateAdded ? formatDateTime(msg.dateAdded) : ""}
-              </p>
-            </div>
-            {channelLabel && (
-              <span data-r10n-bubble-channel className="text-[10px] text-muted-foreground/70 px-1.5">
-                {channelLabel}
-              </span>
-            )}
-            {hasChips && attachTarget && (
-              <div className="flex flex-wrap gap-1.5 mt-1 max-w-[68%]">
-                {chips!.urls.map((v) => (
-                  <EnrichChip key={v} type="url" value={v} target={attachTarget} onSaved={handleFieldSaved} />
-                ))}
-                {chips!.emails.map((v) => (
-                  <EnrichChip key={v} type="email" value={v} target={attachTarget} onSaved={handleFieldSaved} />
-                ))}
-                {chips!.phones.map((v) => (
-                  <EnrichChip key={v} type="phone" value={v} target={attachTarget} onSaved={handleFieldSaved} />
-                ))}
+                {hasText && (
+                  <MessageBody
+                    body={msg.body}
+                    linkClassName={isOutbound ? "text-[#2563EB] underline" : "text-primary"}
+                  />
+                )}
+                {attachments.length > 0 && (
+                  <MessageAttachments urls={attachments} className={cn(hasText && "mt-2", isOutbound && "justify-end")} />
+                )}
+                {!hasText && attachments.length === 0 && (
+                  <span className="text-xs italic text-muted-foreground/70">No content</span>
+                )}
+                <p data-r10n-bubble-time className={cn(
+                  "text-[10px] mt-1.5 text-right tabular-nums",
+                  isOutbound ? "text-[#1C1C21]/50" : "text-muted-foreground"
+                )}>
+                  {msg.dateAdded ? formatDateTime(msg.dateAdded) : ""}
+                </p>
               </div>
-            )}
+              {channelLabel && (
+                <span data-r10n-bubble-channel className="text-[10px] text-muted-foreground/70 px-1.5">
+                  {channelLabel}
+                </span>
+              )}
+              {hasChips && attachTarget && (
+                <div className={cn("flex flex-wrap gap-1.5 mt-1", isOutbound ? "justify-end" : "justify-start")}>
+                  {chips!.urls.map((v) => (
+                    <EnrichChip key={v} type="url" value={v} target={attachTarget} onSaved={handleFieldSaved} />
+                  ))}
+                  {chips!.emails.map((v) => (
+                    <EnrichChip key={v} type="email" value={v} target={attachTarget} onSaved={handleFieldSaved} />
+                  ))}
+                  {chips!.phones.map((v) => (
+                    <EnrichChip key={v} type="phone" value={v} target={attachTarget} onSaved={handleFieldSaved} />
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         );
       })}

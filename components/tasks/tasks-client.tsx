@@ -166,7 +166,7 @@ export function TasksClient() {
   const apiStatus = filter === "completed" ? "completed" : "all";
 
   // Fetch tasks
-  const { data, isLoading } = useQuery<{ tasks: Task[] }>({
+  const { data, isLoading } = useQuery<{ tasks: Task[]; meId: string | null }>({
     queryKey: ["tasks-page", teamView ? "team" : "my", apiStatus],
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -181,6 +181,9 @@ export function TasksClient() {
   });
 
   const allTasks = data?.tasks ?? [];
+  /** Who is looking. Comes back with the list, so it costs no extra request and works for
+   *  every role (the admin-only roster endpoint would not). */
+  const meId = data?.meId ?? null;
 
   // Client-side filtering for tabs
   const filteredTasks = useMemo(() => {
@@ -495,6 +498,7 @@ export function TasksClient() {
             <TilesView
               groups={filter === "completed" ? [{ key: "completed", label: "Completed", tasks: filteredTasks }] : groups}
               teamView={teamView}
+              meId={meId}
               selectedIds={selectedIds}
               collapsedGroups={collapsedGroups}
               onToggleGroup={toggleGroup}
@@ -506,6 +510,7 @@ export function TasksClient() {
             <ListView
               tasks={filteredTasks}
               teamView={teamView}
+              meId={meId}
               selectedIds={selectedIds}
               onToggleSelect={toggleSelect}
               onClickTask={setSelectedTask}
@@ -515,6 +520,7 @@ export function TasksClient() {
             <BoardView
               tasks={filteredTasks}
               teamView={teamView}
+              meId={meId}
               selectedIds={selectedIds}
               onToggleSelect={toggleSelect}
               onClickTask={setSelectedTask}
@@ -636,6 +642,7 @@ function EmptyState({ filter }: { filter: FilterTab }) {
 function TaskCard({
   task,
   teamView,
+  meId,
   selected,
   onToggleSelect,
   onClick,
@@ -643,6 +650,8 @@ function TaskCard({
 }: {
   task: Task;
   teamView: boolean;
+  /** The viewer's own user id, so the card can tell "mine" from "theirs". */
+  meId: string | null;
   selected: boolean;
   onToggleSelect: (id: string) => void;
   onClick: (t: Task) => void;
@@ -734,8 +743,21 @@ function TaskCard({
 
       {/* Footer */}
       <div className="flex items-center gap-2 mt-auto">
-        {teamView && task.userName && (
-          <Avatar name={task.userName} size={20} variant="rep" />
+        {/* Who is carrying this.
+            In team view, always. In your own list, only when it is NOT yours — which now
+            happens, because a task you delegated stays in your list (Jack, 2026-09-22).
+            Stamping your own name on every one of your own cards would be pure noise. */}
+        {task.userName && (teamView || (meId && task.userId && task.userId !== meId)) && (
+          <span className="flex items-center gap-1" title={`Assigned to ${task.userName}`}>
+            <Avatar name={task.userName} size={20} variant="rep" />
+            {!teamView && (
+              <span className="text-[10px] text-muted-foreground/70">{task.userName.split(" ")[0]}</span>
+            )}
+          </span>
+        )}
+        {/* Handed to you by someone else. */}
+        {task.assignedByName && meId && task.userId === meId && (
+          <span className="text-[10px] text-muted-foreground/60">from {task.assignedByName.split(" ")[0]}</span>
         )}
         {task.opportunityId && (
           <span data-r10n-task-card-meta className="text-[10px] text-muted-foreground/50 flex items-center gap-1">
@@ -753,6 +775,7 @@ function TaskCard({
 function TilesView({
   groups,
   teamView,
+  meId,
   selectedIds,
   collapsedGroups,
   onToggleGroup,
@@ -762,6 +785,7 @@ function TilesView({
 }: {
   groups: TaskGroup[];
   teamView: boolean;
+  meId: string | null;
   selectedIds: Set<string>;
   collapsedGroups: Set<string>;
   onToggleGroup: (key: string) => void;
@@ -801,6 +825,7 @@ function TilesView({
                     key={task.id}
                     task={task}
                     teamView={teamView}
+                    meId={meId}
                     selected={selectedIds.has(task.id)}
                     onToggleSelect={onToggleSelect}
                     onClick={onClickTask}
@@ -821,6 +846,7 @@ function TilesView({
 function ListView({
   tasks,
   teamView,
+  meId,
   selectedIds,
   onToggleSelect,
   onClickTask,
@@ -828,11 +854,15 @@ function ListView({
 }: {
   tasks: Task[];
   teamView: boolean;
+  meId: string | null;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onClickTask: (t: Task) => void;
   onRequestComplete: (t: Task) => void;
 }) {
+  /** Show WHO only when it carries information: always in team view, and in your own list
+   *  when at least one row is not yours (a task you delegated stays in your list). */
+  const showAssignee = teamView || tasks.some((t) => meId && t.userId && t.userId !== meId);
   const tz = useUserTimezone();
   return (
     <div data-r10n-task-table className="bg-card border border-border rounded-[10px] overflow-hidden">
@@ -842,7 +872,7 @@ function ListView({
         <span data-r10n-th>Contact</span>
         <span data-r10n-th>Priority</span>
         <span data-r10n-th>Due Date</span>
-        {teamView && <span data-r10n-th>Assignee</span>}
+        {showAssignee && <span data-r10n-th>Assignee</span>}
         <span data-r10n-th>Created</span>
       </div>
 
@@ -913,7 +943,7 @@ function ListView({
             </span>
 
             {/* Assignee */}
-            {teamView && (
+            {showAssignee && (
               <span data-r10n-task-row-cell className="text-xs text-muted-foreground truncate">
                 {task.userName ?? "—"}
               </span>
@@ -935,6 +965,7 @@ function ListView({
 function BoardView({
   tasks,
   teamView,
+  meId,
   selectedIds,
   onToggleSelect,
   onClickTask,
@@ -942,6 +973,7 @@ function BoardView({
 }: {
   tasks: Task[];
   teamView: boolean;
+  meId: string | null;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onClickTask: (t: Task) => void;
@@ -987,6 +1019,7 @@ function BoardView({
                 key={task.id}
                 task={task}
                 teamView={teamView}
+                meId={meId}
                 selected={selectedIds.has(task.id)}
                 onToggleSelect={onToggleSelect}
                 onClick={onClickTask}

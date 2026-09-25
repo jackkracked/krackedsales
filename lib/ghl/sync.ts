@@ -10,6 +10,7 @@
  * re-syncing the same record just updates it in place.
  */
 import { db } from "@/lib/db";
+import { LEGACY_WEBSITE_FIELD_IDS } from "@/lib/ghl/qualification";
 import {
   localContacts,
   localOpportunities,
@@ -163,6 +164,34 @@ export async function updateLastResponder(
 
 // ─── Upsert functions ─────────────────────────────────────────────────────────
 
+/**
+ * The website a lead gave us, wherever GHL actually put it.
+ *
+ * GHL has THREE places for it: the native `website` field and two lead-form custom fields,
+ * "Your website" (te2hH1PWliUW8R18epQn) and "Full Website URL" (48zVkYYk45nGYTwIndE0).
+ * Meta lead-ad submissions land in the custom fields, so the native column stayed empty:
+ * 2,258 of 5,094 live contacts had a URL on the record that nothing could search, which is
+ * why Gage could not find harborheightscoffee.com or buruv.com despite both being present.
+ * (Both were Kelsey's contacts, with open opportunities and a conversation each.)
+ *
+ * The field ids were already known — LEGACY_WEBSITE_FIELD_IDS in lib/ghl/qualification.ts,
+ * used by the per-contact route and the DTC KPI. The sync just never applied them.
+ */
+function resolveWebsite(c: GhlContact): string | null {
+  const native = c.website?.trim();
+  if (native) return native;
+  const fields = (c.customFields ?? []) as { id?: string; value?: unknown; field_value?: unknown }[];
+  for (const id of LEGACY_WEBSITE_FIELD_IDS) {
+    const hit = fields.find((f) => f.id === id);
+    const raw = hit?.value ?? hit?.field_value;
+    // GHL custom-field values are not reliably strings (a number or array crashed the contact
+    // modal once — see tasks/lessons.md 2026-06-25). Coerce before trimming.
+    const v = typeof raw === "string" ? raw : Array.isArray(raw) ? raw.join(", ") : raw == null ? "" : String(raw);
+    if (v.trim()) return v.trim();
+  }
+  return null;
+}
+
 export async function upsertContact(c: GhlContact): Promise<void> {
   const fullName =
     c.name ??
@@ -192,7 +221,7 @@ export async function upsertContact(c: GhlContact): Promise<void> {
       state: c.state ?? null,
       country: c.country ?? null,
       companyName: c.companyName ?? null,
-      website: c.website ?? null,
+      website: resolveWebsite(c),
       dnd: c.dnd ?? false,
       rawData: c as unknown as Record<string, unknown>,
       createdAtGhl: c.dateAdded ? new Date(c.dateAdded) : null,

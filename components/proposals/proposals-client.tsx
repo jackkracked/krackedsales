@@ -14,6 +14,7 @@ import { ProposalDetailSlideOver } from "./proposal-detail-slide-over";
 import { EngagementCell, type EngagementSummary } from "./engagement";
 import { OpportunityModal } from "@/components/pipeline/opportunity-modal";
 import type { GHLOpportunity } from "@/lib/ghl/types";
+import { WON_STATUSES } from "@/lib/proposals/status";
 
 interface Instalment {
   id: string;
@@ -54,7 +55,9 @@ interface Proposal {
   instalments: Instalment[];
 }
 
-const STATUS_FILTERS = ["All", "Draft", "Sent", "Signed", "Partial", "Paid", "Overdue", "Lost", "Archived"] as const;
+// "Active" (retainer running) and "Completed" (term finished) sit next to the states they relate
+// to rather than at the end, so the strip still reads left-to-right as a lifecycle.
+const STATUS_FILTERS = ["All", "Draft", "Sent", "Signed", "Active", "Partial", "Completed", "Paid", "Overdue", "Lost", "Archived"] as const;
 
 function fmtDate(d: string | null, tz: string) {
   if (!d) return null;
@@ -82,7 +85,9 @@ function paidSoFar(p: Proposal): number {
     .reduce((sum, i) => sum + i.amount, 0);
   if (p.hasDeposit) return Math.max(paidInstalments, p.depositsPaidTotal ?? 0);
   if (p.paymentStructure === "instalment") return paidInstalments;
-  return p.status === "paid" || p.paidAt ? p.totalAmount : 0;
+  // WON_STATUSES, not just "paid": a spread retainer sits in "active" for most of its life and
+  // would otherwise report $0 collected in the list.
+  return WON_STATUSES.includes(p.status) || p.paidAt ? p.totalAmount : 0;
 }
 
 
@@ -428,8 +433,11 @@ export function ProposalsClient() {
     sent: allProposals.filter((p) => p.status === "sent").length,
     signed: allProposals.filter((p) => p.status === "signed").length,
     partial: allProposals.filter((p) => p.status === "partial").length,
-    paid: allProposals.filter((p) => p.status === "paid").length,
-    outstanding: allProposals.filter((p) => ["sent", "signed", "partial"].includes(p.status)).length,
+    // "active" and "past_due" are money-in-progress: still outstanding, not yet complete.
+    active: allProposals.filter((p) => p.status === "active").length,
+    // A completed 90-day term is collected in full, so it belongs with paid, not on its own line.
+    paid: allProposals.filter((p) => ["paid", "completed"].includes(p.status)).length,
+    outstanding: allProposals.filter((p) => ["sent", "signed", "partial", "active", "past_due"].includes(p.status)).length,
     overdue: allProposals.filter((p) => p.status === "overdue").length,
     lost: allProposals.filter((p) => p.status === "lost").length,
   };
@@ -623,7 +631,7 @@ export function ProposalsClient() {
                       <TypeBadge type={proposal.type} />
                     </td>
                     <td className="px-4 py-3">
-                      <ProposalStatusBadge status={proposal.status} />
+                      <ProposalStatusBadge status={proposal.status} management={proposal.type === "management"} />
                     </td>
                     <td data-r10n-proposal-cell-date className="px-4 py-3 text-sm text-muted-foreground tabular-nums">
                       {fmtDate(proposal.sentAt, tz) ?? <span className="text-muted-foreground/40">—</span>}

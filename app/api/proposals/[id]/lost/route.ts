@@ -4,6 +4,7 @@ import { proposals, proposalInstalments } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
 import Stripe from "stripe";
+import { WON_STATUSES } from "@/lib/proposals/status";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,17 @@ export async function POST(
   // Don't allow marking already-lost proposals
   if (proposal.status === "lost") {
     return NextResponse.json({ error: "Proposal is already marked as lost" }, { status: 400 });
+  }
+
+  // A deal that converted to cash cannot be "lost". This route VOIDS UNPAID STRIPE INVOICES, so
+  // running it on a live or finished 90-day retainer would void real invoices and rewrite a won
+  // deal as churn. "paid" was already effectively protected because the UI hides the action for
+  // it; "active" and "completed" need it explicitly.
+  if (WON_STATUSES.includes(proposal.status)) {
+    return NextResponse.json(
+      { error: "This proposal has been paid. Cancel the subscription in Stripe instead of marking it lost." },
+      { status: 400 },
+    );
   }
 
   // Void unpaid Stripe invoices

@@ -12,6 +12,29 @@ export function cleanUrl(raw: string): string {
   return clean;
 }
 
+/**
+ * Reduce a URL to its bare comparable form: no scheme, no `www.`, no trailing slash,
+ * no query or hash, lowercased.
+ *
+ *   "https://harborheightscoffee.com/"  → "harborheightscoffee.com"
+ *   "www.harborheightscoffee.com"       → "harborheightscoffee.com"
+ *
+ * Both of those are the SAME site, and Gage searching Contacts for the URL he copied from
+ * the browser found nothing because we stored the `www.` form and he pasted the `https://`
+ * one — neither string contains the other, so a substring match can never join them.
+ * Normalise both sides before comparing.
+ */
+export function urlKey(raw: string): string {
+  return String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .split(/[?#]/)[0]
+    .replace(/\/+$/, "");
+}
+
 /** Return true if a string looks like a URL */
 export function looksLikeUrl(value: string): boolean {
   const trimmed = value.trim().replace(/\s+/g, "");

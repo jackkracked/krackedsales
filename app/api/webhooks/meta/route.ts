@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import crypto from "crypto";
 import { db } from "@/lib/db";
 import { keywordTriggers, socialLeads } from "@/lib/db/schema";
@@ -49,9 +50,17 @@ export async function POST(req: NextRequest) {
 
   const body = safeJson(raw);
 
-  // Process async, fire and forget so we respond instantly (Meta retries non-200).
-  handleMetaEvent(body, signatureValid).catch((err) =>
-    console.error("[Meta Webhook] Unhandled error:", err)
+  // Process async so we respond instantly (Meta retries non-200), but hand the promise to
+  // waitUntil. A bare fire-and-forget is silently killed on Vercel: the moment the response
+  // is returned the lambda can freeze, so the handler never completes and nothing is stored.
+  // That is exactly what happened on 2026-08-07 — Meta delivered a leadgen event, we replied
+  // 200, and the lead never landed, with NO log line of any kind because the code never ran.
+  // waitUntil keeps the invocation alive until the work finishes. Same pattern already used
+  // by the Slack webhook and the Fathom connect route.
+  waitUntil(
+    handleMetaEvent(body, signatureValid).catch((err) =>
+      console.error("[Meta Webhook] Unhandled error:", err)
+    )
   );
 
   return NextResponse.json({ ok: true }, { status: 200 });

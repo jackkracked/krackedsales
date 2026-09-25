@@ -14,6 +14,8 @@ import {
 import { OpportunityModal } from "@/components/pipeline/opportunity-modal";
 import { CallPrepModal } from "@/components/calls/call-prep/call-prep-modal";
 import type { GHLOpportunity } from "@/lib/ghl/types";
+import { ErrorBoundary } from "@/components/shared/error-boundary";
+import { Modal } from "@/components/ui/modal";
 
 // ─── Outcome definitions ──────────────────────────────────────────────────────
 
@@ -168,7 +170,20 @@ function OutcomeModal({ event, clientName, onClose, onDispositioned, suggestedOu
         fetch("/api/ghl/pipelines").then((r) => r.json()),
       ]);
 
-      const opportunity = oppRes.opportunity;
+      // Same guard as the Inbox sidebar: only accept an opportunity that provably belongs to
+      // this contact. This tile can PATCH a pipeline stage further down, and moving a stage
+      // fires GHL automations that message the client — so acting on someone else's deal
+      // messages someone else's client (the 2026-08-13 Oobi/Schleepi incident). The endpoint
+      // now enforces this too; this is defence in depth on the writing side.
+      const rawOpportunity = oppRes.opportunity;
+      const opportunity =
+        rawOpportunity && rawOpportunity.contact?.id === event.contactId ? rawOpportunity : null;
+      if (rawOpportunity && !opportunity) {
+        console.warn(
+          `[call-tile] Discarded opportunity ${rawOpportunity.id} — belongs to contact ` +
+            `${rawOpportunity.contact?.id}, not ${event.contactId}.`,
+        );
+      }
       if (opportunity) {
         setOpp({
           id: opportunity.id,
@@ -529,6 +544,7 @@ export function CallTile({ event, isNext, isAdmin, onDispositioned }: CallTilePr
   const [cardOpp, setCardOpp] = useState<GHLOpportunity | null>(null);
   const [cardStageName, setCardStageName] = useState("");
   const [cardLoading, setCardLoading] = useState(false);
+  const [cardNotice, setCardNotice] = useState<string | null>(null);
   const [suggestedOutcome, setSuggestedOutcome] = useState<string | undefined>();
   const [suggestedNotes, setSuggestedNotes] = useState<string | undefined>();
 
@@ -544,14 +560,49 @@ export function CallTile({ event, isNext, isAdmin, onDispositioned }: CallTilePr
     e.stopPropagation(); // Prevent tile click from firing
     if (!event.contactId) return;
     setCardLoading(true);
+    setCardNotice(null);
     try {
       const params = new URLSearchParams({ name: clientName });
       const res = await fetch(`/api/ghl/contacts/${event.contactId}/opportunity?${params}`);
-      const data = await res.json();
+      const data = (await res.json().catch(() => ({}))) as {
+        opportunity?: GHLOpportunity | null;
+        stageName?: string;
+        lookupFailed?: boolean;
+      };
+
       if (data.opportunity) {
+        // IDENTITY IS NEVER GUESSED, on this side too. The route enforces this already, but the
+        // opportunity we set here feeds the Create Demo / Task / Audit actions inside the modal,
+        // and those message clients. Defence in depth on the writing side, same as OutcomeModal.
+        if (data.opportunity.contact?.id !== event.contactId) {
+          console.error(
+            `[call-tile] Discarded opportunity ${data.opportunity.id}: belongs to contact ` +
+              `${data.opportunity.contact?.id ?? "unknown"}, not ${event.contactId}.`,
+          );
+          setCardNotice("That record did not match this contact, so it was not opened.");
+          return;
+        }
         setCardOpp(data.opportunity);
         setCardStageName(data.stageName ?? "");
+        return;
       }
+
+      // The route returns a null opportunity for BOTH "no opportunity belongs to this contact"
+      // and "the GoHighLevel search failed", because it refuses to guess an identity. It now
+      // says which, via `lookupFailed`. The status alone could not: a swallowed search error
+      // still returned 200, so a rate-limited lookup would have been reported to the rep as
+      // fact that the client has no deal. Neither case may be a silent no-op: this branch had
+      // no else at all, which is why Aidan Thompson's button simply looked dead.
+      setCardNotice(
+        data.lookupFailed || !res.ok
+          ? "Couldn't reach GoHighLevel to load this opportunity. Try again in a moment."
+          : `${clientName} has no opportunity in GoHighLevel yet, so there is no card to open.`,
+      );
+    } catch (err) {
+      // A network failure or malformed body used to become an unhandled rejection: nothing
+      // rendered, nothing logged, nothing for the rep to act on.
+      console.error("[call-tile] openCard failed", err);
+      setCardNotice("Couldn't load this opportunity. Check your connection and try again.");
     } finally {
       setCardLoading(false);
     }
@@ -692,12 +743,69 @@ export function CallTile({ event, isNext, isAdmin, onDispositioned }: CallTilePr
         />
       )}
 
+      {cardNotice && (
+        <Modal
+          open
+          onOpenChange={(o) => { if (!o) setCardNotice(null); }}
+          label="Opportunity card unavailable"
+          size="max-w-sm"
+          className="p-4"
+        >
+          <p className="text-sm font-medium text-foreground">
+            {cardNotice.startsWith("Couldn't") ? "Couldn't open the card" : "No opportunity card"}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{cardNotice}</p>
+          <button onClick={() => setCardNotice(null)} className="mt-3 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted">
+            Close
+          </button>
+        </Modal>
+      )}
+
       {cardOpp && (
-        <OpportunityModal
-          opportunity={cardOpp}
-          stageName={cardStageName}
-          onClose={() => setCardOpp(null)}
-        />
+        // Contained deliberately. A render crash inside the modal used to take the ENTIRE
+        // dashboard to the global error screen; now it is confined to the modal and the rep
+        // keeps their page. The message is surfaced rather than swallowed.
+        <ErrorBoundary
+          label="opportunity-card"
+          resetKeys={[cardOpp.id]}
+          autoRetryOnce
+          fallback={(reset, error) => (
+            // Radix, not a bare div: OpportunityModal has Escape-to-close, and a hand-rolled
+            // overlay would silently drop it at the exact moment the rep most wants out. This
+            // brings the focus trap, focus restore and aria-modal with it.
+            <Modal
+              open
+              onOpenChange={(o) => { if (!o) setCardOpp(null); }}
+              label="Couldn't open this opportunity"
+              size="max-w-sm"
+              className="p-4"
+            >
+              <p className="text-sm font-medium text-foreground">Couldn&apos;t open this opportunity</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                The rest of your dashboard is fine. We retried automatically and it failed again.
+              </p>
+              {/* The actual fault, verbatim. A fallback that only says "it failed" costs a
+                  round-trip to the operator every time; this one is self-diagnosing. */}
+              <p className="mt-2 break-words rounded-md bg-muted/60 px-2 py-1 font-mono text-[11px] leading-snug text-muted-foreground">
+                {error?.message || "Unknown error"}
+              </p>
+              <div className="mt-3 flex items-center gap-2">
+                <button onClick={reset} className="rounded-md bg-foreground px-2.5 py-1 text-xs font-medium text-background hover:opacity-90">
+                  Try again
+                </button>
+                <button onClick={() => setCardOpp(null)} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-muted">
+                  Close
+                </button>
+              </div>
+            </Modal>
+          )}
+        >
+          <OpportunityModal
+            opportunity={cardOpp}
+            stageName={cardStageName}
+            onClose={() => setCardOpp(null)}
+          />
+        </ErrorBoundary>
       )}
     </>
   );

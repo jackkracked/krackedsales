@@ -19,7 +19,7 @@ export default async function DialerPage() {
         </p>
       </header>
       <div className="min-h-0 flex-1 border-t border-border">
-        <DialerClient role={role} userName={userName} />
+        <DialerClient role={role} userName={userName} userId={user?.id ?? null} />
       </div>
     </div>
   );

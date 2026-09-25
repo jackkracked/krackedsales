@@ -7,8 +7,8 @@
  * All money is already in dollars in the DB. Date fields are epoch ms (Number).
  */
 import { db } from "@/lib/db";
-import { softwareCosts, manualExpenses, demoBoards } from "@/lib/db/schema";
-import { gte, lt, and, or, type SQLWrapper } from "drizzle-orm";
+import { softwareCosts, manualExpenses, demoBoards, teamSalaries, manualMrrAdjustments } from "@/lib/db/schema";
+import { gte, lt, eq, and, or, type SQLWrapper } from "drizzle-orm";
 import type { DatasetDef, LoadCtx, RawRow } from "../types";
 
 const toMs = (d: Date | string | null | undefined): number | null =>
@@ -200,6 +200,171 @@ export const demoBoardsDataset: DatasetDef = {
         }));
     } catch (e) {
       console.error("[kpi/datasets/demo_boards] fetch failed:", e);
+      return [];
+    }
+  },
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+//  team_salaries — monthly salary per person, spread across the DAYS of each
+//  month so any window shows the right slice. One row per active person per day
+//  (amount = monthlyAmount ÷ days-in-that-month). Summing over [start, end)
+//  therefore pro-rates automatically: a full month → the full salary, the 20th
+//  of a 31-day month → 20/31 of it. Days that haven't happened yet are never
+//  emitted, so "this month" only ever counts elapsed days.
+// ════════════════════════════════════════════════════════════════════════════
+
+export const teamSalariesDataset: DatasetDef = {
+  key: "team_salaries",
+  integration: "internal",
+  label: "Money paid out — team salaries",
+  description: "What you pay your team each month, spread across the days of the month so any date range shows the right slice.",
+  fields: [
+    { key: "amount", label: "Daily salary cost", type: "money", operators: ["gt", "lt", "between"] },
+    { key: "role", label: "Role", type: "string", operators: ["contains", "eq", "is_set", "is_not_set"] },
+  ],
+  dateFields: [{ key: "date", label: "Day" }],
+  aggregations: ["sum", "count"],
+  rowLabel: (row: RawRow) => ({
+    label: (row.role as string) || "Team salary",
+    sublabel: undefined,
+  }),
+  rowAmount: (row: RawRow) => Number(row.amount ?? 0),
+  load: async ({ fetchStart, fetchEnd }: LoadCtx): Promise<RawRow[]> => {
+    try {
+      const people = await db()
+        .select({ role: teamSalaries.role, monthlyAmount: teamSalaries.monthlyAmount })
+        .from(teamSalaries)
+        .where(eq(teamSalaries.active, true));
+      if (people.length === 0) return [];
+
+      const DAY_MS = 86_400_000;
+      // Never record salary for days that haven't happened yet.
+      const now = new Date();
+      const endOfTodayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) + DAY_MS;
+      const limit = Math.min(fetchEnd.getTime(), endOfTodayMs);
+
+      const out: RawRow[] = [];
+      // Walk whole UTC days from the window start up to the cap.
+      let dayMs = Date.UTC(fetchStart.getUTCFullYear(), fetchStart.getUTCMonth(), fetchStart.getUTCDate());
+      while (dayMs < limit) {
+        const d = new Date(dayMs);
+        const daysInMonth = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+        for (const p of people) {
+          out.push({ role: p.role, amount: p.monthlyAmount / daysInMonth, date: dayMs });
+        }
+        dayMs += DAY_MS;
+      }
+      return out;
+    } catch (e) {
+      console.error("[kpi/datasets/team_salaries] fetch failed:", e);
+      return [];
+    }
+  },
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+//  manual_management_mrr — hand-entered Management MRR for real retainer clients
+//  billed OUTSIDE tracked Stripe subscriptions (e.g. deals created as projects
+//  before the 90-day retainer product existed). A LEVEL (current run-rate), like
+//  software_costs: no date rows, just the currently-effective active adjustments.
+//  amount_cents is CENTS in the DB; the engine works in dollars, so ÷100 here.
+// ════════════════════════════════════════════════════════════════════════════
+
+export const manualManagementMrrDataset: DatasetDef = {
+  key: "manual_management_mrr",
+  integration: "internal",
+  label: "Management MRR — manual adjustments",
+  description:
+    "Hand-entered Management MRR for real retainer clients billed outside tracked Stripe subscriptions. Each line is one adjustment with a written reason.",
+  fields: [
+    { key: "amount", label: "Monthly amount", type: "money", operators: ["gt", "lt", "between"] },
+    { key: "clientName", label: "Client", type: "string", operators: ["contains", "eq", "is_set", "is_not_set"] },
+    { key: "reason", label: "Reason", type: "string", operators: ["contains", "is_set", "is_not_set"] },
+  ],
+  dateFields: [], // a level (current run-rate), not a flow
+  aggregations: ["sum", "count"],
+  rowLabel: (row: RawRow) => ({
+    label: (row.clientName as string) || "Manual MRR",
+    sublabel: (row.reason as string) || undefined,
+  }),
+  rowAmount: (row: RawRow) => Number(row.amount ?? 0),
+  load: async (_ctx: LoadCtx): Promise<RawRow[]> => {
+    try {
+      const rows = await db()
+        .select({
+          amountCents: manualMrrAdjustments.amountCents,
+          clientName: manualMrrAdjustments.clientName,
+          reason: manualMrrAdjustments.reason,
+          effectiveFrom: manualMrrAdjustments.effectiveFrom,
+          effectiveTo: manualMrrAdjustments.effectiveTo,
+        })
+        .from(manualMrrAdjustments)
+        .where(eq(manualMrrAdjustments.active, true));
+      const now = Date.now();
+      return rows
+        .filter((r) => {
+          const from = toMs(r.effectiveFrom);
+          const to = toMs(r.effectiveTo);
+          if (from != null && from > now) return false; // not started yet
+          if (to != null && to < now) return false; // already ended
+          return true;
+        })
+        .map((r) => ({
+          amount: (r.amountCents ?? 0) / 100, // cents → dollars
+          clientName: r.clientName ?? "",
+          reason: r.reason ?? "",
+        }));
+    } catch (e) {
+      console.error("[kpi/datasets/manual_management_mrr] fetch failed:", e);
+      return [];
+    }
+  },
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+//  manual_management_mrr_flow — the SAME manual adjustments, but keyed by their START
+//  (effectiveFrom) and END (effectiveTo) dates so they can flow into New Management MRR
+//  (started in period) and Churned Management MRR (ended in period). No "now" filter — the
+//  engine filters by the chosen date field within the selected range.
+// ════════════════════════════════════════════════════════════════════════════
+
+export const manualManagementMrrFlowDataset: DatasetDef = {
+  key: "manual_management_mrr_flow",
+  integration: "internal",
+  label: "Management MRR — manual (by start/end date)",
+  description:
+    "Hand-entered Management MRR adjustments keyed by when each started or ended — feeds New and Churned Management MRR.",
+  fields: [
+    { key: "amount", label: "Monthly amount", type: "money", operators: ["gt", "lt", "between"] },
+    { key: "clientName", label: "Client", type: "string", operators: ["contains", "eq", "is_set", "is_not_set"] },
+  ],
+  dateFields: [
+    { key: "effectiveFrom", label: "Started" },
+    { key: "effectiveTo", label: "Ended" },
+  ],
+  aggregations: ["sum", "count"],
+  rowLabel: (row: RawRow) => ({ label: (row.clientName as string) || "Manual MRR", sublabel: undefined }),
+  rowAmount: (row: RawRow) => Number(row.amount ?? 0),
+  load: async (_ctx: LoadCtx): Promise<RawRow[]> => {
+    try {
+      const rows = await db()
+        .select({
+          amountCents: manualMrrAdjustments.amountCents,
+          clientName: manualMrrAdjustments.clientName,
+          effectiveFrom: manualMrrAdjustments.effectiveFrom,
+          effectiveTo: manualMrrAdjustments.effectiveTo,
+        })
+        .from(manualMrrAdjustments)
+        .where(eq(manualMrrAdjustments.active, true));
+      return rows.map((r) => ({
+        amount: (r.amountCents ?? 0) / 100,
+        clientName: r.clientName ?? "",
+        effectiveFrom: toMs(r.effectiveFrom),
+        effectiveTo: toMs(r.effectiveTo),
+      }));
+    } catch (e) {
+      console.error("[kpi/datasets/manual_management_mrr_flow] fetch failed:", e);
       return [];
     }
   },

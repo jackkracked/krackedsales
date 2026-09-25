@@ -3,8 +3,10 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
   X, ChevronRight, ChevronLeft, Search, Plus, Trash2, Check,
-  Repeat, CalendarClock, Layers, Wallet, ArrowRight,
+  Repeat, CalendarClock, Layers, Wallet, ArrowRight, Zap, CreditCard, Package, Mail,
 } from "lucide-react";
+import { PACKAGE_TIERS, termPriceOf } from "@/lib/packages/catalog";
+import type { Deliverables, DeliverableItem } from "@/lib/proposals/content";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate, useReducedMotion } from "motion/react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils/cn";
@@ -59,13 +61,20 @@ interface FormState {
   customFlows: CustomFlow[];
   emailCampaigns: string;
   smsCampaigns: string;
+  flowEmails: string;
   popUps: string;
+  extras: string[];        // value stack: included calendar/calls/Slack etc. (client-facing)
+  extraInput: string;      // in-progress custom value-stack line
   scopeNotes: string;
   // Price
   totalAmount: string;       // the FULL price the user enters (pre-discount)
   currency: string;
   discountType: "percent" | "fixed";
   discountValue: string;
+  // Does the discount repeat, or come off once? Only meaningful on a management retainer, where
+  // `totalAmount` is a MONTHLY price — "£250 off" a 90-day term is £250 or £750 depending on this.
+  // A project is a single payment, so its scope is always "total" (see effectiveScope).
+  discountScope: "recurring" | "first_payment";
   startDate: string;
   subscriptionStartDate: string; // when recurring billing first charges (blank = default)
   // Deal / billing
@@ -76,6 +85,17 @@ interface FormState {
   instalments: Instalment[];
   hasDeposit: boolean;
   depositInstalments: DepositInstalment[];
+  // 90-Day Management
+  managementOption: "upfront" | "spread";
+  autoRebillMode: "none" | "monthly" | "full90";
+  selectedPackageId: string;
+  splitFirstPayment: boolean;
+  firstPaymentPortions: { id: string; amount: string; offsetDays: string }[];
+  // Recipients
+  ccEmails: string[];
+  ccInput: string;
+  billingEmailEnabled: boolean;
+  billingEmail: string;
   // Review
   notes: string;
 }
@@ -108,13 +128,41 @@ const SMS_FLOWS = [
 
 const CURRENCIES = ["USD", "EUR", "GBP", "CAD", "AUD"];
 
-/** The amount actually charged = entered price minus any discount (clamped to >= 0). */
-function billedTotalOf(form: FormState): number {
+/**
+ * A project is one payment, so its discount is inherently one-time off the total. Only a
+ * management retainer bills repeatedly, so only it gets the recurring-vs-once choice.
+ */
+function effectiveScope(form: FormState): "recurring" | "first_payment" | "total" {
+  return form.type === "management" ? form.discountScope : "total";
+}
+
+/** The discount in currency, clamped to the price. Same clamp the server re-applies. */
+function discountAmountOf(form: FormState): number {
   const price = parseFloat(form.totalAmount) || 0;
   const dv = parseFloat(form.discountValue) || 0;
   const disc = form.discountType === "percent" ? price * (dv / 100) : dv;
-  const clamped = Math.min(Math.max(disc, 0), price);
-  return Math.round((price - clamped) * 100) / 100;
+  return Math.round(Math.min(Math.max(disc, 0), price) * 100) / 100;
+}
+
+/**
+ * The RECURRING price — what gets charged each period, and what lands in `proposals.total_amount`.
+ *
+ * A "first payment only" discount must NOT reduce this. Baking it in here is exactly the bug
+ * Gage caught: £250 off a £1,000/month 90-day term became a £750/month subscription and a £750
+ * discount. Under that scope the price stays whole and the discount is carried separately,
+ * applied once (in Stripe, a coupon with duration "once").
+ */
+function billedTotalOf(form: FormState): number {
+  const price = parseFloat(form.totalAmount) || 0;
+  if (effectiveScope(form) === "first_payment") return Math.round(price * 100) / 100;
+  return Math.round((price - discountAmountOf(form)) * 100) / 100;
+}
+
+/** What the client actually pays on payment 1 (or, when split, across the split portions). */
+function firstPaymentTotalOf(form: FormState): number {
+  const base = billedTotalOf(form);
+  if (effectiveScope(form) !== "first_payment") return base;
+  return Math.round((base - discountAmountOf(form)) * 100) / 100;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -134,9 +182,11 @@ function newCustomFlow(): CustomFlow {
 function compileScope(form: FormState): string {
   if (form.type === "management") {
     const lines: string[] = [];
-    if (parseInt(form.emailCampaigns) > 0) lines.push(`Email Campaigns: ${form.emailCampaigns}/month`);
-    if (parseInt(form.smsCampaigns) > 0) lines.push(`SMS Campaigns: ${form.smsCampaigns}/month`);
-    if (parseInt(form.popUps) > 0) lines.push(`Pop-ups: ${form.popUps}/month`);
+    if (parseInt(form.emailCampaigns) > 0) lines.push(`Emails (campaigns + flows): ${form.emailCampaigns}`);
+    if (parseInt(form.smsCampaigns) > 0) lines.push(`SMS Campaigns: ${form.smsCampaigns}`);
+    if (parseInt(form.flowEmails) > 0) lines.push(`Flow Emails: ${form.flowEmails}`);
+    if (parseInt(form.popUps) > 0) lines.push(`Pop-up redesigns: ${form.popUps}`);
+    form.extras.forEach(e => { if (e.trim()) lines.push(e.trim()); });
     if (form.scopeNotes) lines.push(form.scopeNotes);
     return lines.join("\n");
   }
@@ -161,17 +211,68 @@ function compileScope(form: FormState): string {
   return sections.join("\n\n");
 }
 
+/** Structured, line-by-line deliverables for the created proposal (rendered on the client doc
+ *  and editable inline before send). Management pulls from the package + value stack; project
+ *  from the selected/custom flows. Returns null when there's nothing to itemise. */
+function buildDeliverables(form: FormState): Deliverables | null {
+  if (form.type === "management") {
+    const pkg = PACKAGE_TIERS.find((p) => p.id === form.selectedPackageId);
+    const included = new Set(pkg?.included ?? []);
+    const exclusive = new Set(pkg?.exclusive ?? []);
+    const items: DeliverableItem[] = form.extras
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((label, i) => ({
+        id: `d${i}`,
+        label,
+        group: exclusive.has(label) ? "exclusive" : included.has(label) ? "included" : "custom",
+        order: i,
+      }));
+    const emails = parseInt(form.emailCampaigns) || null;
+    const popUps = parseInt(form.popUps) || null;
+    if (!items.length && !pkg && emails == null && popUps == null) return null;
+    return {
+      packageId: form.selectedPackageId || null,
+      packageName: pkg?.name ?? null,
+      emails,
+      popUps,
+      items,
+    };
+  }
+  // Project: itemise the selected email/SMS flows + any custom flows.
+  const items: DeliverableItem[] = [];
+  const push = (label: string, detail: string, group: DeliverableItem["group"]) =>
+    items.push({ id: `f${items.length}`, label, detail, group, order: items.length });
+  EMAIL_FLOWS.forEach((f) => {
+    const n = form.selectedFlows[f.id] ?? 0;
+    if (n > 0) push(f.label, `${n} email${n > 1 ? "s" : ""}`, "included");
+  });
+  SMS_FLOWS.forEach((f) => {
+    const n = form.selectedFlows[f.id] ?? 0;
+    if (n > 0) push(f.label, `${n} SMS`, "included");
+  });
+  form.customFlows.forEach((cf) => {
+    if (cf.name.trim() && cf.count > 0) {
+      push(cf.name.trim(), `${cf.count} ${cf.type === "email" ? `email${cf.count > 1 ? "s" : ""}` : "SMS"}`, "custom");
+    }
+  });
+  if (!items.length) return null;
+  return { packageId: null, packageName: null, emails: null, popUps: null, items };
+}
+
 /** A short, plain summary line of what's included, for the reveal. */
 function scopeSummary(form: FormState): string {
   if (form.type === "management") {
     const parts: string[] = [];
     const e = parseInt(form.emailCampaigns) || 0;
     const s = parseInt(form.smsCampaigns) || 0;
+    const f = parseInt(form.flowEmails) || 0;
     const p = parseInt(form.popUps) || 0;
-    if (e) parts.push(`${e} email campaign${e > 1 ? "s" : ""}`);
+    if (e) parts.push(`${e} email${e > 1 ? "s" : ""}`);
     if (s) parts.push(`${s} SMS`);
+    if (f) parts.push(`${f} flow email${f > 1 ? "s" : ""}`);
     if (p) parts.push(`${p} pop-up${p > 1 ? "s" : ""}`);
-    return parts.length ? `${parts.join(" · ")} / month` : "Retention management";
+    return parts.length ? `${parts.join(" · ")} over 90 days` : "Retention management";
   }
   const flowCount =
     Object.values(form.selectedFlows).filter(n => n > 0).length +
@@ -187,10 +288,8 @@ function symbolFor(currency: string): string {
 /** The price-field label, adapted to the chosen deal shape so the number is never ambiguous. */
 function amountLabel(form: FormState): string {
   if (form.type === "project") return "Project price";
-  const n = parseInt(form.billingIntervalCount) || 1;
-  if (!form.autoRenew) return `Total for the ${n > 1 ? `${n} months` : "month"}`;
-  if (form.billingInterval === "year") return "Amount per year";
-  return n > 1 ? `Amount per billing (every ${n} months)` : "Amount per month";
+  // 90-Day Management: the price entered is the MONTHLY retainer, billed across the 90-day term.
+  return "Amount per month";
 }
 
 // ─── Step model ────────────────────────────────────────────────────────────────
@@ -205,7 +304,8 @@ function activeSteps(form: FormState): StepKey[] {
   const steps: StepKey[] = ["client", "work", "scope", "deal", "price"];
   const needsSchedule =
     (form.type === "project" && form.paymentStructure === "instalment") ||
-    (form.type === "management" && form.autoRenew && form.hasDeposit);
+    (form.type === "management" && form.autoRenew && form.hasDeposit) ||
+    (form.type === "management" && form.managementOption === "spread" && form.splitFirstPayment);
   if (needsSchedule) steps.push("schedule");
   steps.push("reveal");
   return steps;
@@ -437,7 +537,6 @@ function ChoiceCard({ active, icon: Icon, title, desc, onClick, children }: {
   active: boolean; icon: React.ElementType; title: string; desc: string; onClick: () => void; children?: React.ReactNode;
 }) {
   const reduce = useReducedMotion();
-  const filled = active && !children;
   return (
     <motion.div
       onClick={onClick}
@@ -446,30 +545,27 @@ function ChoiceCard({ active, icon: Icon, title, desc, onClick, children }: {
       transition={SPRING_SELECT}
       data-r10n-proposal-choice
       data-active={active}
-      data-filled={filled}
       className={cn(
-        "rounded-[12px] border p-4 cursor-pointer transition-colors duration-200",
-        filled
-          ? "bg-primary border-primary shadow-[0_8px_24px_-16px_rgba(15,58,92,0.28)]"
-          : active
-            ? "bg-primary/[0.05] border-primary/60 ring-1 ring-primary/10"
-            : "bg-background border-border hover:border-primary/40 hover:shadow-[0_4px_14px_-12px_rgba(28,35,51,0.18)]",
+        "rounded-[12px] border p-4 cursor-pointer transition-all duration-200",
+        active
+          ? "bg-primary/[0.05] border-primary/55 ring-1 ring-primary/10 shadow-[0_10px_26px_-18px_rgba(15,58,92,0.35)]"
+          : "bg-background border-border hover:border-primary/40 hover:shadow-[0_4px_14px_-12px_rgba(28,35,51,0.18)]",
       )}
     >
       <div className="flex items-start gap-3.5">
-        <span className={cn("mt-0.5 w-10 h-10 rounded-[10px] flex items-center justify-center shrink-0 transition-colors duration-200",
-          filled ? "bg-primary-foreground/15 text-primary-foreground" : active ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted text-muted-foreground")}>
+        <span data-r10n-choice-icon data-active={active} className={cn("mt-0.5 w-10 h-10 rounded-[10px] flex items-center justify-center shrink-0 transition-colors duration-200",
+          active ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted text-muted-foreground")}>
           <Icon className="w-[18px] h-[18px]" strokeWidth={2} />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <p className={cn("text-[15px] font-semibold tracking-[-0.01em]", filled ? "text-primary-foreground" : active ? "text-primary" : "text-foreground")} style={{ fontFamily: "var(--font-heading)" }}>{title}</p>
-            <span className={cn("w-[18px] h-[18px] rounded-full border-[1.5px] flex items-center justify-center shrink-0 transition-colors duration-200",
-              filled ? "border-primary-foreground bg-primary-foreground" : active ? "border-primary bg-primary" : "border-border")}>
-              {active && <motion.span initial={reduce ? false : { scale: 0 }} animate={{ scale: 1 }} transition={SPRING_SELECT} className={cn("w-2 h-2 rounded-full", filled ? "bg-primary" : "bg-primary-foreground")} />}
+            <p className={cn("text-[15px] font-semibold tracking-[-0.01em]", active ? "text-primary" : "text-foreground")} style={{ fontFamily: "var(--font-heading)" }}>{title}</p>
+            <span data-r10n-choice-radio data-active={active} className={cn("w-[18px] h-[18px] rounded-full border-[1.5px] flex items-center justify-center shrink-0 transition-colors duration-200",
+              active ? "border-primary bg-primary" : "border-border")}>
+              {active && <motion.span initial={reduce ? false : { scale: 0 }} animate={{ scale: 1 }} transition={SPRING_SELECT} className="w-2 h-2 rounded-full bg-primary-foreground" />}
             </span>
           </div>
-          <p className={cn("text-xs mt-1 leading-relaxed", filled ? "text-primary-foreground/70" : "text-muted-foreground")}>{desc}</p>
+          <p className={cn("text-xs mt-1 leading-relaxed", active ? "text-foreground/70" : "text-muted-foreground")}>{desc}</p>
           <AnimatePresence initial={false}>
             {active && children && (
               <motion.div
@@ -502,6 +598,7 @@ function Segmented({ id, options, value, onChange }: {
           <button key={o.key} type="button" onClick={() => onChange(o.key)}
             className={cn("relative px-3 py-1.5 rounded-[6px] text-xs font-medium transition-colors duration-200", on ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
             {on && <motion.span layoutId={id} transition={reduce ? { duration: 0 } : SPRING_PILL}
+              data-r10n-seg-pill
               className="absolute inset-0 rounded-[6px] bg-primary shadow-sm" style={{ zIndex: 0 }} />}
             <span className="relative z-[1] whitespace-nowrap">{o.label}</span>
           </button>
@@ -589,8 +686,6 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
   const [submitting, setSubmitting] = useState(false);
   const [submitAction, setSubmitAction] = useState<"draft" | "send" | null>(null);
   const [error, setError] = useState("");
-  const [customCadence, setCustomCadence] = useState(false);
-  const [customTerm, setCustomTerm] = useState(false);
 
   const [form, setForm] = useState<FormState>({
     contact: null,
@@ -599,12 +694,17 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
     customFlows: [],
     emailCampaigns: "",
     smsCampaigns: "",
+    flowEmails: "",
     popUps: "",
+    extras: [],
+    extraInput: "",
     scopeNotes: "",
     totalAmount: "",
     currency: "USD",
     discountType: "percent",
     discountValue: "",
+    // Today's behaviour, so an untouched builder produces exactly what it did before.
+    discountScope: "recurring",
     startDate: format(toZonedDate(new Date(), tz), "yyyy-MM-dd"),
     subscriptionStartDate: "",
     paymentStructure: "subscription",
@@ -614,6 +714,15 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
     instalments: [newInstalment(), newInstalment()],
     hasDeposit: false,
     depositInstalments: [newDepositInstalment()],
+    managementOption: "upfront",
+    autoRebillMode: "none",
+    selectedPackageId: "",
+    splitFirstPayment: false,
+    firstPaymentPortions: [],
+    ccEmails: [],
+    ccInput: "",
+    billingEmailEnabled: false,
+    billingEmail: "",
     notes: "",
   });
 
@@ -627,6 +736,87 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
 
   function setAutoRenew(on: boolean) {
     setForm(prev => ({ ...prev, autoRenew: on, hasDeposit: on ? prev.hasDeposit : false }));
+  }
+
+  /** Pick a 90-day package: pre-fill the monthly price + the real deliverable fields + the value
+   *  stack of extras (all still editable). Custom keeps whatever's already there — build from scratch. */
+  function selectPackage(id: string) {
+    const pkg = PACKAGE_TIERS.find(p => p.id === id);
+    if (!pkg) return;
+    setForm(prev => pkg.isCustom
+      ? { ...prev, selectedPackageId: id, totalAmount: prev.totalAmount || String(pkg.monthlyPrice) }
+      : {
+          ...prev,
+          selectedPackageId: id,
+          totalAmount: String(pkg.monthlyPrice),
+          emailCampaigns: String(pkg.emails),
+          smsCampaigns: "",
+          flowEmails: "",
+          popUps: String(pkg.popUps),
+          extras: [...pkg.included, ...pkg.exclusive],
+        });
+  }
+
+  function addExtra(raw: string) {
+    const v = raw.replace(/[\r\n]/g, "").trim();
+    setForm(prev => ({
+      ...prev,
+      extras: v && !prev.extras.includes(v) ? [...prev.extras, v] : prev.extras,
+      extraInput: "",
+    }));
+  }
+  function removeExtra(v: string) {
+    setForm(prev => ({ ...prev, extras: prev.extras.filter(x => x !== v) }));
+  }
+
+  // ── First-payment split (only for "Pay every 30 days") ──
+  const pid = () => Math.random().toString(36).slice(2);
+  function setSplitFirstPayment(on: boolean) {
+    setForm(prev => {
+      if (!on) return { ...prev, splitFirstPayment: false };
+      if (prev.firstPaymentPortions.length >= 2) return { ...prev, splitFirstPayment: true };
+      const monthly = parseFloat(prev.totalAmount) || 0;
+      const half = Math.round((monthly / 2) * 100) / 100;
+      return {
+        ...prev,
+        splitFirstPayment: true,
+        firstPaymentPortions: [
+          { id: pid(), amount: half ? String(half) : "", offsetDays: "0" },
+          { id: pid(), amount: half ? String(Math.round((monthly - half) * 100) / 100) : "", offsetDays: "14" },
+        ],
+      };
+    });
+  }
+  function updatePortion(id: string, field: "amount" | "offsetDays", val: string) {
+    setForm(prev => ({ ...prev, firstPaymentPortions: prev.firstPaymentPortions.map(p => p.id === id ? { ...p, [field]: val } : p) }));
+  }
+  function addPortion() {
+    setForm(prev => prev.firstPaymentPortions.length >= 4 ? prev : ({ ...prev, firstPaymentPortions: [...prev.firstPaymentPortions, { id: pid(), amount: "", offsetDays: "30" }] }));
+  }
+  function removePortion(id: string) {
+    setForm(prev => prev.firstPaymentPortions.length <= 2 ? prev : ({ ...prev, firstPaymentPortions: prev.firstPaymentPortions.filter(p => p.id !== id) }));
+  }
+  function splitFirstEvenly() {
+    setForm(prev => {
+      const monthly = parseFloat(prev.totalAmount) || 0;
+      const n = prev.firstPaymentPortions.length || 1;
+      const each = Math.round((monthly / n) * 100) / 100;
+      return { ...prev, firstPaymentPortions: prev.firstPaymentPortions.map((p, i) => ({ ...p, amount: String(i === n - 1 ? Math.round((monthly - each * (n - 1)) * 100) / 100 : each) })) };
+    });
+  }
+
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  function addCcEmail(raw: string) {
+    const e = raw.replace(/[\r\n,]/g, "").trim().toLowerCase();
+    if (!e) { setForm(prev => ({ ...prev, ccInput: "" })); return; }
+    setForm(prev => ({
+      ...prev,
+      ccEmails: EMAIL_RE.test(e) && !prev.ccEmails.includes(e) ? [...prev.ccEmails, e].slice(0, 5) : prev.ccEmails,
+      ccInput: "",
+    }));
+  }
+  function removeCcEmail(e: string) {
+    setForm(prev => ({ ...prev, ccEmails: prev.ccEmails.filter(x => x !== e) }));
   }
 
   function toggleFlow(id: string, defaultCount = 1) {
@@ -682,10 +872,21 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
 
   const enteredPrice = parseFloat(form.totalAmount) || 0;
   const billedTotal = billedTotalOf(form);
-  const discountAmount = Math.round((enteredPrice - billedTotal) * 100) / 100;
-  const hasDiscount = (parseFloat(form.discountValue) || 0) > 0 && billedTotal < enteredPrice;
+  const discountScope = effectiveScope(form);
+  const discountAmount = discountAmountOf(form);
+  const firstPaymentTotal = firstPaymentTotalOf(form);
+  const hasDiscount = discountAmount > 0 && enteredPrice > 0;
   const discountPct = enteredPrice > 0 ? Math.round((discountAmount / enteredPrice) * 100) : 0;
+  // The discount is "once", so it must not exceed what payment 1 actually collects.
+  const discountOverruns = discountAmount > 0 && enteredPrice > 0 && discountAmount >= enteredPrice;
+  // Mirrors fullTermTotal() in lib/proposals/billing.ts: a once-off discount is subtracted from
+  // the term total, a recurring one is already inside the monthly price and so multiplies through.
+  const fullTermPreview = Math.round((billedTotal * 3 - (discountScope === "first_payment" ? discountAmount : 0)) * 100) / 100;
   const currencySymbol = symbolFor(form.currency);
+  // First-payment split (spread only): portions must add up to the monthly amount.
+  const isSplitSchedule = form.type === "management" && form.managementOption === "spread" && form.splitFirstPayment;
+  const splitSum = Math.round(form.firstPaymentPortions.reduce((a, p) => a + (parseFloat(p.amount) || 0), 0) * 100) / 100;
+  const splitSumOk = Math.abs(splitSum - billedTotal) < 0.01 && form.firstPaymentPortions.every(p => (parseFloat(p.amount) || 0) > 0);
 
   const previewTerms: BillingTerms = {
     type: form.type,
@@ -702,8 +903,12 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
   function canAdvance(): boolean {
     switch (currentKey) {
       case "client": return !!form.contact;
-      case "price": return billedTotal > 0;
+      // `discountOverruns` is load-bearing: under "first payment" scope the recurring price stays
+      // whole, so billedTotal is still positive even when the discount exceeds it. Without this a
+      // rep could advance with a 100%-off first payment and hand Stripe a zero-value first invoice.
+      case "price": return billedTotal > 0 && !discountOverruns;
       case "schedule": {
+        if (isSplitSchedule) return splitSumOk && form.firstPaymentPortions.length >= 2;
         if (form.type === "project" && form.paymentStructure === "instalment") {
           const sum = form.instalments.reduce((acc, i) => acc + (i.amount || 0), 0);
           return Math.abs(sum - billedTotal) < 0.01 && form.instalments.length > 0;
@@ -740,7 +945,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
       const enteredP = parseFloat(form.totalAmount) || 0;
       const billed = billedTotalOf(form);
       const discountNum = parseFloat(form.discountValue) || 0;
-      const hasDisc = discountNum > 0 && billed < enteredP;
+      const hasDisc = discountNum > 0 && discountAmountOf(form) > 0;
 
       const payload: Record<string, unknown> = {
         type: form.type,
@@ -748,29 +953,38 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
         contactName: toTitleCase(form.contact.name),
         contactEmail: form.contact.email,
         serviceDescription,
+        deliverables: buildDeliverables(form),
         totalAmount: billed,
         currency: form.currency.toLowerCase(),
         paymentStructure: form.paymentStructure,
-        autoRenew: form.type === "management" ? form.autoRenew : false,
+        // 90-day auto-renew is derived from the rebill choice: "none" stops at term end.
+        autoRenew: form.type === "management" ? form.autoRebillMode !== "none" : false,
         startDate: form.startDate || null,
         notes: form.notes || null,
       };
+      // Extra recipients + separate billing email (apply to any proposal type).
+      if (form.ccEmails.length) payload.ccEmails = form.ccEmails;
+      if (form.billingEmailEnabled && EMAIL_RE.test(form.billingEmail.trim())) payload.billingEmail = form.billingEmail.trim();
       if (hasDisc) {
         payload.listAmount = enteredP;
         payload.discountType = form.discountType;
         payload.discountValue = discountNum;
+        // Tells the server whether `totalAmount` above is already net of the discount
+        // ("recurring"/"total") or is the full price with the discount still to come off
+        // payment 1 ("first_payment"). Without it the server would subtract twice.
+        payload.discountScope = effectiveScope(form);
       }
       if (form.type === "management") {
-        payload.billingInterval = form.billingInterval;
-        payload.billingIntervalCount = parseInt(form.billingIntervalCount) || 1;
-        // Rep-chosen first-charge date (blank = default: one cycle after start, or immediate if no deposit).
-        if (form.autoRenew && form.subscriptionStartDate) {
-          payload.subscriptionStartDate = form.subscriptionStartDate;
-        }
-        if (form.paymentStructure === "subscription" && form.hasDeposit) {
-          payload.hasDeposit = true;
-          payload.depositTotal = form.depositInstalments.reduce((a, i) => a + (i.amount || 0), 0);
-          payload.depositInstalments = form.depositInstalments.map((i, idx) => ({ number: idx + 1, amount: i.amount, dueDate: i.dueDate }));
+        payload.billingInterval = "month";
+        payload.billingIntervalCount = 1;
+        // The 90-Day Management billing model + post-term rebill control.
+        payload.managementOption = form.managementOption;
+        payload.autoRebillMode = form.autoRebillMode;
+        if (form.managementOption === "spread" && form.splitFirstPayment && form.firstPaymentPortions.length > 1) {
+          payload.firstPaymentSplit = form.firstPaymentPortions.map((p, i) => ({
+            amount: parseFloat(p.amount) || 0,
+            offsetDays: i === 0 ? 0 : Math.max(0, parseInt(p.offsetDays) || 0),
+          }));
         }
       }
       if (form.paymentStructure === "instalment") {
@@ -819,8 +1033,10 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
         animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.28, ease: EASE_OUT }}
         data-r10n-proposal-wizard
-        className="relative bg-[#FBFBF9] border border-border/60 rounded-t-[20px] sm:rounded-[18px] shadow-[0_24px_64px_-32px_rgba(15,23,42,0.22)] ring-1 ring-foreground/[0.03] w-full sm:max-w-[452px] z-10 flex flex-col max-h-[92vh] overflow-hidden"
+        className="relative bg-[#FBFBF9] border border-border/60 rounded-t-[20px] sm:rounded-[18px] shadow-[0_24px_64px_-32px_rgba(15,23,42,0.22)] ring-1 ring-foreground/[0.03] w-full sm:max-w-[452px] md:max-w-[912px] z-10 flex flex-col md:flex-row max-h-[92vh] md:h-[858px] overflow-hidden"
       >
+        {/* LEFT: the step wizard (full width on mobile, fixed on desktop) */}
+        <div className="flex flex-col min-h-0 w-full md:w-[468px] md:shrink-0 md:border-r md:border-border/60">
         {/* Header — step counter + filling progress rail */}
         <div className="px-7 pt-6 pb-4 shrink-0">
           <div className="flex items-center justify-between mb-3.5">
@@ -884,14 +1100,84 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
                   <h3 data-r10n-proposal-q className="text-[1.6rem] leading-[1.15] font-bold text-foreground mb-1.5 tracking-[-0.02em] text-balance" style={{ fontFamily: "var(--font-heading)" }}>What&apos;s included?</h3>
                   <p className="text-sm text-muted-foreground mb-5">{form.type === "management" ? "Monthly deliverables." : "Pick the flows in this build."}</p>
                   {form.type === "management" ? (
-                    <div className="grid grid-cols-3 gap-3">
-                      {[{ key: "emailCampaigns" as const, label: "Email campaigns" }, { key: "smsCampaigns" as const, label: "SMS campaigns" }, { key: "popUps" as const, label: "Pop-ups" }].map(({ key, label }) => (
-                        <div key={key}>
-                          <label className="block text-[11px] text-muted-foreground mb-1">{label} <span className="opacity-60">/mo</span></label>
-                          <input type="number" value={form[key]} onChange={e => set(key, e.target.value)} placeholder="0" min="0"
-                            className="w-full px-3 py-2 text-sm bg-background border border-border rounded-[7px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50" />
+                    <div className="space-y-5">
+                      {/* Package picker — 2 / 2 / 1 grid. Selecting one pre-fills the fields + value stack. */}
+                      <div>
+                        <label className="flex items-center gap-1.5 text-xs font-medium text-foreground mb-2"><Package className="w-3.5 h-3.5 text-muted-foreground" /> Package <span className="text-muted-foreground font-normal">(pre-fills everything, still editable)</span></label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {PACKAGE_TIERS.map(pkg => {
+                            const active = form.selectedPackageId === pkg.id;
+                            return (
+                              <motion.button key={pkg.id} type="button" onClick={() => selectPackage(pkg.id)}
+                                whileTap={reduce ? undefined : { scale: 0.99 }} transition={SPRING_SELECT}
+                                data-r10n-proposal-choice data-active={active}
+                                className={cn("relative text-left rounded-[11px] border p-3.5 transition-colors duration-200",
+                                  active ? "bg-primary/[0.05] border-primary/60 ring-1 ring-primary/15" : "bg-background border-border hover:border-primary/40 hover:shadow-[0_4px_14px_-12px_rgba(28,35,51,0.18)]")}>
+                                {pkg.mostPopular && (
+                                  <span data-r10n-signal-chip className="absolute -top-2 right-3 px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground text-[9px] font-bold uppercase tracking-wide">Most Popular</span>
+                                )}
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className={cn("text-[14px] font-semibold tracking-[-0.01em]", active ? "text-primary" : "text-foreground")} style={{ fontFamily: "var(--font-heading)" }}>{pkg.name}</span>
+                                  <span data-r10n-choice-radio data-active={active} className={cn("w-[17px] h-[17px] rounded-full border-[1.5px] flex items-center justify-center shrink-0 transition-colors duration-200", active ? "border-primary bg-primary" : "border-border")}>
+                                    {active && <motion.span initial={reduce ? false : { scale: 0 }} animate={{ scale: 1 }} transition={SPRING_SELECT} className="w-1.5 h-1.5 rounded-full bg-primary-foreground" />}
+                                  </span>
+                                </div>
+                                <div className="mt-1">
+                                  <span className={cn("text-[15px] font-bold tabular-nums", active ? "text-primary" : "text-foreground")} style={{ fontFamily: "var(--font-heading)" }}>{pkg.isCustom ? "Custom" : `$${termPriceOf(pkg).toLocaleString()}`}</span>
+                                  {!pkg.isCustom && <span className="text-[11px] text-muted-foreground font-normal"> · 90 days</span>}
+                                </div>
+                              </motion.button>
+                            );
+                          })}
                         </div>
-                      ))}
+                      </div>
+
+                      {/* Deliverables — the two headline counts (over the 90-day term). Pre-filled by the package. */}
+                      <motion.div key={form.selectedPackageId || "none"} initial={reduce ? false : { opacity: 0.4 }} animate={{ opacity: 1 }} transition={{ duration: 0.28, ease: EASE_OUT }}>
+                        <label className="block text-xs font-medium text-foreground mb-2">Deliverables <span className="text-muted-foreground font-normal">(over 90 days)</span></label>
+                        <div className="grid grid-cols-2 gap-2.5">
+                          {([{ key: "emailCampaigns", label: "Emails (campaigns + flows)" }, { key: "popUps", label: "Pop-up redesigns" }] as const).map(({ key, label }) => (
+                            <div key={key}>
+                              <label className="block text-[11px] text-muted-foreground mb-1">{label}</label>
+                              <input type="number" value={form[key]} onChange={e => set(key, e.target.value)} placeholder="0" min="0"
+                                className="w-full px-3 py-2 text-sm tabular-nums bg-background border border-border rounded-[8px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50" />
+                            </div>
+                          ))}
+                        </div>
+                      </motion.div>
+
+                      {/* Value stack — the included extras (calendar / calls / Slack), a clean editable checklist. */}
+                      <div>
+                        <label className="block text-xs font-medium text-foreground mb-2">Also included</label>
+                        <div className="rounded-[11px] border border-border bg-muted/25 p-1.5">
+                          <AnimatePresence initial={false} mode="popLayout">
+                            {form.extras.map((ex, i) => (
+                              <motion.div key={ex} layout
+                                initial={reduce ? { opacity: 0 } : { opacity: 0, y: -4 }}
+                                animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                                exit={reduce ? { opacity: 0 } : { opacity: 0, x: -6 }}
+                                transition={{ duration: 0.2, ease: EASE_OUT, delay: reduce ? 0 : Math.min(i * 0.03, 0.15) }}
+                                className="group/ex flex items-center gap-2.5 px-2.5 py-1 rounded-[8px] hover:bg-background/70 transition-colors">
+                                <span className="w-4 h-4 rounded-full bg-primary/10 flex items-center justify-center shrink-0"><Check data-r10n-signal-text className="w-2.5 h-2.5 text-primary" strokeWidth={3} /></span>
+                                <span className="flex-1 text-[12.5px] text-foreground leading-snug">{ex}</span>
+                                <button type="button" onClick={() => removeExtra(ex)} className="opacity-0 group-hover/ex:opacity-100 text-muted-foreground hover:text-red-500 transition-opacity shrink-0"><X className="w-3.5 h-3.5" /></button>
+                              </motion.div>
+                            ))}
+                          </AnimatePresence>
+                          {form.extras.length === 0 && (
+                            <p className="px-2.5 py-2 text-[12px] text-muted-foreground">Pick a package, or add what&apos;s included below.</p>
+                          )}
+                          <div className="flex items-center gap-2 px-2.5 py-1.5 border-t border-border/50 mt-0.5">
+                            <Plus className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                            <input type="text" value={form.extraInput}
+                              onChange={e => set("extraInput", e.target.value)}
+                              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addExtra(form.extraInput); } }}
+                              onBlur={() => { if (form.extraInput.trim()) addExtra(form.extraInput); }}
+                              placeholder="Add an included item, then Enter"
+                              className="flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none" />
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-4">
@@ -937,11 +1223,15 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
                       </div>
                     </div>
                   )}
-                  <div className="mt-4">
-                    <label className="block text-xs font-medium text-foreground mb-1.5">Notes <span className="text-muted-foreground font-normal">(optional)</span></label>
-                    <textarea value={form.scopeNotes} onChange={e => set("scopeNotes", e.target.value)} placeholder="Any extra context for this proposal…" rows={2}
-                      className="w-full px-3 py-2 text-sm bg-background border border-border rounded-[7px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 resize-none" />
-                  </div>
+                  {/* Project keeps a free-text scope note; management's scope is the fields + value stack,
+                      and the internal note lives on the Review step. */}
+                  {form.type === "project" && (
+                    <div className="mt-4">
+                      <label className="block text-xs font-medium text-foreground mb-1.5">Notes <span className="text-muted-foreground font-normal">(optional)</span></label>
+                      <textarea value={form.scopeNotes} onChange={e => set("scopeNotes", e.target.value)} placeholder="Any extra context for this proposal…" rows={2}
+                        className="w-full px-3 py-2 text-sm bg-background border border-border rounded-[7px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 resize-none" />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -953,56 +1243,29 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
 
                   {form.type === "management" ? (
                     <div className="space-y-3">
-                      <ChoiceCard active={form.autoRenew} icon={Repeat} title="Auto-renewing retainer" desc="Bills on a set schedule, renews automatically until cancelled." onClick={() => setAutoRenew(true)}>
-                        <div>
-                          <p className="text-[11px] font-medium text-foreground mb-2">Bills</p>
-                          <Segmented id="seg-cadence"
-                            options={[{ key: "month-1", label: "Monthly" }, { key: "month-3", label: "3 mo" }, { key: "month-6", label: "6 mo" }, { key: "year-1", label: "Yearly" }]}
-                            value={customCadence ? "" : `${form.billingInterval}-${form.billingIntervalCount}`}
-                            onChange={(k) => { const [iv, ct] = k.split("-"); setCustomCadence(false); setForm(prev => ({ ...prev, billingInterval: iv as FormState["billingInterval"], billingIntervalCount: ct })); }}
-                          />
-                          {!customCadence ? (
-                            <button type="button" onClick={() => { setCustomCadence(true); setForm(prev => ({ ...prev, billingInterval: "month" })); }}
-                              className="mt-2 block text-[11px] font-medium text-primary/80 hover:text-primary transition-colors">or set a custom period</button>
-                          ) : (
-                            <div className="mt-2.5 flex items-center gap-2 flex-wrap">
-                              <span className="text-xs text-muted-foreground">Every</span>
-                              <input type="number" min="1" max="12" value={form.billingIntervalCount} onChange={e => set("billingIntervalCount", e.target.value)}
-                                className="w-16 px-2 py-1.5 text-sm bg-background border border-border rounded-[6px] text-foreground text-center focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50" />
-                              <span className="text-xs text-muted-foreground">months <span className="opacity-60">(max 12)</span></span>
-                              <button type="button" onClick={() => { setCustomCadence(false); setForm(prev => ({ ...prev, billingInterval: "month", billingIntervalCount: "1" })); }}
-                                className="ml-auto text-[11px] text-muted-foreground hover:text-foreground transition-colors">use a preset</button>
-                            </div>
-                          )}
-                          <label className="flex items-center gap-2.5 mt-3 pt-3 border-t border-primary/10 cursor-pointer">
-                            <input type="checkbox" checked={form.hasDeposit} onChange={e => set("hasDeposit", e.target.checked)} className="w-4 h-4 rounded border-border text-primary focus:ring-primary/30" />
-                            <span className="text-xs font-medium text-foreground">Collect a deposit up front</span>
-                          </label>
-                        </div>
+                      <ChoiceCard active={form.managementOption === "upfront"} icon={Zap} title="Pay in full" desc="The full 90 days in one payment." onClick={() => set("managementOption", "upfront")} />
+                      <ChoiceCard active={form.managementOption === "spread"} icon={CreditCard} title="Pay every 30 days" desc="Billed as three monthly payments." onClick={() => set("managementOption", "spread")}>
+                        <label className="flex items-center gap-2.5 cursor-pointer">
+                          <input type="checkbox" checked={form.splitFirstPayment} onChange={e => setSplitFirstPayment(e.target.checked)} className="w-4 h-4 rounded border-border text-primary focus:ring-primary/30" />
+                          <span className="text-xs font-medium text-foreground">Split the first payment</span>
+                        </label>
+                        {form.splitFirstPayment && (
+                          <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed">Break the first month into portions (e.g. a deposit + the rest). You&apos;ll set the amounts next. The contract officially starts when the final portion clears.</p>
+                        )}
                       </ChoiceCard>
-
-                      <ChoiceCard active={!form.autoRenew} icon={CalendarClock} title="Fixed term, paid once" desc="One payment covering a set number of months. Never renews." onClick={() => setAutoRenew(false)}>
-                        <div>
-                          <p className="text-[11px] font-medium text-foreground mb-2">Length</p>
-                          <Segmented id="seg-length"
-                            options={[{ key: "1", label: "1 mo" }, { key: "3", label: "3 mo" }, { key: "6", label: "6 mo" }, { key: "12", label: "12 mo" }]}
-                            value={customTerm ? "" : (form.billingInterval === "month" ? form.billingIntervalCount : "")}
-                            onChange={(k) => { setCustomTerm(false); setForm(prev => ({ ...prev, billingInterval: "month", billingIntervalCount: k })); }}
-                          />
-                          {!customTerm ? (
-                            <button type="button" onClick={() => { setCustomTerm(true); setForm(prev => ({ ...prev, billingInterval: "month" })); }}
-                              className="mt-2 block text-[11px] font-medium text-primary/80 hover:text-primary transition-colors">or a custom length</button>
-                          ) : (
-                            <div className="mt-2.5 flex items-center gap-2 flex-wrap">
-                              <input type="number" min="1" max="12" value={form.billingIntervalCount} onChange={e => set("billingIntervalCount", e.target.value)}
-                                className="w-16 px-2 py-1.5 text-sm bg-background border border-border rounded-[6px] text-foreground text-center focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50" />
-                              <span className="text-xs text-muted-foreground">months <span className="opacity-60">(max 12)</span></span>
-                              <button type="button" onClick={() => { setCustomTerm(false); setForm(prev => ({ ...prev, billingInterval: "month", billingIntervalCount: "6" })); }}
-                                className="ml-auto text-[11px] text-muted-foreground hover:text-foreground transition-colors">use a preset</button>
-                            </div>
-                          )}
-                        </div>
-                      </ChoiceCard>
+                      <div className="rounded-[12px] border border-border bg-muted/30 p-4">
+                        <p className="text-[11px] font-medium text-foreground mb-2">After the 90 days</p>
+                        <Segmented id="seg-rebill"
+                          options={[{ key: "none", label: "Stop" }, { key: "monthly", label: "Continue monthly" }, { key: "full90", label: "Re-bill 90 days" }]}
+                          value={form.autoRebillMode}
+                          onChange={(k) => set("autoRebillMode", k as FormState["autoRebillMode"])}
+                        />
+                        <p className="text-[11px] text-muted-foreground mt-2 leading-relaxed truncate">
+                          {form.autoRebillMode === "none" && "Billing stops at the end of the term."}
+                          {form.autoRebillMode === "monthly" && "Continues month-to-month until cancelled."}
+                          {form.autoRebillMode === "full90" && "Re-bills another full 90-day term."}
+                        </p>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -1051,6 +1314,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
                       <div className="flex rounded-[7px] border border-border overflow-hidden shrink-0">
                         {(["percent", "fixed"] as const).map(t => (
                           <button key={t} type="button" onClick={() => set("discountType", t)}
+                            data-r10n-sel data-active={form.discountType === t}
                             className={cn("px-3.5 text-sm font-semibold transition-colors", form.discountType === t ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:text-foreground")}>
                             {t === "percent" ? "%" : currencySymbol || "$"}
                           </button>
@@ -1060,16 +1324,62 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
                     <AnimatePresence>
                       {hasDiscount && (
                         <motion.div initial={reduce ? false : { opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.18 }} className="overflow-hidden">
+                          {/* Scope: a monthly retainer charges repeatedly, so "£250 off" is ambiguous
+                              until the rep says whether it repeats. A project has one payment, so
+                              there is nothing to choose and we say so rather than show a dead control. */}
+                          {form.type === "management" ? (
+                            <div className="mt-2.5">
+                              <span className="block text-[11px] font-medium text-muted-foreground mb-1.5">Comes off</span>
+                              <div className="grid grid-cols-2 gap-2">
+                                {/* Upfront is a single payment covering all 3 months, so "first
+                                    payment only" would be meaningless wording for the same maths:
+                                    once off the term total vs off each month inside it. */}
+                                {(form.managementOption === "upfront" ? ([
+                                  { v: "first_payment", label: "The total, once", hint: "One-time" },
+                                  { v: "recurring", label: "Each of the 3 months", hint: `${discountPct}% off × 3` },
+                                ] as const) : ([
+                                  { v: "first_payment", label: "First payment only", hint: "One-time" },
+                                  { v: "recurring", label: "Every payment", hint: "Repeats monthly" },
+                                ] as const)).map(o => (
+                                  <button key={o.v} type="button" onClick={() => set("discountScope", o.v)}
+                                    data-r10n-sel data-active={form.discountScope === o.v}
+                                    className={cn("px-3 py-2 rounded-[7px] border text-left transition-colors",
+                                      form.discountScope === o.v ? "border-primary bg-primary/5" : "border-border bg-background hover:border-foreground/20")}>
+                                    <span className={cn("block text-[12px] font-semibold", form.discountScope === o.v ? "text-foreground" : "text-muted-foreground")}>{o.label}</span>
+                                    <span className="block text-[10.5px] text-muted-foreground mt-0.5">{o.hint}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="mt-2 text-[11px] text-muted-foreground">One-time discount off the project total.</p>
+                          )}
+
                           <div data-r10n-proposal-discount-strip className="mt-2 flex items-center gap-2.5 px-3 py-2.5 rounded-[8px] bg-green-50 border border-green-200">
                             <span className="text-sm text-muted-foreground line-through tabular-nums">{fmtMoney(enteredPrice, form.currency)}</span>
                             <span className="text-muted-foreground">→</span>
-                            <span className="text-sm font-bold text-foreground tabular-nums">{fmtMoney(billedTotal, form.currency)}</span>
+                            <span className="text-sm font-bold text-foreground tabular-nums">{fmtMoney(discountScope === "first_payment" ? firstPaymentTotal : billedTotal, form.currency)}</span>
                             <span data-r10n-proposal-discount-save className="ml-auto text-[11px] font-semibold text-green-700">{discountPct}% off · saves {fmtMoney(discountAmount, form.currency)}</span>
                           </div>
+                          {/* Spell out the consequence in money. The whole bug was that "£250 off" read
+                              as £250 and silently charged £750 less across a 90-day term. */}
+                          {form.type !== "management" ? null : form.managementOption === "upfront" ? (
+                            <p className="mt-1.5 text-[11px] text-muted-foreground">
+                              One payment of {fmtMoney(fullTermPreview, form.currency)} for the 90 days. Total saved: {fmtMoney(Math.round((enteredPrice * 3 - fullTermPreview) * 100) / 100, form.currency)}.
+                            </p>
+                          ) : discountScope === "first_payment" ? (
+                            <p className="mt-1.5 text-[11px] text-muted-foreground">
+                              {isSplitSchedule ? "Comes off the first portion only" : "Payment 1"} is {fmtMoney(firstPaymentTotal, form.currency)}, then {fmtMoney(billedTotal, form.currency)} every 30 days. Total saved: {fmtMoney(discountAmount, form.currency)}.
+                            </p>
+                          ) : (
+                            <p className="mt-1.5 text-[11px] text-muted-foreground">
+                              Every payment is {fmtMoney(billedTotal, form.currency)}. Over the 90-day term that saves {fmtMoney(Math.round(discountAmount * 3 * 100) / 100, form.currency)}.
+                            </p>
+                          )}
                         </motion.div>
                       )}
                     </AnimatePresence>
-                    {(parseFloat(form.discountValue) || 0) > 0 && billedTotal <= 0 && <p className="mt-2 text-[11px] text-amber-600">Discount can&apos;t be more than the price.</p>}
+                    {discountOverruns && <p className="mt-2 text-[11px] text-amber-600">Discount can&apos;t be more than the price.</p>}
                   </div>
 
                   <div className="mt-4">
@@ -1078,7 +1388,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
                       className="w-full px-3 py-2 text-sm bg-background border border-border rounded-[7px] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50" />
                   </div>
 
-                  {form.type === "management" && form.autoRenew && (
+                  {form.type === "management" && form.autoRenew && !form.managementOption && (
                     <div className="mt-4">
                       <label className="block text-xs font-medium text-foreground mb-1.5">First subscription charge <span className="text-muted-foreground font-normal">(optional)</span></label>
                       <input type="date" value={form.subscriptionStartDate} onChange={e => set("subscriptionStartDate", e.target.value)}
@@ -1093,11 +1403,50 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
               {/* ── SCHEDULE ── */}
               {currentKey === "schedule" && (
                 <div>
-                  <h3 data-r10n-proposal-q className="text-[1.6rem] leading-[1.15] font-bold text-foreground mb-1.5 tracking-[-0.02em] text-balance" style={{ fontFamily: "var(--font-heading)" }}>Set the schedule</h3>
+                  <h3 data-r10n-proposal-q className="text-[1.6rem] leading-[1.15] font-bold text-foreground mb-1.5 tracking-[-0.02em] text-balance" style={{ fontFamily: "var(--font-heading)" }}>{isSplitSchedule ? "Split the first payment" : "Set the schedule"}</h3>
                   <p className="text-sm text-muted-foreground mb-5">
-                    {form.type === "project" ? `Split ${fmtMoney(billedTotal, form.currency)} into payments.` : `Set the deposit amount and when each payment is due.`}
+                    {isSplitSchedule
+                      ? `Break the first ${fmtMoney(billedTotal, form.currency)} into portions. The contract starts when the final one clears.`
+                      : form.type === "project" ? `Split ${fmtMoney(billedTotal, form.currency)} into payments.` : `Set the deposit amount and when each payment is due.`}
                   </p>
-                  {form.type === "project" ? (
+                  {isSplitSchedule ? (
+                    <div>
+                      <div className="space-y-2">
+                        {form.firstPaymentPortions.map((p, i) => (
+                          <div key={p.id} className="flex items-center gap-2">
+                            <span className="text-[11px] text-muted-foreground w-[68px] shrink-0">{i === 0 ? "At signup" : `Portion ${i + 1}`}</span>
+                            <div className="relative flex-1">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">{currencySymbol}</span>
+                              <input type="number" value={p.amount} onChange={e => updatePortion(p.id, "amount", e.target.value)} placeholder="0" min="0"
+                                aria-label={i === 0 ? "First payment amount (at signup)" : `Portion ${i + 1} amount`}
+                                className="w-full pl-6 pr-2.5 py-2 text-sm tabular-nums bg-background border border-border rounded-[7px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50" />
+                            </div>
+                            {i === 0 ? (
+                              <span className="text-[11px] text-muted-foreground w-[104px] text-center shrink-0">charged now</span>
+                            ) : (
+                              <div className="flex items-center gap-1.5 w-[104px] shrink-0">
+                                <input type="number" value={p.offsetDays} onChange={e => updatePortion(p.id, "offsetDays", e.target.value)} min="1" placeholder="14"
+                                  aria-label={`Portion ${i + 1}: days after the first payment`}
+                                  className="w-12 px-2 py-2 text-sm tabular-nums text-center bg-background border border-border rounded-[7px] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50" />
+                                <span className="text-[11px] text-muted-foreground">days later</span>
+                              </div>
+                            )}
+                            {form.firstPaymentPortions.length > 2 && i > 0
+                              ? <button type="button" onClick={() => removePortion(p.id)} className="p-1.5 text-muted-foreground hover:text-red-500 transition-colors shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
+                              : <span className="w-[26px] shrink-0" aria-hidden />}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex items-center justify-between mt-3">
+                        <div className="flex items-center gap-3">
+                          {form.firstPaymentPortions.length < 4 && <button type="button" onClick={addPortion} className="flex items-center gap-1 text-[11px] font-medium text-primary hover:text-primary/80 transition-colors"><Plus className="w-3 h-3" /> Add portion</button>}
+                          <button type="button" onClick={splitFirstEvenly} className="text-[11px] font-medium text-primary/80 hover:text-primary transition-colors">Split evenly</button>
+                        </div>
+                        <span className={cn("text-[11px] font-semibold tabular-nums", splitSumOk ? "text-muted-foreground" : "text-amber-600")}>{fmtMoney(splitSum, form.currency)} of {fmtMoney(billedTotal, form.currency)}</span>
+                      </div>
+                      {!splitSumOk && <p role="status" aria-live="polite" className="mt-1.5 text-[11px] text-amber-600">The portions need to add up to the monthly amount ({fmtMoney(billedTotal, form.currency)}).</p>}
+                    </div>
+                  ) : form.type === "project" ? (
                     <ScheduleEditor rows={form.instalments} currencySymbol={currencySymbol} onUpdate={updateInstalment} onAdd={addInstalment} onRemove={removeInstalment} onDistribute={distributeEvenly} total={billedTotal} addLabel="Add payment" />
                   ) : (
                     <ScheduleEditor rows={form.depositInstalments} currencySymbol={currencySymbol} onUpdate={updateDepositInstalment} onAdd={addDepositInstalment} onRemove={removeDepositInstalment} onDistribute={distributeDepositEvenly} total={form.depositInstalments.reduce((a, i) => a + (i.amount || 0), 0)} addLabel="Add deposit payment" />
@@ -1107,7 +1456,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
 
               {/* ── REVEAL ── */}
               {currentKey === "reveal" && (
-                <Reveal form={form} billedTotal={billedTotal} enteredPrice={enteredPrice} hasDiscount={hasDiscount} discountPct={discountPct} discountAmount={discountAmount} currencySymbol={currencySymbol} previewTerms={previewTerms} reduce={!!reduce} setNotes={(v) => set("notes", v)} error={error} />
+                <Reveal form={form} billedTotal={billedTotal} enteredPrice={enteredPrice} hasDiscount={hasDiscount} discountPct={discountPct} discountAmount={discountAmount} currencySymbol={currencySymbol} previewTerms={previewTerms} reduce={!!reduce} setNotes={(v) => set("notes", v)} error={error} set={set} onCcAdd={addCcEmail} onCcRemove={removeCcEmail} />
               )}
             </motion.div>
           </AnimatePresence>
@@ -1119,7 +1468,7 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
             <motion.div initial={reduce ? false : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
               transition={{ duration: 0.2, ease: EASE_OUT }}
               data-r10n-proposal-dealline
-              className="mx-7 mb-1.5 px-3.5 py-2.5 rounded-[10px] bg-primary/[0.05] border border-primary/15 flex items-start gap-2.5">
+              className="md:hidden mx-7 mb-1.5 px-3.5 py-2.5 rounded-[10px] bg-primary/[0.05] border border-primary/15 flex items-start gap-2.5">
               <span data-r10n-proposal-dealline-node className="mt-px w-4 h-4 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
                 <ArrowRight className="w-2.5 h-2.5 text-primary" />
               </span>
@@ -1158,16 +1507,171 @@ export function ProposalCreateModal({ onClose, onCreated }: ProposalCreateModalP
             </motion.button>
           )}
         </div>
+        </div>
+        {/* ── RIGHT: the live proposal, building as you go (desktop only) ── */}
+        <aside data-r10n-proposal-summary className="hidden md:flex md:flex-col md:w-[432px] md:shrink-0 bg-[#F6F6F2] overflow-y-auto">
+          <LiveSummary form={form} billedTotal={billedTotal} currencySymbol={currencySymbol} previewTerms={previewTerms} reduce={!!reduce} />
+        </aside>
       </motion.div>
+    </div>
+  );
+}
+
+/** Read-only live preview of the proposal as it's built. Pure presentation of form state — it
+ *  changes no logic. Deepens on the scope/payment steps, shows a running summary elsewhere. */
+function LiveSummary({ form, billedTotal, currencySymbol, previewTerms, reduce }: {
+  form: FormState; billedTotal: number; currencySymbol: string; previewTerms: BillingTerms; reduce: boolean;
+}) {
+  const firstName = form.contact ? toTitleCase(form.contact.name) : null;
+  const pkg = PACKAGE_TIERS.find(p => p.id === form.selectedPackageId);
+  const monthly = billedTotal;
+  const num = (s: string) => parseInt(s) || 0;
+  const money = (n: number) => fmtMoney(n, form.currency);
+
+  // Payment schedule → the vertical timeline.
+  type Row = { label: string; sub: string; amount: number };
+  const rows: Row[] = [];
+  if (form.type === "management") {
+    if (form.managementOption === "upfront") {
+      rows.push({ label: "Full 90 days", sub: "at signup", amount: monthly * 3 });
+    } else {
+      if (form.splitFirstPayment && form.firstPaymentPortions.length > 1) {
+        form.firstPaymentPortions.forEach((p, i) => rows.push({
+          label: i === 0 ? "First payment" : `Portion ${i + 1}`,
+          sub: i === 0 ? "at signup" : `+${num(p.offsetDays)} days`,
+          amount: parseFloat(p.amount) || 0,
+        }));
+        rows.push({ label: "Month 2", sub: "after the term starts", amount: monthly });
+        rows.push({ label: "Month 3", sub: "after the term starts", amount: monthly });
+      } else {
+        rows.push({ label: "Month 1", sub: "at signup", amount: monthly });
+        rows.push({ label: "Month 2", sub: "day 30", amount: monthly });
+        rows.push({ label: "Month 3", sub: "day 60", amount: monthly });
+      }
+    }
+  } else if (form.paymentStructure === "instalment") {
+    form.instalments.forEach((inst, i) => rows.push({ label: `Payment ${i + 1}`, sub: inst.dueDate || "", amount: inst.amount || 0 }));
+  } else {
+    rows.push({ label: "Project", sub: "one payment", amount: billedTotal });
+  }
+
+  const rebillLabel = form.autoRebillMode === "monthly" ? "then monthly" : form.autoRebillMode === "full90" ? "then re-bills 90 days" : "then stops";
+  const e = num(form.emailCampaigns), s = num(form.smsCampaigns), f = num(form.flowEmails), pu = num(form.popUps);
+  const hasDeliverables = !!(e || s || f || pu || form.extras.length);
+
+  const Section = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div className="px-6 py-3.5 border-b border-black/[0.055]">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 mb-2" style={{ fontFamily: "var(--font-heading)" }}>{label}</p>
+      {children}
+    </div>
+  );
+
+  return (
+    <motion.div key={form.contact?.id ?? "empty"} initial={reduce ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3, ease: EASE_OUT }} className="flex flex-col min-h-full">
+      <div className="px-6 pt-6 pb-4 border-b border-black/[0.055]">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/60 mb-2" style={{ fontFamily: "var(--font-heading)" }}>Proposal</p>
+        {firstName ? (
+          <>
+            <p className="text-[20px] font-bold text-foreground leading-tight tracking-[-0.02em]" style={{ fontFamily: "var(--font-heading)" }}>{firstName}</p>
+            <span className="inline-flex items-center gap-1.5 mt-2 px-2 py-0.5 rounded-full bg-primary/[0.06] border border-primary/15 text-[10px] font-semibold text-primary uppercase tracking-wide">
+              {form.type === "management" ? "Management" : "Project"}
+            </span>
+          </>
+        ) : (
+          <p className="text-[15px] text-muted-foreground/70">Pick a client to begin.</p>
+        )}
+      </div>
+
+      {firstName && (
+        <>
+          {(pkg || hasDeliverables) && (
+            <Section label="Scope">
+              {pkg && !pkg.isCustom && (
+                <div className="mb-2">
+                  <p className="text-[13px] font-semibold text-foreground leading-tight" style={{ fontFamily: "var(--font-heading)" }}>{pkg.name}</p>
+                  <p className="text-[11px] text-muted-foreground">{pkg.tagline}</p>
+                </div>
+              )}
+              {hasDeliverables ? (
+                <div className="space-y-1">
+                  {e > 0 && <SummaryLine label="Emails (campaigns + flows)" value={String(e)} />}
+                  {s > 0 && <SummaryLine label="SMS campaigns" value={String(s)} />}
+                  {f > 0 && <SummaryLine label="Flow emails" value={String(f)} />}
+                  {pu > 0 && <SummaryLine label="Pop-up redesigns" value={String(pu)} />}
+                  {form.extras.map(x => (
+                    <div key={x} className="flex items-start gap-2 text-[12px] text-foreground/80 leading-snug">
+                      <Check data-r10n-signal-text className="w-3 h-3 mt-0.5 text-primary shrink-0" strokeWidth={3} /> <span>{x}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="text-[12px] text-muted-foreground/70">Set the deliverables.</p>}
+            </Section>
+          )}
+
+          {billedTotal > 0 && (
+            <Section label="Price">
+              <div className="flex items-baseline gap-1.5">
+                <span data-r10n-signal-text className="text-[24px] font-bold text-primary tracking-[-0.02em] tabular-nums" style={{ fontFamily: "var(--font-heading)" }}>{money(billedTotal)}</span>
+                <span className="text-[12px] text-muted-foreground">{form.type === "management" ? "/mo" : "total"}</span>
+              </div>
+            </Section>
+          )}
+
+          {billedTotal > 0 && (
+            <Section label="Payment plan">
+              {form.type === "management" && (
+                <p className="text-[12px] font-medium text-foreground mb-3">
+                  {form.managementOption === "upfront" ? "Pay in full" : "Pay every 30 days"}
+                  <span className="text-muted-foreground font-normal"> · {rebillLabel}</span>
+                </p>
+              )}
+              <div className="relative">
+                {rows.map((r, i) => (
+                  <div key={i} className="flex items-start gap-3 pb-2.5 last:pb-0 relative">
+                    {i < rows.length - 1 && <span className="absolute left-[5px] top-3.5 bottom-0 w-px bg-border" aria-hidden />}
+                    <span className="mt-1 w-[11px] h-[11px] rounded-full border-2 border-primary bg-background shrink-0 z-[1]" aria-hidden />
+                    <div className="flex-1 flex items-baseline justify-between gap-2 min-w-0">
+                      <div className="min-w-0">
+                        <p className="text-[12px] font-medium text-foreground leading-tight">{r.label}</p>
+                        <p className="text-[11px] text-muted-foreground">{r.sub}</p>
+                      </div>
+                      <span className="text-[12px] font-semibold text-foreground tabular-nums shrink-0">{money(r.amount)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+        </>
+      )}
+      <div className="flex-1" />
+      {billedTotal > 0 && (
+        <div className="px-6 py-4 border-t border-black/[0.06] bg-white/50">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70" style={{ fontFamily: "var(--font-heading)" }}>{form.type === "management" ? "90-day total" : "Total"}</span>
+            <span data-r10n-signal-text className="text-[15px] font-bold text-primary tabular-nums" style={{ fontFamily: "var(--font-heading)" }}>{money(form.type === "management" ? billedTotal * 3 : billedTotal)}</span>
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function SummaryLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2 text-[12px]">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-semibold text-foreground tabular-nums">{value}</span>
     </div>
   );
 }
 
 // ─── Reveal screen ──────────────────────────────────────────────────────────────
 
-function Reveal({ form, billedTotal, enteredPrice, hasDiscount, discountPct, discountAmount, currencySymbol, previewTerms, reduce, setNotes, error }: {
+function Reveal({ form, billedTotal, enteredPrice, hasDiscount, discountPct, discountAmount, currencySymbol, previewTerms, reduce, setNotes, error, set, onCcAdd, onCcRemove }: {
   form: FormState; billedTotal: number; enteredPrice: number; hasDiscount: boolean; discountPct: number; discountAmount: number;
   currencySymbol: string; previewTerms: BillingTerms; reduce: boolean; setNotes: (v: string) => void; error: string;
+  set: <K extends keyof FormState>(key: K, val: FormState[K]) => void; onCcAdd: (raw: string) => void; onCcRemove: (e: string) => void;
 }) {
   const model = billingModel(previewTerms);
   const firstName = form.contact ? toTitleCase(form.contact.name.split(" ")[0]) : "Client";
@@ -1251,6 +1755,43 @@ function Reveal({ form, billedTotal, enteredPrice, hasDiscount, discountPct, dis
             <span className="text-[11px] text-muted-foreground shrink-0">Included</span>
             <span className="text-[11px] font-medium text-foreground text-right">{scopeSummary(form)}</span>
           </div>
+        </div>
+      </div>
+
+      {/* Recipients — extra CC + a separate billing/finance email. */}
+      <div className="mt-4 space-y-3">
+        <div>
+          <label className="flex items-center gap-1.5 text-xs font-medium text-foreground mb-1.5"><Mail className="w-3.5 h-3.5 text-muted-foreground" /> CC others <span className="text-muted-foreground font-normal">(optional, up to 5)</span></label>
+          {form.ccEmails.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-1.5">
+              {form.ccEmails.map(e => (
+                <span key={e} data-r10n-cc-pill className="inline-flex items-center gap-1 pl-2.5 pr-1.5 py-1 rounded-full bg-primary/[0.06] border border-primary/15 text-[11px] text-foreground">
+                  {e}
+                  <button type="button" onClick={() => onCcRemove(e)} className="text-muted-foreground hover:text-red-500 transition-colors"><X className="w-3 h-3" /></button>
+                </span>
+              ))}
+            </div>
+          )}
+          <input type="email" value={form.ccInput}
+            onChange={e => set("ccInput", e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); onCcAdd(form.ccInput); } }}
+            onBlur={() => { if (form.ccInput.trim()) onCcAdd(form.ccInput); }}
+            placeholder="email@company.com, then Enter"
+            className="w-full px-3 py-2 text-sm bg-background border border-border rounded-[7px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50" />
+        </div>
+        <div>
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <input type="checkbox" checked={form.billingEmailEnabled} onChange={e => set("billingEmailEnabled", e.target.checked)} className="w-4 h-4 rounded border-border text-primary focus:ring-primary/30" />
+            <span className="text-xs font-medium text-foreground">Send billing + invoices to a different email</span>
+          </label>
+          <AnimatePresence initial={false}>
+            {form.billingEmailEnabled && (
+              <motion.div initial={reduce ? { opacity: 0 } : { opacity: 0, height: 0 }} animate={reduce ? { opacity: 1 } : { opacity: 1, height: "auto" }} exit={reduce ? { opacity: 0 } : { opacity: 0, height: 0 }} transition={{ duration: 0.22, ease: EASE_OUT }} className="overflow-hidden">
+                <input type="email" value={form.billingEmail} onChange={e => set("billingEmail", e.target.value)} placeholder="finance@company.com"
+                  className="mt-2 w-full px-3 py-2 text-sm bg-background border border-border rounded-[7px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50" />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 

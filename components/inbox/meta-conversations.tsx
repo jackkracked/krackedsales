@@ -3,8 +3,9 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { RefreshCw, Send, ListTodo, Layers, ClipboardCheck } from "lucide-react";
+import { RefreshCw, Send } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { QuickActionsBar } from "@/components/shared/quick-actions-bar";
 import { useMessages, useConversations } from "@/lib/hooks/use-conversations";
 import { MessageThread as GHLMessageThread } from "./message-thread";
 import { ReplyComposer } from "./reply-composer";
@@ -1192,6 +1193,15 @@ const PLATFORM_CHIP: Record<string, { label: string; cls: string }> = {
   tiktok: { label: "TikTok", cls: "bg-neutral-100 text-neutral-800 border-neutral-300" },
 };
 
+/**
+ * Instagram usernames are 1-30 characters of letters, numbers, periods and underscores. Anything
+ * with a space, a pipe or an emoji is a display name, not a handle.
+ */
+function isPlausibleInstagramHandle(name: string | undefined | null): name is string {
+  const v = (name ?? "").trim();
+  return v.length > 0 && v.length <= 30 && /^[A-Za-z0-9._]+$/.test(v);
+}
+
 function MetaLeadSidebar({
   conversation,
 }: {
@@ -1206,10 +1216,21 @@ function MetaLeadSidebar({
   const name = conversation.participantName || "Unknown";
   const commentLeadId = conversation.source === "comment" ? conversation.id : undefined;
 
-  // Task B — prefill the forms from data we already have. IG "name" IS the @handle; FB/TikTok
-  // "name" is a person name, not a handle → leave the handle blank there.
+  // Task B — prefill the forms from data we already have.
+  //
+  // CORRECTED 2026-08-24: this used to assert that an Instagram "name" IS the @handle and
+  // prefilled it unconditionally. Measured against production, 515 of 958 Instagram-attributed
+  // contacts (54%) have a display name that CANNOT be a handle — "besto | natural pesto",
+  // "vipe vintage" — because Meta gives us the display name, not the username. Those junk values
+  // were being submitted to n8n as the social handle, and they look plausible enough that nobody
+  // corrected them.
+  //
+  // So: prefill only when the name is actually a valid handle, and otherwise leave it EMPTY.
+  // An empty required-looking field prompts the rep to fill it; a wrong one does not.
   const socialHandle =
-    platform === "instagram" ? conversation.participantName || undefined : undefined;
+    platform === "instagram" && isPlausibleInstagramHandle(conversation.participantName)
+      ? conversation.participantName
+      : undefined;
   const leadEmail = conversation.email || undefined;
   const leadPhone = conversation.phone || undefined;
   const leadWebsite = conversation.website || undefined;
@@ -1244,30 +1265,28 @@ function MetaLeadSidebar({
           </p>
         </div>
 
-        {/* Quick Actions */}
-        <div className="px-4 py-4">
+        {/* Quick actions — PINNED, not in the scroll.
+            This panel scrolls, so these used to fall below the fold and were invisible on a
+            laptop. `mt-auto sticky bottom-0` keeps them in view at any height. An opaque
+            background and a top border are required: a transparent sticky bar lets the
+            content underneath read straight through it. */}
+        <div className="mt-auto sticky bottom-0 z-10 bg-card px-4 py-3 border-t border-border">
           <h4 data-r10n-sidebar-section className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.12em] mb-2.5">
             Quick actions
           </h4>
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              { icon: ListTodo, label: "Task", onClick: () => setShowTask(true) },
-              { icon: Layers, label: "Demo", onClick: () => setShowDemo(true) },
-              { icon: ClipboardCheck, label: "Audit", onClick: () => setShowAudit(true) },
-            ].map(({ icon: Icon, label, onClick }) => (
-              <button
-                key={label}
-                onClick={onClick}
-                data-r10n-quickaction
-                className="group flex flex-col items-center gap-1.5 py-3 text-[11px] font-medium text-foreground border border-border rounded-[9px] hover:border-primary/40 hover:bg-primary/[0.03] transition-all active:scale-[0.97]"
-              >
-                <span data-r10n-quickaction-icon className="w-7 h-7 rounded-[7px] bg-muted/70 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
-                  <Icon className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
-                </span>
-                {label}
-              </button>
-            ))}
-          </div>
+          <QuickActionsBar
+            compact
+            actions={[
+              { key: "task", label: "Task", onClick: () => setShowTask(true) },
+              { key: "demo", label: "Demo", onClick: () => setShowDemo(true) },
+              { key: "audit", label: "Audit", onClick: () => setShowAudit(true) },
+              // NO "Book" here on purpose. A booking needs a GoHighLevel contact, and a Meta
+              // DM lead is not one yet — `DmConversation` carries a participantId, not a
+              // contactId. Demo and Audit create the GHL lead as a side effect, so the real
+              // path is: create one of those, then book from the contact card. A button that
+              // cannot work is worse than no button.
+            ]}
+          />
         </div>
       </aside>
 

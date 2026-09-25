@@ -7,6 +7,7 @@ import { getStageBadge, getStageRiskDays } from "@/lib/utils/demo-stage";
 import { OpportunityModal } from "@/components/pipeline/opportunity-modal";
 import type { EnrichedTask } from "@/app/api/clickup/tasks/route";
 import type { GHLOpportunity } from "@/lib/ghl/types";
+import { DemoLinkField } from "@/components/shared/demo-link-field";
 
 function MiroLogo({ size = 14 }: { size?: number }) {
   return (
@@ -144,6 +145,12 @@ export function DemoTaskModal({ task, onClose }: DemoTaskModalProps) {
                 </a>
               )}
             </div>
+
+            {/* Demo Link — the GHL field, editable. Distinct from the read-only ClickUp
+                "Miro Board" link above, which comes from the task's PSD/Figma field. */}
+            {task.ghlContactId && (
+              <DemoLinkField contactId={task.ghlContactId} />
+            )}
 
             {/* Linked opportunity */}
             <div>

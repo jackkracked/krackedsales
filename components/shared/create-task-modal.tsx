@@ -17,6 +17,14 @@ interface OppResult {
   contactName: string | null;
 }
 
+interface TeamMember {
+  id: string;
+  name: string;
+  role: string;
+  isActive: boolean;
+  hasSlack: boolean;
+}
+
 interface CreateTaskModalProps {
   contactId?: string;
   contactName?: string;
@@ -119,6 +127,34 @@ export function CreateTaskModal({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  /**
+   * The team roster, and who I am.
+   *
+   * `/api/users` is admin-only and 403s for everyone else, so the absence of a roster IS the
+   * permission signal. Deliberately not a separate `role === "admin"` check in the client:
+   * one source of truth cannot drift out of step with the server, and a hidden control is
+   * not a permission anyway (the POST re-checks).
+   */
+  const [roster, setRoster] = useState<{ users: TeamMember[]; meId: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/users")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && d?.users) setRoster(d); })
+      .catch(() => { /* not an admin, or offline: no picker, task is still self-assigned */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  /** Me first, then the rest by name. Deactivated people are never assignable. */
+  const assignable = roster
+    ? roster.users
+        .filter((u) => u.isActive)
+        .sort((a, b) => (a.id === roster.meId ? -1 : b.id === roster.meId ? 1 : a.name.localeCompare(b.name)))
+    : [];
+  const [assigneeId, setAssigneeId] = useState<string | null>(null);
+  const assignee = assignable.find((u) => u.id === assigneeId) ?? null;
+  const isDelegated = !!assignee && assignee.id !== roster?.meId;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) { setError("Title is required"); return; }
@@ -134,6 +170,7 @@ export function CreateTaskModal({
         contactName: linkedOpp?.contactName ?? initialContactName ?? undefined,
         opportunityId: linkedOpp?.id ?? undefined,
         opportunityName: linkedOpp?.name ?? undefined,
+        assigneeId: assigneeId ?? undefined,
       };
 
       const res = await fetch("/api/tasks", {
@@ -199,6 +236,59 @@ export function CreateTaskModal({
               className="w-full text-sm px-3 py-2.5 border border-border rounded-[7px] bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-colors"
             />
           </div>
+
+          {/* Assign to — admins only, because only admins get a roster back from /api/users.
+              Sits directly under the title: who does it ranks second only to what it is, and
+              "title, person, when" is the order the task gets spoken aloud. */}
+          {assignable.length > 1 && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Assign To
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {assignable.map((u) => {
+                  const isMe = u.id === roster?.meId;
+                  const selected = isMe ? assigneeId === null || assigneeId === u.id : assigneeId === u.id;
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => setAssigneeId(isMe ? null : u.id)}
+                      className={cn(
+                        "px-3 py-2 text-xs font-medium rounded-[7px] border transition-all",
+                        selected
+                          ? "text-foreground border-primary/50 bg-primary/5"
+                          : "text-muted-foreground border-border hover:bg-muted/50"
+                      )}
+                    >
+                      {isMe ? "Me" : u.name.split(" ")[0]}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Say what will actually happen, at the moment of the decision. Someone with no
+                  linked Slack account gets no DM, and a silent no-op is worse than a caveat. */}
+              {/* Always say what will happen, including for a task you keep yourself. Saying
+                  nothing is what made a working notification look broken. */}
+              {(() => {
+                const target = assignee ?? assignable.find((u) => u.id === roster?.meId);
+                if (!target) return null;
+                const first = target.name.split(" ")[0];
+                if (!target.hasSlack) {
+                  return (
+                    <p className="text-[11px] text-muted-foreground">
+                      No Slack account linked for {isDelegated ? first : "you"} — it will appear in the app only
+                    </p>
+                  );
+                }
+                return (
+                  <p className="text-[11px] text-muted-foreground">
+                    {isDelegated ? `${first} gets a Slack DM` : "You get a Slack DM"}
+                  </p>
+                );
+              })()}
+            </div>
+          )}
 
           {/* Due Date */}
           <div className="space-y-1.5">

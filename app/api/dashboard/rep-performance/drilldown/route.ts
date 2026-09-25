@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { users, calls, proposals } from "@/lib/db/schema";
-import { and, eq, gte, lte, isNotNull, desc } from "drizzle-orm";
+import { users, calls, proposals, activityEvents } from "@/lib/db/schema";
+import { and, eq, gte, lte, isNotNull, desc, or, sql } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 import {
   startOfDay, endOfDay, startOfWeek, startOfMonth, subDays,
 } from "date-fns";
+import { getSessionUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,10 @@ interface DrillItem {
  * can validate every metric. metric ∈ calls | proposals | closed | open.
  */
 export async function GET(req: NextRequest) {
+  // Admin-only: exposes any rep's underlying records by userId.
+  const actor = await getSessionUser().catch(() => null);
+  if (actor?.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
   const sp = req.nextUrl.searchParams;
   const userId = sp.get("userId") ?? "";
   const metric = sp.get("metric") ?? "";
@@ -69,7 +74,24 @@ export async function GET(req: NextRequest) {
   let total = 0;
 
   try {
-    if (metric === "calls") {
+    if (metric === "booked") {
+      // The calls this rep SET, not the ones they sat on. Clicking "Booked" used to open the
+      // `calls` list, which filters on repEmail (the ATTENDEE) — so Kelsey's 2 booked calls
+      // opened a list of the 187 she was on. Same source as the leaderboard number.
+      const where = !user.ghlUserId
+        ? and(eq(calls.id, "00000000-0000-0000-0000-000000000000")) // no GHL id → nothing to show
+        : start
+          ? and(eq(calls.bookedByGhlUserId, user.ghlUserId), gte(calls.startedAt, start), lte(calls.startedAt, end))
+          : eq(calls.bookedByGhlUserId, user.ghlUserId);
+      const rows = await db().select().from(calls).where(where).orderBy(desc(calls.startedAt)).limit(300);
+      items = rows.map((c) => ({
+        id: c.id,
+        title: c.contactName ?? "Unknown contact",
+        sub: ["Booked by this rep", c.status].filter(Boolean).join(" · "),
+        date: c.startedAt.toISOString(),
+        status: c.status ?? undefined,
+      }));
+    } else if (metric === "calls") {
       const where = start
         ? and(eq(calls.repEmail, user.email), gte(calls.startedAt, start), lte(calls.startedAt, end))
         : eq(calls.repEmail, user.email);
@@ -86,20 +108,46 @@ export async function GET(req: NextRequest) {
         status: c.status ?? undefined,
       }));
     } else if (metric === "proposals" || metric === "closed") {
-      const dateCol = metric === "closed" ? proposals.paidAt : proposals.sentAt;
+      // MUST mirror the leaderboard exactly, or the list contradicts the number above it.
+      //   - "closed" keys on signedAt (a deal closes at signature, not when fully collected)
+      //   - and honours the closedBy override, so a deal sent by one rep on another's behalf
+      //     appears under whoever actually closed it.
+      const isClosed = metric === "closed";
+      const dateCol = isClosed ? proposals.signedAt : proposals.sentAt;
+      const repMatch = isClosed
+        ? or(
+            eq(proposals.closedBy, userId),
+            and(sql`${proposals.closedBy} is null`, eq(proposals.createdBy, userId)),
+          )
+        : eq(proposals.createdBy, userId);
       const where = start
-        ? and(eq(proposals.createdBy, userId), isNotNull(dateCol), gte(dateCol, start), lte(dateCol, end))
-        : and(eq(proposals.createdBy, userId), isNotNull(dateCol));
+        ? and(repMatch, isNotNull(dateCol), gte(dateCol, start), lte(dateCol, end))
+        : and(repMatch, isNotNull(dateCol));
       const rows = await db().select().from(proposals).where(where).orderBy(desc(dateCol)).limit(300);
       items = rows.map((p) => ({
         id: p.id,
         title: p.contactName,
         sub: p.title,
-        date: (metric === "closed" ? p.paidAt : p.sentAt)?.toISOString(),
+        date: (isClosed ? p.signedAt : p.sentAt)?.toISOString(),
         amount: p.totalAmount,
         status: p.status,
         href: `/proposals/${p.id}`,
       }));
+    } else if (metric === "demos") {
+      // Demos this rep created, newest first. Read from the activity trail — the same source
+      // the leaderboard counts — so the list can never disagree with the number above it.
+      const where = start
+        ? and(eq(activityEvents.userId, user.id), eq(activityEvents.action, "demo.created"),
+              gte(activityEvents.createdAt, start), lte(activityEvents.createdAt, end))
+        : and(eq(activityEvents.userId, user.id), eq(activityEvents.action, "demo.created"));
+      const rows = await db()
+        .select({ id: activityEvents.id, name: activityEvents.entityName, at: activityEvents.createdAt })
+        .from(activityEvents)
+        .where(where)
+        .orderBy(desc(activityEvents.createdAt))
+        .limit(200);
+      total = rows.length;
+      items = rows.map((r) => ({ id: r.id, title: r.name ?? "Demo", date: r.at?.toISOString() }));
     } else if (metric === "open") {
       // Open GHL opportunities assigned to this rep. The COUNT comes from GHL's
       // filtered meta.total (reliable, matches the leaderboard). The LIST is a

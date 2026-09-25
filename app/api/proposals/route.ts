@@ -6,6 +6,8 @@ import { getSessionUser } from "@/lib/auth/session";
 import crypto from "crypto";
 import { logActivity } from "@/lib/activity/logger";
 import { addPeriod } from "@/lib/proposals/billing";
+import { getTemplateSections } from "@/lib/proposals/templates";
+import { normalizeDeliverables } from "@/lib/proposals/normalize";
 
 export const dynamic = "force-dynamic";
 
@@ -32,9 +34,15 @@ export async function GET() {
         billingInterval: proposals.billingInterval,
         billingIntervalCount: proposals.billingIntervalCount,
         autoRenew: proposals.autoRenew,
+        managementOption: proposals.managementOption,
+        autoRebillMode: proposals.autoRebillMode,
+        firstPaymentSplit: proposals.firstPaymentSplit,
+        contractStartAt: proposals.contractStartAt,
+        scheduleSnapshot: proposals.scheduleSnapshot,
         listAmount: proposals.listAmount,
         discountType: proposals.discountType,
         discountValue: proposals.discountValue,
+        discountScope: proposals.discountScope,
         startDate: proposals.startDate,
         endDate: proposals.endDate,
         expiresAt: proposals.expiresAt,
@@ -105,12 +113,42 @@ export async function POST(req: NextRequest) {
       listAmount,
       discountType,
       discountValue,
+      discountScope,
       subscriptionStartDate,
+      managementOption,
+      autoRebillMode,
+      ccEmails,
+      billingEmail,
+      firstPaymentSplit,
+      deliverables,
     } = body;
 
     if (!type || !ghlContactId || !contactName || !totalAmount || !paymentStructure) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
+
+    // ── Validate + sanitize the new config fields (Gate 6: never persist junk / injection) ──
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const cleanEmail = (e: unknown): string | null => {
+      if (typeof e !== "string") return null;
+      const v = e.replace(/[\r\n]/g, "").trim().toLowerCase();
+      return EMAIL_RE.test(v) ? v : null;
+    };
+    const cleanBillingEmail = billingEmail ? cleanEmail(billingEmail) : null;
+    if (billingEmail && !cleanBillingEmail) {
+      return NextResponse.json({ error: "Invalid billing email" }, { status: 400 });
+    }
+    // CC: valid emails only, deduped (incl. vs contact email), capped at 5.
+    const contactLower = (contactEmail ?? "").toLowerCase();
+    const cleanCc = Array.isArray(ccEmails)
+      ? [...new Set(ccEmails.map(cleanEmail).filter((e): e is string => !!e && e !== contactLower))].slice(0, 5)
+      : [];
+    // 90-day management config — only meaningful for management; ignored otherwise.
+    const resolvedManagementOption =
+      type === "management" && (managementOption === "upfront" || managementOption === "spread")
+        ? managementOption : null;
+    const resolvedAutoRebillMode =
+      ["none", "monthly", "full90"].includes(autoRebillMode) ? autoRebillMode : "none";
 
     // ── Billing-model guardrail (Gate 6: never persist an inconsistent state) ──
     // Management: auto-renew ON => recurring subscription; OFF => paid-in-full single charge.
@@ -148,11 +186,19 @@ export async function POST(req: NextRequest) {
     // here, so a malformed payload can never persist (and later charge) a wrong amount.
     const hasDiscount =
       typeof listAmount === "number" && listAmount > 0 && typeof discountValue === "number" && discountValue > 0;
+    // "first_payment" means the discount comes off ONCE, so the recurring price stays whole and
+    // the discount is carried separately (see migration 0051). Subtracting it here as well would
+    // charge it on every payment — the exact bug this scope exists to prevent.
+    const resolvedScope: "recurring" | "first_payment" | "total" =
+      discountScope === "first_payment" || discountScope === "total" ? discountScope : "recurring";
     let billed: number;
-    if (hasDiscount) {
+    if (hasDiscount && resolvedScope !== "first_payment") {
       const rawDiscount = discountType === "fixed" ? discountValue : listAmount * (discountValue / 100);
       const clampedDiscount = Math.min(Math.max(rawDiscount, 0), listAmount);
       billed = Math.round((listAmount - clampedDiscount) * 100) / 100;
+    } else if (hasDiscount) {
+      // Full price. Trust listAmount over totalAmount so the two can never disagree.
+      billed = Math.round(listAmount * 100) / 100;
     } else {
       billed = Math.round((Number(totalAmount) || 0) * 100) / 100;
     }
@@ -182,6 +228,24 @@ export async function POST(req: NextRequest) {
       if (!(depositSum > 0)) {
         return NextResponse.json({ error: "Deposit amount must be greater than zero." }, { status: 400 });
       }
+    }
+
+    // First-month split for "Pay every 30 days": 2-4 portions that ADD UP to the monthly amount,
+    // portion 1 charged at signup (offsetDays 0), the rest auto-charged off-session on their dates.
+    let resolvedFirstPaymentSplit: { amount: number; offsetDays: number }[] | null = null;
+    if (resolvedManagementOption === "spread" && Array.isArray(firstPaymentSplit) && firstPaymentSplit.length > 1) {
+      const portions = firstPaymentSplit.slice(0, 4).map((p: { amount?: number; offsetDays?: number }, i: number) => ({
+        amount: Math.round((Number(p.amount) || 0) * 100) / 100,
+        offsetDays: i === 0 ? 0 : Math.max(0, Math.round(Number(p.offsetDays) || 0)),
+      }));
+      if (portions.some((p) => p.amount <= 0)) {
+        return NextResponse.json({ error: "Each first-payment portion must be greater than zero." }, { status: 400 });
+      }
+      const sum = Math.round(portions.reduce((a, p) => a + p.amount, 0) * 100) / 100;
+      if (Math.abs(sum - billed) > 0.01) {
+        return NextResponse.json({ error: `The first-payment split ($${sum}) must add up to the monthly amount ($${billed}).` }, { status: 400 });
+      }
+      resolvedFirstPaymentSplit = portions;
     }
 
     // The subscription first-charge date must be within ~18 months. Stripe caps a trial at
@@ -215,6 +279,11 @@ export async function POST(req: NextRequest) {
 
     const title = `${type === "management" ? "Management Retainer" : "Project"} — ${contactName}`;
 
+    // Snapshot the active template copy onto the proposal now, so later template edits never alter
+    // this proposal. Structured deliverables are validated from the builder payload.
+    const contentSnapshot = await getTemplateSections(type === "project" ? "project" : "management");
+    const cleanDeliverables = normalizeDeliverables(deliverables);
+
     // Save proposal to DB — Stripe is handled at send time
     const [proposal] = await db()
       .insert(proposals)
@@ -238,6 +307,7 @@ export async function POST(req: NextRequest) {
         listAmount: hasDiscount ? listAmount : null,
         discountType: hasDiscount ? (discountType ?? null) : null,
         discountValue: hasDiscount ? discountValue : null,
+        discountScope: hasDiscount ? resolvedScope : null,
         startDate: startDate ? new Date(startDate + "T12:00:00.000Z") : todayNoon,
         // Rep-chosen date the recurring subscription's first charge lands. Null = legacy
         // behaviour (first charge one billing cycle after start, i.e. deposit covers cycle 1).
@@ -246,6 +316,14 @@ export async function POST(req: NextRequest) {
         expiresAt,
         hasDeposit: resolvedHasDeposit,
         depositTotal: resolvedHasDeposit ? depositSum : null,
+        // 90-day management config + recipients (billing engine consumes these at sign; stored now).
+        managementOption: resolvedManagementOption,
+        autoRebillMode: resolvedAutoRebillMode,
+        firstPaymentSplit: resolvedFirstPaymentSplit,
+        ccEmails: cleanCc.length ? cleanCc : null,
+        billingEmail: cleanBillingEmail,
+        deliverables: cleanDeliverables,
+        content: contentSnapshot,
         updatedAt: new Date(),
       })
       .returning();

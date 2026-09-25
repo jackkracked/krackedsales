@@ -50,6 +50,12 @@ export const proposalsDataset: DatasetDef = {
         { value: "signed", label: "Signed" },
         { value: "partial", label: "Part-paid" },
         { value: "paid", label: "Paid" },
+        // A 90-day retainer sits in "active" for most of its life and ends "completed". Without
+        // these, a saved KPI config filtering on status silently stops matching those deals and
+        // its number drops to 0 with no error.
+        { value: "active", label: "Active (retainer running)" },
+        { value: "completed", label: "Completed (term finished)" },
+        { value: "past_due", label: "Past due" },
         { value: "failed", label: "Payment failed" },
         { value: "void", label: "Cancelled" },
         { value: "overdue", label: "Overdue" },

@@ -1,17 +1,50 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, createContext, useContext } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { Pen, RefreshCw, Check, AlertTriangle, Clock, Shield, Download, Pencil } from "lucide-react";
+import {
+  Pen, RefreshCw, Check, AlertTriangle, Clock, Shield, Download, Pencil,
+  GripVertical, Plus, X, Loader2,
+} from "lucide-react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { cn } from "@/lib/utils/cn";
 import {
   priceSuffix,
   clientSentence,
+  discountSentence,
   discountInfo,
   amountBlockLabel,
+  fullTermTotal,
+  termMultiplier,
+  managementSchedule,
+  billingAnchor,
   type BillingTerms,
 } from "@/lib/proposals/billing";
+import { RichTextEditor } from "@/components/proposals/rich-text-editor";
+import type {
+  Deliverables,
+  DeliverableGroup,
+  DeliverableItem,
+  ProposalContent,
+  AdditionalRate,
+} from "@/lib/proposals/content";
 
 interface Instalment {
   id: string;
@@ -39,7 +72,14 @@ interface ProposalData {
   listAmount?: number | null;
   discountType?: string | null;
   discountValue?: number | null;
+  discountScope?: string | null;
   startDate: string | null;
+  subscriptionStartDate?: string | null;
+  // 90-Day Management billing display fields.
+  managementOption?: string | null;
+  autoRebillMode?: string | null;
+  firstPaymentSplit?: Array<{ amount: number; offsetDays?: number }> | null;
+  contractStartAt?: string | null;
   endDate: string | null;
   expiresAt: string | null;
   status: string;
@@ -49,6 +89,539 @@ interface ProposalData {
   hasDeposit?: boolean;
   depositTotal?: number | null;
   depositsPaidTotal?: number | null;
+  deliverables?: Deliverables | null;
+  content?: ProposalContent | null;
+}
+
+// ─── Document-level autosave indicator ─────────────────────────────────────────
+// One calm, shared status line for the whole draft. Every inline editor reports through
+// the same context so the admin sees a single "Saving… / Saved / Couldn't save" pill
+// instead of a per-field flurry. `retry` re-runs the last failed save.
+
+type SaveState = "idle" | "saving" | "saved" | "error";
+
+interface SaveContextValue {
+  state: SaveState;
+  begin: () => void;
+  succeed: () => void;
+  fail: (retry: () => void) => void;
+  retry: () => void;
+}
+
+const SaveContext = createContext<SaveContextValue | null>(null);
+
+function useSave(): SaveContextValue {
+  return (
+    useContext(SaveContext) ?? {
+      // No provider (non-draft view) — a harmless no-op so components never crash.
+      state: "idle",
+      begin: () => {},
+      succeed: () => {},
+      fail: () => {},
+      retry: () => {},
+    }
+  );
+}
+
+function SaveProvider({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<SaveState>("idle");
+  const inFlight = useRef(0);
+  const retryRef = useRef<(() => void) | null>(null);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const begin = useCallback(() => {
+    inFlight.current += 1;
+    if (savedTimer.current) clearTimeout(savedTimer.current);
+    setState("saving");
+  }, []);
+
+  const settle = useCallback((next: "saved" | "error") => {
+    inFlight.current = Math.max(0, inFlight.current - 1);
+    if (inFlight.current > 0) return; // let the last one report
+    setState(next);
+    if (next === "saved") {
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setState("idle"), 1800);
+    }
+  }, []);
+
+  const succeed = useCallback(() => settle("saved"), [settle]);
+  const fail = useCallback(
+    (retry: () => void) => {
+      retryRef.current = retry;
+      settle("error");
+    },
+    [settle],
+  );
+  const retry = useCallback(() => {
+    const fn = retryRef.current;
+    retryRef.current = null;
+    fn?.();
+  }, []);
+
+  useEffect(() => () => { if (savedTimer.current) clearTimeout(savedTimer.current); }, []);
+
+  const value = useMemo(
+    () => ({ state, begin, succeed, fail, retry }),
+    [state, begin, succeed, fail, retry],
+  );
+
+  return <SaveContext.Provider value={value}>{children}</SaveContext.Provider>;
+}
+
+function SaveIndicator() {
+  const { state, retry } = useSave();
+  return (
+    <div
+      className="pointer-events-none fixed bottom-4 right-4 z-50 print:hidden"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <div
+        className={cn(
+          "pointer-events-auto flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-medium shadow-sm backdrop-blur transition-opacity duration-150 ease-out",
+          state === "idle" && "opacity-0",
+          state !== "idle" && "opacity-100",
+          state === "saving" && "border-black/8 bg-white/90 text-muted-foreground",
+          state === "saved" && "border-green-600/20 bg-green-50/95 text-green-700",
+          state === "error" && "border-red-500/25 bg-red-50/95 text-red-700",
+        )}
+        data-r10n-proposal-save
+      >
+        {state === "saving" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+        {state === "saved" && <Check className="h-3.5 w-3.5" strokeWidth={2.5} />}
+        {state === "error" && <AlertTriangle className="h-3.5 w-3.5" />}
+        <span>
+          {state === "saving" && "Saving…"}
+          {state === "saved" && "Saved"}
+          {state === "error" && "Couldn't save"}
+        </span>
+        {state === "error" && (
+          <button
+            type="button"
+            onClick={retry}
+            className="ml-0.5 rounded-full px-2 py-0.5 font-semibold text-red-700 underline underline-offset-2 hover:text-red-800"
+          >
+            Retry
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// A debounced autosave that funnels through the shared indicator. Returns a `save(body)`
+// that debounces `delay` ms; `flush()` fires any pending save immediately (used on blur).
+function useAutosave(proposalId: string, delay = 600) {
+  const save = useSave();
+  const queryClient = useQueryClient();
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pending = useRef<Record<string, unknown> | null>(null);
+  // Holds the latest `send` so the failure path can retry the exact same body without a
+  // self-referential callback (avoids the temporal-dead-zone / immutability lint hazard).
+  const sendRef = useRef<(body: Record<string, unknown>) => void>(() => {});
+
+  // Send one concrete body. Body-explicit so retry re-sends the exact same payload.
+  const send = useCallback(
+    async (body: Record<string, unknown>) => {
+      save.begin();
+      const ok = await persistEdit(proposalId, body);
+      if (ok) {
+        save.succeed();
+        queryClient.invalidateQueries({ queryKey: ["public-proposal"] });
+      } else {
+        save.fail(() => sendRef.current(body));
+      }
+    },
+    [proposalId, save, queryClient],
+  );
+  sendRef.current = send;
+
+  const run = useCallback(() => {
+    const body = pending.current;
+    pending.current = null;
+    if (body) send(body);
+  }, [send]);
+
+  const flush = useCallback(() => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    run();
+  }, [run]);
+
+  const schedule = useCallback(
+    (body: Record<string, unknown>, immediate = false) => {
+      pending.current = { ...(pending.current ?? {}), ...body };
+      if (timer.current) clearTimeout(timer.current);
+      if (immediate) { run(); return; }
+      timer.current = setTimeout(run, delay);
+    },
+    [run, delay],
+  );
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  return { schedule, flush };
+}
+
+// ─── Themed markdown renderer (matches the document's typography) ───────────────
+// react-markdown with remark-gfm ONLY (no rehype-raw): raw HTML in the stored markdown is
+// escaped, never executed, so the public signing page has no XSS path. The component map
+// mirrors the legacy hardcoded JSX so copy rendered from `content` looks byte-close to the
+// legacy sections (text-sm, foreground/80, bold headings, disc lists, black-bar-free rules).
+
+const DOC_MD_COMPONENTS: Components = {
+  h1: (p) => <p className="mt-5 mb-2 text-sm font-bold text-foreground" {...p} />,
+  h2: (p) => <p className="mt-5 mb-2 text-sm font-bold text-foreground" {...p} />,
+  h3: (p) => <p className="mt-4 mb-1.5 text-sm font-semibold text-foreground" {...p} />,
+  p: (p) => <p className="mb-2.5 text-sm leading-relaxed text-foreground/80" {...p} />,
+  ul: (p) => <ul className="mb-3 list-disc space-y-2 pl-5 text-sm text-foreground/80" {...p} />,
+  ol: (p) => <ol className="mb-3 list-decimal space-y-2 pl-5 text-sm text-foreground/80" {...p} />,
+  li: (p) => <li className="leading-relaxed" {...p} />,
+  strong: (p) => <strong className="font-semibold text-foreground" {...p} />,
+  em: (p) => <em className="italic" {...p} />,
+  a: ({ href, ...p }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer nofollow"
+      className="text-primary underline underline-offset-2 hover:text-primary/80"
+      {...p}
+    />
+  ),
+  hr: () => <div className="h-3 bg-foreground rounded-sm my-6" />,
+  table: (p) => (
+    <div className="mb-4 overflow-x-auto">
+      <table className="w-full border-collapse text-sm" {...p} />
+    </div>
+  ),
+  th: (p) => (
+    <th className="border border-foreground/20 bg-foreground/8 px-3 py-2 text-left font-bold text-foreground" {...p} />
+  ),
+  td: (p) => <td className="border border-foreground/20 px-3 py-2 text-foreground/80" {...p} />,
+};
+
+function DocMarkdown({ children, className }: { children: string; className?: string }) {
+  return (
+    <div className={className}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={DOC_MD_COMPONENTS}>
+        {children}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+/** Substitute the literal {{client}} token with the client's name. */
+function fillClient(md: string, clientName: string): string {
+  return (md ?? "").replace(/\{\{client\}\}/g, clientName);
+}
+
+// ─── Deliverables display ───────────────────────────────────────────────────────
+// Structured, line-by-line scope. Grouped (Included / Exclusive / Additional) with an
+// optional headline count row. Read-only render; inline editing layers on top in draft mode.
+const DELIVERABLE_GROUPS: { key: DeliverableGroup; label: string }[] = [
+  { key: "included", label: "Included" },
+  { key: "exclusive", label: "Exclusive to your plan" },
+  { key: "custom", label: "Additional" },
+];
+
+function CountStat({ value, label }: { value: number; label: string }) {
+  return (
+    <div className="flex items-baseline gap-1.5 rounded-lg border border-foreground/10 bg-foreground/[0.03] px-3 py-1.5">
+      <span className="text-base font-bold text-foreground tabular-nums">{value}</span>
+      <span className="text-xs text-foreground/60">{label}</span>
+    </div>
+  );
+}
+
+function DeliverablesDisplay({ deliverables }: { deliverables: Deliverables }) {
+  const emails = deliverables.emails ?? 0;
+  const popUps = deliverables.popUps ?? 0;
+  const hasCounts = emails > 0 || popUps > 0;
+  const populated = DELIVERABLE_GROUPS.map((g) => ({
+    ...g,
+    items: deliverables.items.filter((i) => i.group === g.key).sort((a, b) => a.order - b.order),
+  })).filter((g) => g.items.length > 0);
+  const showLabels = populated.length > 1;
+
+  return (
+    <div className="space-y-4">
+      {hasCounts && (
+        <div className="flex flex-wrap gap-2.5">
+          {emails > 0 && <CountStat value={emails} label={emails === 1 ? "Email campaign / flow" : "Email campaigns + flows"} />}
+          {popUps > 0 && <CountStat value={popUps} label={popUps === 1 ? "Pop-up redesign" : "Pop-up redesigns"} />}
+        </div>
+      )}
+      {populated.map((g) => (
+        <div key={g.key} className="space-y-2">
+          {showLabels && (
+            <p className="text-[11px] font-bold uppercase tracking-wider text-foreground/45">{g.label}</p>
+          )}
+          <ul className="space-y-2">
+            {g.items.map((it) => (
+              <li key={it.id} className="flex gap-2.5 text-sm leading-relaxed">
+                <Check className="mt-0.5 h-[15px] w-[15px] shrink-0 text-foreground/35" strokeWidth={2.5} />
+                <span className="text-foreground/85">
+                  <span className="font-medium text-foreground">{it.label}</span>
+                  {it.detail ? <span className="text-foreground/55"> — {it.detail}</span> : null}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Deliverables editor (draft only) ──────────────────────────────────────────
+// The owner's #1 surface. Grouped, line-by-line, drag-to-reorder within a group. Add /
+// edit label + detail / remove / change group / edit counts / add a custom line. Every
+// change autosaves the WHOLE deliverables object through the shared indicator.
+
+function uid() {
+  return `d_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function SortableDeliverableRow({
+  item,
+  onChange,
+  onRemove,
+}: {
+  item: DeliverableItem;
+  onChange: (patch: Partial<DeliverableItem>) => void;
+  onRemove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: item.id,
+  });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 20 : undefined,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "group flex items-start gap-2 rounded-[8px] border border-dashed border-transparent px-1.5 py-1.5 transition-colors duration-150 ease-out hover:border-[var(--color-signal,#2563EB)]/30 hover:bg-[var(--color-signal,#2563EB)]/[0.04]",
+        isDragging && "border-[var(--color-signal,#2563EB)]/40 bg-white shadow-md",
+      )}
+    >
+      <button
+        type="button"
+        aria-label="Drag to reorder"
+        {...attributes}
+        {...listeners}
+        className="mt-1 shrink-0 cursor-grab touch-none rounded p-0.5 text-foreground/25 transition-colors hover:text-foreground/60 active:cursor-grabbing"
+      >
+        <GripVertical className="h-4 w-4" />
+      </button>
+      <Check className="mt-2 h-[15px] w-[15px] shrink-0 text-foreground/35" strokeWidth={2.5} />
+      <div className="min-w-0 flex-1 space-y-1">
+        <input
+          type="text"
+          value={item.label}
+          onChange={(e) => onChange({ label: e.target.value })}
+          placeholder="Deliverable"
+          className="w-full rounded-[5px] border border-transparent bg-transparent px-1.5 py-0.5 text-sm font-medium text-foreground outline-none transition-colors duration-150 ease-out hover:border-black/10 focus:border-[var(--color-signal,#2563EB)]/50 focus:bg-white"
+        />
+        <input
+          type="text"
+          value={item.detail ?? ""}
+          onChange={(e) => onChange({ detail: e.target.value })}
+          placeholder="Add a short detail (optional)"
+          className="w-full rounded-[5px] border border-transparent bg-transparent px-1.5 py-0.5 text-[13px] text-foreground/55 outline-none transition-colors duration-150 ease-out placeholder:text-foreground/30 hover:border-black/10 focus:border-[var(--color-signal,#2563EB)]/50 focus:bg-white"
+        />
+      </div>
+      <select
+        value={item.group}
+        onChange={(e) => onChange({ group: e.target.value as DeliverableGroup })}
+        aria-label="Group"
+        className="mt-0.5 shrink-0 cursor-pointer rounded-[5px] border border-black/10 bg-white px-1.5 py-1 text-[11px] font-medium text-foreground/70 outline-none transition-colors duration-150 ease-out hover:border-[var(--color-signal,#2563EB)]/40 focus:border-[var(--color-signal,#2563EB)]/60"
+      >
+        <option value="included">Included</option>
+        <option value="exclusive">Exclusive</option>
+        <option value="custom">Additional</option>
+      </select>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label="Remove deliverable"
+        className="mt-1 shrink-0 rounded p-1 text-foreground/25 opacity-0 transition-all duration-150 ease-out hover:bg-red-50 hover:text-red-500 focus-visible:opacity-100 group-hover:opacity-100"
+      >
+        <X className="h-3.5 w-3.5" strokeWidth={2.5} />
+      </button>
+    </div>
+  );
+}
+
+function CountEditor({ label, value, onChange }: { label: string; value: number; onChange: (n: number) => void }) {
+  return (
+    <label className="flex items-center gap-2 rounded-lg border border-foreground/10 bg-foreground/[0.03] px-3 py-1.5">
+      <input
+        type="number"
+        min={0}
+        value={value}
+        onChange={(e) => onChange(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+        className="w-12 rounded-[4px] border border-black/10 bg-white px-1.5 py-0.5 text-center text-base font-bold tabular-nums text-foreground outline-none transition-colors duration-150 ease-out focus:border-[var(--color-signal,#2563EB)]/60"
+      />
+      <span className="text-xs text-foreground/60">{label}</span>
+    </label>
+  );
+}
+
+function DeliverablesEditor({
+  deliverables,
+  proposalId,
+}: {
+  deliverables: Deliverables | null;
+  proposalId: string;
+}) {
+  // Local working copy; the server normalizes and re-orders on save, then the query refetch
+  // reconciles. We keep edits snappy by mutating locally and autosaving the whole blob.
+  const seed = useMemo<Deliverables>(
+    () =>
+      deliverables ?? { packageId: null, packageName: null, emails: null, popUps: null, items: [] },
+    [deliverables],
+  );
+  const [draft, setDraft] = useState<Deliverables>(seed);
+  const lastSaved = useRef(JSON.stringify(seed));
+  const { schedule } = useAutosave(proposalId);
+
+  // Re-seed from the server only when the incoming value genuinely differs from what we
+  // last persisted (avoids clobbering in-progress typing on a background refetch).
+  useEffect(() => {
+    const incoming = JSON.stringify(seed);
+    if (incoming !== lastSaved.current) {
+      lastSaved.current = incoming;
+      setDraft(seed);
+    }
+  }, [seed]);
+
+  const commit = useCallback(
+    (next: Deliverables, immediate = false) => {
+      setDraft(next);
+      lastSaved.current = JSON.stringify(next);
+      schedule({ deliverables: next }, immediate);
+    },
+    [schedule],
+  );
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+
+  const grouped = DELIVERABLE_GROUPS.map((g) => ({
+    ...g,
+    items: draft.items.filter((i) => i.group === g.key).sort((a, b) => a.order - b.order),
+  }));
+
+  function reorderWithin(groupKey: DeliverableGroup, from: string, to: string) {
+    const inGroup = draft.items.filter((i) => i.group === groupKey).sort((a, b) => a.order - b.order);
+    const oldIndex = inGroup.findIndex((i) => i.id === from);
+    const newIndex = inGroup.findIndex((i) => i.id === to);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const moved = arrayMove(inGroup, oldIndex, newIndex);
+    const others = draft.items.filter((i) => i.group !== groupKey);
+    // Re-flatten: keep other groups, splice this group's new order back in global order space.
+    const next = [...others, ...moved].map((it, i) => ({ ...it, order: i }));
+    commit({ ...draft, items: next });
+  }
+
+  function patchItem(id: string, patch: Partial<DeliverableItem>) {
+    const next = draft.items.map((it) => {
+      if (it.id !== id) return it;
+      const merged = { ...it, ...patch };
+      if (patch.detail !== undefined && !patch.detail.trim()) delete merged.detail;
+      return merged;
+    });
+    commit({ ...draft, items: next });
+  }
+
+  function removeItem(id: string) {
+    const next = draft.items.filter((it) => it.id !== id).map((it, i) => ({ ...it, order: i }));
+    commit({ ...draft, items: next }, true);
+  }
+
+  function addItem(group: DeliverableGroup) {
+    const next: DeliverableItem = { id: uid(), label: "", group, order: draft.items.length };
+    commit({ ...draft, items: [...draft.items, next] });
+  }
+
+  return (
+    <div className="space-y-4" data-r10n-proposal-deliverables-editor>
+      {/* Counts */}
+      <div className="flex flex-wrap items-center gap-2.5">
+        <CountEditor
+          label="Email campaigns + flows"
+          value={draft.emails ?? 0}
+          onChange={(n) => commit({ ...draft, emails: n || null })}
+        />
+        <CountEditor
+          label="Pop-up redesigns"
+          value={draft.popUps ?? 0}
+          onChange={(n) => commit({ ...draft, popUps: n || null })}
+        />
+      </div>
+
+      {/* Grouped, sortable items */}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={(e: DragEndEvent) => {
+          const { active, over } = e;
+          if (!over || active.id === over.id) return;
+          const item = draft.items.find((i) => i.id === active.id);
+          if (!item) return;
+          reorderWithin(item.group, String(active.id), String(over.id));
+        }}
+      >
+        <div className="space-y-4">
+          {grouped.map((g) => (
+            <div key={g.key} className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-foreground/45">{g.label}</p>
+                <button
+                  type="button"
+                  onClick={() => addItem(g.key)}
+                  className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold text-[var(--color-signal,#2563EB)] transition-colors duration-150 ease-out hover:bg-[var(--color-signal,#2563EB)]/10"
+                >
+                  <Plus className="h-3 w-3" strokeWidth={2.5} />
+                  Add line
+                </button>
+              </div>
+              {g.items.length === 0 ? (
+                <p className="rounded-[8px] border border-dashed border-black/10 px-3 py-2 text-xs text-foreground/40">
+                  No lines yet.
+                </p>
+              ) : (
+                <SortableContext items={g.items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+                  <div className="space-y-0.5">
+                    {g.items.map((it) => (
+                      <SortableDeliverableRow
+                        key={it.id}
+                        item={it}
+                        onChange={(patch) => patchItem(it.id, patch)}
+                        onRemove={() => removeItem(it.id)}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              )}
+            </div>
+          ))}
+        </div>
+      </DndContext>
+    </div>
+  );
+}
+
+// Signature line shows the name in title case (content stores it upper-cased, e.g.
+// "GAGE FLESHER" → "Gage Flesher") to match the legacy italic serif signature.
+function titleCaseName(name: string): string {
+  return (name ?? "")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function fmtAmount(amount: number, currency: string) {
@@ -86,7 +659,29 @@ function SignatureCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [drawing, setDrawing] = useState(false);
   const [hasStroke, setHasStroke] = useState(false);
+  const [strong, setStrong] = useState(false); // enough ink + spread to be a real signature
   const lastPos = useRef<{ x: number; y: number } | null>(null);
+
+  // A real signature has meaningful ink AND spans a real area. A single dot/tap fails both,
+  // so people can't just place a dot and continue.
+  function evaluateSignature() {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const { data } = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height);
+    let ink = 0, minX = canvas.width, maxX = -1, minY = canvas.height, maxY = -1;
+    for (let y = 0; y < canvas.height; y++) {
+      for (let x = 0; x < canvas.width; x++) {
+        if (data[(y * canvas.width + x) * 4 + 3] > 20) {
+          ink++;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    setStrong(ink >= 100 && maxX - minX >= 40 && maxY - minY >= 12);
+  }
 
   function getPos(e: React.PointerEvent<HTMLCanvasElement>) {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -128,6 +723,7 @@ function SignatureCanvas({
   function handlePointerUp() {
     setDrawing(false);
     lastPos.current = null;
+    evaluateSignature();
   }
 
   function clear() {
@@ -135,6 +731,7 @@ function SignatureCanvas({
     if (!canvas) return;
     canvas.getContext("2d")!.clearRect(0, 0, canvas.width, canvas.height);
     setHasStroke(false);
+    setStrong(false);
   }
 
   return (
@@ -162,6 +759,9 @@ function SignatureCanvas({
           </div>
         )}
       </div>
+      {hasStroke && !strong && (
+        <p className="text-[11px] text-amber-600">Please draw your full signature to continue.</p>
+      )}
       <div className="flex items-center justify-between">
         <button
           type="button"
@@ -175,13 +775,13 @@ function SignatureCanvas({
         <button
           type="button"
           onClick={() => {
-            if (!hasStroke || !canvasRef.current || !canSign) return;
+            if (!strong || !canvasRef.current || !canSign) return;
             onSign(canvasRef.current.toDataURL("image/png"));
           }}
-          disabled={!hasStroke || disabled || !canSign}
+          disabled={!strong || disabled || !canSign}
           className={cn(
             "flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-[7px] transition-all",
-            hasStroke && !disabled && canSign
+            strong && !disabled && canSign
               ? "bg-primary text-white hover:bg-primary/90"
               : "bg-muted text-muted-foreground cursor-not-allowed"
           )}
@@ -288,8 +888,13 @@ function PricingTable({ proposal }: { proposal: ProposalData }) {
   const terms = proposal as BillingTerms;
   const suffix = priceSuffix(terms);
   const disc = discountInfo(terms);
-  const totalLabel = `${fmtAmount(proposal.totalAmount, proposal.currency)}${suffix}`;
+  const discSentence = discountSentence(terms, (n) => fmtAmount(n, proposal.currency));
+  // 90-Day Management leads with the full 90-day total (monthly × 3); every other proposal
+  // already stores its true total, so mult is 1 and nothing changes for them.
+  const mult = termMultiplier(terms);
+  const totalLabel = `${fmtAmount(fullTermTotal(terms), proposal.currency)}${suffix}`;
   const listLabel = disc ? `${fmtAmount(disc.listAmount, proposal.currency)}${suffix}` : null;
+  const mgmtSchedule = managementSchedule(terms);
 
   // The price cell: struck-through list price → billed price when a discount applies.
   const priceNode = disc ? (
@@ -301,9 +906,11 @@ function PricingTable({ proposal }: { proposal: ProposalData }) {
     <>{totalLabel}</>
   );
 
-  const serviceLabel = isManagement
-    ? "Kracked Retention Email + SMS Marketing Management"
-    : "Project Services";
+  // Prefer the per-proposal content snapshot's service label; fall back to the legacy
+  // hardcoded label when a proposal has no content (older/legacy records).
+  const serviceLabel =
+    proposal.content?.serviceLabel ??
+    (isManagement ? "Kracked Retention Email + SMS Marketing Management" : "Project Services");
 
   // For project proposals with structured scope text, render it as formatted bullets
   const serviceCellContent = !isManagement && proposal.serviceDescription ? (
@@ -358,6 +965,9 @@ function PricingTable({ proposal }: { proposal: ProposalData }) {
 
       {/* Plain-language billing summary + savings — what they pay and whether it recurs */}
       <p className="text-sm text-foreground/75 mb-1.5">{clientSentence(terms)}</p>
+      {/* A once-off discount reduces payment 1 on the schedule below while the monthly price
+          stays whole. Without this line the client sees two figures and no reason for the gap. */}
+      {discSentence && <p className="text-sm text-foreground/75 mb-1.5">{discSentence}</p>}
       {disc && (
         <p className="text-xs font-semibold text-green-700 mb-3">
           You save {fmtAmount(disc.saved, proposal.currency)} ({disc.pct}% off).
@@ -411,13 +1021,57 @@ function PricingTable({ proposal }: { proposal: ProposalData }) {
         );
       })()}
 
+      {/* ── 90-Day Management payment schedule (spread) — mirrors the project instalment table ── */}
+      {mgmtSchedule && mgmtSchedule.length > 0 && (
+        <>
+          {/* Mobile */}
+          <div className="sm:hidden border border-foreground/20 rounded-[8px] overflow-hidden mb-4 text-sm">
+            <div className="bg-foreground/5 px-4 py-2.5 border-b border-foreground/20">
+              <span className="font-bold text-foreground text-xs uppercase tracking-wide">Payment Schedule</span>
+            </div>
+            {mgmtSchedule.map((row, i) => (
+              <div key={i} className="flex items-center justify-between px-4 py-3 border-b border-foreground/10 last:border-0">
+                <div>
+                  <p className="font-medium text-foreground">{row.label}</p>
+                  <p className="text-xs text-foreground/60 mt-0.5">{row.when}</p>
+                </div>
+                <span className="font-bold text-foreground">{fmtAmount(row.amount, proposal.currency)}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop */}
+          <table className="hidden sm:table w-full border-collapse mb-4 text-sm">
+            <thead>
+              <tr>
+                <th className="border border-foreground/20 bg-foreground/8 px-3 py-2 text-left font-bold text-foreground" colSpan={3}>Payment Schedule</th>
+              </tr>
+              <tr>
+                <th className="border border-foreground/20 bg-foreground/8 px-3 py-1.5 text-left text-xs font-semibold text-foreground/70">Payment</th>
+                <th className="border border-foreground/20 bg-foreground/8 px-3 py-1.5 text-left text-xs font-semibold text-foreground/70">Date</th>
+                <th className="border border-foreground/20 bg-foreground/8 px-3 py-1.5 text-right text-xs font-semibold text-foreground/70">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mgmtSchedule.map((row, i) => (
+                <tr key={i}>
+                  <td className="border border-foreground/20 px-3 py-2 text-foreground">{row.label}</td>
+                  <td className="border border-foreground/20 px-3 py-2 text-foreground">{row.when}</td>
+                  <td className="border border-foreground/20 px-3 py-2 text-right font-bold text-foreground">{fmtAmount(row.amount, proposal.currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
       {/* ── Invoice date + payment options ── */}
       {/* Mobile */}
       <div className="sm:hidden border border-foreground/20 rounded-[8px] overflow-hidden text-sm">
         <div className="px-4 py-3 flex items-center justify-between border-b border-foreground/10">
           <span className="text-xs font-semibold text-foreground/60 uppercase tracking-wide">Invoice Date</span>
           <span className="font-medium text-foreground" suppressHydrationWarning>
-            {proposal.startDate ? fmtDateShort(proposal.startDate) : fmtDateShort(new Date())}
+            {fmtDate(billingAnchor(terms)) ?? fmtDate(new Date())}
           </span>
         </div>
         <div className="px-4 py-3">
@@ -437,7 +1091,7 @@ function PricingTable({ proposal }: { proposal: ProposalData }) {
         <tbody>
           <tr>
             <td className="border border-foreground/20 px-3 py-2 font-medium text-foreground" suppressHydrationWarning>
-              {proposal.startDate ? fmtDateShort(proposal.startDate) : fmtDateShort(new Date())}
+              {fmtDate(billingAnchor(terms)) ?? fmtDate(new Date())}
             </td>
             <td className="border border-foreground/20 px-3 py-2 text-foreground/80">
               Invoice via Stripe, Bank Transfer, or Zelle
@@ -470,15 +1124,15 @@ function AdditionalScopePricing({
 }) {
   const defaults = isManagement
     ? [
-        { item: "Campaign Emails", cost: "$300 per email" },
-        { item: "Flow Emails", cost: "$300 per email" },
+        { item: "Campaign Emails", cost: "$200 per email" },
+        { item: "Flow Emails", cost: "$200 per email" },
         { item: "Flow Email Edits", cost: "$100 per email" },
-        { item: "SMS", cost: "$100 per SMS/MMS" },
+        { item: "SMS", cost: "FREE" },
         { item: "Pop-Up", cost: "$150 per Pop-Up" },
       ]
     : [
-        { item: "Flow Emails", cost: "$300 per email" },
-        { item: "SMS", cost: "$100 per SMS/MMS" },
+        { item: "Flow Emails", cost: "$200 per email" },
+        { item: "SMS", cost: "FREE" },
         { item: "Pop-Up", cost: "$150 per Pop-Up" },
       ];
 
@@ -993,44 +1647,436 @@ function InlineEditScope({
   );
 }
 
-function InlineEditDate({
-  value,
-  proposalId,
-  className,
-}: {
-  value: string | null;
-  proposalId: string;
-  className?: string;
-}) {
-  const queryClient = useQueryClient();
-  const [localValue, setLocalValue] = useState(value ? new Date(value).toISOString().slice(0, 10) : "");
-  const [saved, setSaved] = useState(false);
-  const [saveFailed, setSaveFailed] = useState(false);
+// ─── Content-section editors (draft only, `content` present) ───────────────────
+// These edit fields on the per-proposal `content` snapshot. Each writes the WHOLE content
+// object back (server merges/normalizes) so a single field edit never drops the rest.
 
-  async function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const newVal = e.target.value;
-    setLocalValue(newVal);
-    if (!newVal) return;
-    setSaveFailed(false);
-    const ok = await persistEdit(proposalId, { expiresAt: new Date(newVal).toISOString() });
-    if (!ok) { setSaveFailed(true); return; }
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1800);
-    queryClient.invalidateQueries({ queryKey: ["public-proposal"] });
+/** A rich-text (markdown) copy section: renders read-only, reveals an editor on click. */
+function ContentMarkdownEditor({
+  content,
+  field,
+  proposalId,
+  clientName,
+  ariaLabel,
+  fillClientName = false,
+}: {
+  content: ProposalContent;
+  field: keyof ProposalContent;
+  proposalId: string;
+  clientName: string;
+  ariaLabel: string;
+  fillClientName?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState<string>((content[field] as string) ?? "");
+  const { schedule, flush } = useAutosave(proposalId);
+
+  // Keep local value in sync when a background refetch changes the stored copy while idle.
+  useEffect(() => {
+    if (!editing) setValue((content[field] as string) ?? "");
+  }, [content, field, editing]);
+
+  const rendered = fillClientName ? fillClient(value, clientName) : value;
+
+  if (editing) {
+    return (
+      <div className="my-3">
+        <RichTextEditor
+          value={value}
+          ariaLabel={ariaLabel}
+          onChange={(md) => {
+            setValue(md);
+            schedule({ content: { ...content, [field]: md } });
+          }}
+        />
+        <div className="mt-1.5 flex items-center justify-between">
+          {fillClientName && (
+            <span className="text-[11px] text-foreground/45">
+              Tip: <code className="rounded bg-foreground/5 px-1">{"{{client}}"}</code> inserts the client name.
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => { flush(); setEditing(false); }}
+            className="ml-auto rounded-full bg-foreground/5 px-3 py-1 text-[11px] font-semibold text-foreground/70 transition-colors duration-150 ease-out hover:bg-foreground/10"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <span className={cn("relative inline-flex items-center gap-2", className)}>
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => setEditing(true)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setEditing(true); } }}
+      title="Click to edit"
+      className="group relative -mx-1.5 cursor-text rounded-[8px] border border-dashed border-transparent px-1.5 py-0.5 transition-colors duration-150 ease-out hover:border-[var(--color-signal,#2563EB)]/30 hover:bg-[var(--color-signal,#2563EB)]/[0.04]"
+    >
+      <DocMarkdown>{rendered || "_Click to add copy…_"}</DocMarkdown>
+      <span className="pointer-events-none absolute right-1.5 top-1.5 flex items-center gap-1 rounded-full bg-white/90 px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-signal,#2563EB)] opacity-0 shadow-sm transition-opacity duration-150 ease-out group-hover:opacity-100">
+        <Pencil className="h-3 w-3" /> Edit
+      </span>
+    </div>
+  );
+}
+
+/** A single inline text field on the content object (docTitle, serviceLabel, signature.*). */
+function ContentTextEditor({
+  content,
+  proposalId,
+  getValue,
+  apply,
+  displayClassName,
+  inputClassName,
+  placeholder,
+}: {
+  content: ProposalContent;
+  proposalId: string;
+  getValue: (c: ProposalContent) => string;
+  apply: (c: ProposalContent, v: string) => ProposalContent;
+  displayClassName?: string;
+  inputClassName?: string;
+  placeholder?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(getValue(content));
+  const { schedule, flush } = useAutosave(proposalId);
+
+  useEffect(() => {
+    if (!editing) setValue(getValue(content));
+  }, [content, editing, getValue]);
+
+  if (editing) {
+    return (
       <input
-        type="date"
-        value={localValue}
-        onChange={handleChange}
-        className="bg-amber-50/70 hover:bg-amber-50 rounded-[4px] px-1 py-0.5 border-b border-current/40 focus:outline-none focus:border-current/70 text-inherit text-xs cursor-pointer transition-all"
+        type="text"
+        value={value}
+        autoFocus
+        onChange={(e) => { setValue(e.target.value); schedule({ content: apply(content, e.target.value) }); }}
+        onBlur={() => { flush(); setEditing(false); }}
+        onKeyDown={(e) => { if (e.key === "Enter") { flush(); setEditing(false); } }}
+        placeholder={placeholder}
+        className={cn(
+          "w-full rounded-[5px] border-b border-[var(--color-signal,#2563EB)]/60 bg-transparent text-foreground outline-none",
+          inputClassName,
+        )}
       />
-      <Pencil className="w-3 h-3 opacity-50" />
-      {saved && <span className="text-[10px] text-green-600 font-semibold">Saved</span>}
-      {saveFailed && <span className="text-[10px] text-red-600 font-semibold">Not saved</span>}
+    );
+  }
+
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={() => setEditing(true)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setEditing(true); } }}
+      title="Click to edit"
+      className={cn(
+        "group cursor-text rounded-[4px] border border-dashed border-transparent px-1 -mx-1 py-0.5 transition-colors duration-150 ease-out hover:border-[var(--color-signal,#2563EB)]/30 hover:bg-[var(--color-signal,#2563EB)]/[0.05]",
+        displayClassName,
+      )}
+    >
+      {value || placeholder || "—"}
+      <Pencil className="ml-1 inline-block h-3 w-3 align-middle text-[var(--color-signal,#2563EB)]/40 opacity-0 transition-opacity duration-150 ease-out group-hover:opacity-100" />
     </span>
+  );
+}
+
+/** The additional-scope pricing rows stored on `content` (label + cost, add/edit/remove). */
+function ContentRatesEditor({ content, proposalId }: { content: ProposalContent; proposalId: string }) {
+  const [rows, setRows] = useState<AdditionalRate[]>(content.additionalRates ?? []);
+  const { schedule } = useAutosave(proposalId);
+  const editingRef = useRef(false);
+
+  useEffect(() => {
+    if (!editingRef.current) setRows(content.additionalRates ?? []);
+  }, [content]);
+
+  function commit(next: AdditionalRate[], immediate = false) {
+    setRows(next);
+    schedule({ content: { ...content, additionalRates: next } }, immediate);
+  }
+
+  return (
+    <div className="my-4">
+      <div className="overflow-hidden rounded-[8px] border border-foreground/20 text-sm">
+        <div className="flex items-center justify-between bg-foreground/8 px-3 py-2">
+          <span className="font-bold text-foreground">Additional Scope Pricing</span>
+          <button
+            type="button"
+            onClick={() => commit([...rows, { item: "", cost: "" }])}
+            className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold text-[var(--color-signal,#2563EB)] transition-colors duration-150 ease-out hover:bg-[var(--color-signal,#2563EB)]/10"
+          >
+            <Plus className="h-3 w-3" strokeWidth={2.5} /> Add row
+          </button>
+        </div>
+        {rows.map((row, idx) => (
+          <div key={idx} className="group flex items-center gap-2 border-t border-foreground/10 px-3 py-1.5">
+            <input
+              type="text"
+              value={row.item}
+              placeholder="Service"
+              onFocus={() => { editingRef.current = true; }}
+              onBlur={() => { editingRef.current = false; }}
+              onChange={(e) => commit(rows.map((r, i) => (i === idx ? { ...r, item: e.target.value } : r)))}
+              className="min-w-0 flex-1 rounded-[5px] border border-transparent bg-transparent px-1.5 py-0.5 font-medium text-foreground outline-none transition-colors duration-150 ease-out hover:border-black/10 focus:border-[var(--color-signal,#2563EB)]/50 focus:bg-white"
+            />
+            <input
+              type="text"
+              value={row.cost}
+              placeholder="Cost"
+              onFocus={() => { editingRef.current = true; }}
+              onBlur={() => { editingRef.current = false; }}
+              onChange={(e) => commit(rows.map((r, i) => (i === idx ? { ...r, cost: e.target.value } : r)))}
+              className="w-32 rounded-[5px] border border-transparent bg-transparent px-1.5 py-0.5 text-right text-foreground/80 outline-none transition-colors duration-150 ease-out hover:border-black/10 focus:border-[var(--color-signal,#2563EB)]/50 focus:bg-white"
+            />
+            <button
+              type="button"
+              onClick={() => commit(rows.filter((_, i) => i !== idx), true)}
+              aria-label="Remove row"
+              className="shrink-0 rounded p-1 text-foreground/25 opacity-0 transition-all duration-150 ease-out hover:bg-red-50 hover:text-red-500 focus-visible:opacity-100 group-hover:opacity-100"
+            >
+              <X className="h-3.5 w-3.5" strokeWidth={2.5} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Read-only render of the additional-scope pricing rows from `content`. */
+function ContentRatesDisplay({ rates }: { rates: AdditionalRate[] }) {
+  if (!rates.length) return null;
+  return (
+    <div className="my-4">
+      {/* Mobile */}
+      <div className="mb-1 overflow-hidden rounded-[8px] border border-foreground/20 text-sm sm:hidden">
+        <div className="border-b border-foreground/20 bg-foreground/5 px-4 py-2.5">
+          <span className="text-xs font-bold uppercase tracking-wide text-foreground">Additional Scope Pricing</span>
+        </div>
+        {rates.map((row, idx) => (
+          <div key={idx} className="flex items-center justify-between border-b border-foreground/10 px-4 py-2.5 last:border-0">
+            <span className="font-medium text-foreground">{row.item}</span>
+            <span className="text-foreground/70">{row.cost}</span>
+          </div>
+        ))}
+      </div>
+      {/* Desktop */}
+      <table className="hidden w-full border-collapse text-sm sm:table">
+        <thead>
+          <tr>
+            <th className="border border-foreground/20 bg-foreground/8 px-3 py-2 text-left font-bold text-foreground">Additional Scope Pricing</th>
+            <th className="w-40 border border-foreground/20 bg-foreground/8 px-3 py-2 text-right font-bold text-foreground">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rates.map((row, idx) => (
+            <tr key={idx}>
+              <td className="border border-foreground/20 px-3 py-2 font-medium text-foreground">{row.item}</td>
+              <td className="border border-foreground/20 px-3 py-2 text-right text-foreground/80">{row.cost}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Inline numeric pricing editor: total + optional discount (list price, percent|fixed). */
+function PricingEditor({ proposal }: { proposal: ProposalData }) {
+  const { schedule } = useAutosave(proposal.id);
+  const disc = discountInfo(proposal as BillingTerms);
+  const suffix = priceSuffix(proposal as BillingTerms);
+
+  const [total, setTotal] = useState(String(proposal.totalAmount));
+  const [hasDiscount, setHasDiscount] = useState(!!disc);
+  const [list, setList] = useState(String(proposal.listAmount ?? ""));
+  const [dType, setDType] = useState<"percent" | "fixed">(
+    proposal.discountType === "fixed" ? "fixed" : "percent",
+  );
+  const [dValue, setDValue] = useState(String(proposal.discountValue ?? ""));
+  const editingRef = useRef(false);
+
+  // Reconcile from the server (which recomputes) whenever we're not mid-edit.
+  useEffect(() => {
+    if (editingRef.current) return;
+    setTotal(String(proposal.totalAmount));
+    setHasDiscount(!!disc);
+    setList(String(proposal.listAmount ?? ""));
+    setDType(proposal.discountType === "fixed" ? "fixed" : "percent");
+    setDValue(String(proposal.discountValue ?? ""));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposal.totalAmount, proposal.listAmount, proposal.discountType, proposal.discountValue]);
+
+  function save(next: {
+    total?: string; hasDiscount?: boolean; list?: string; dType?: "percent" | "fixed"; dValue?: string;
+  }, immediate = false) {
+    const t = next.total ?? total;
+    const hd = next.hasDiscount ?? hasDiscount;
+    const l = next.list ?? list;
+    const dt = next.dType ?? dType;
+    const dv = next.dValue ?? dValue;
+    const totalNum = parseFloat(t);
+    if (!Number.isFinite(totalNum) || totalNum <= 0) return; // let the field settle first
+    const body: Record<string, unknown> = { totalAmount: totalNum };
+    if (hd && l && dv) {
+      body.listAmount = parseFloat(l);
+      body.discountType = dt;
+      body.discountValue = parseFloat(dv);
+    } else {
+      body.listAmount = null;
+      body.discountType = null;
+      body.discountValue = null;
+    }
+    schedule(body, immediate);
+  }
+
+  const numCls =
+    "w-28 rounded-[6px] border border-black/15 bg-white px-2 py-1 text-sm tabular-nums text-foreground outline-none transition-colors duration-150 ease-out focus:border-[var(--color-signal,#2563EB)]/60";
+
+  return (
+    <div className="my-4 space-y-3 rounded-[10px] border border-dashed border-[var(--color-signal,#2563EB)]/25 bg-[var(--color-signal,#2563EB)]/[0.03] p-3" data-r10n-proposal-pricing-editor>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-bold uppercase tracking-wide text-foreground/60">Total</span>
+        <div className="flex items-center gap-1">
+          <span className="text-sm text-foreground/50">$</span>
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            value={total}
+            onFocus={() => { editingRef.current = true; }}
+            onBlur={() => { editingRef.current = false; save({}, true); }}
+            onChange={(e) => { setTotal(e.target.value); save({ total: e.target.value }); }}
+            className={numCls}
+          />
+          {suffix && <span className="text-xs text-foreground/50">{suffix}</span>}
+        </div>
+      </div>
+
+      <label className="flex items-center gap-2 text-xs font-medium text-foreground/70">
+        <input
+          type="checkbox"
+          checked={hasDiscount}
+          onChange={(e) => { setHasDiscount(e.target.checked); save({ hasDiscount: e.target.checked }, true); }}
+          className="h-3.5 w-3.5 accent-[var(--color-signal,#2563EB)]"
+        />
+        Show a discount (struck-through list price)
+      </label>
+
+      {hasDiscount && (
+        <div className="flex flex-wrap items-center gap-3 pl-5">
+          <div className="flex items-center gap-1">
+            <span className="text-[11px] text-foreground/50">List $</span>
+            <input
+              type="number" min={0} step="0.01" value={list}
+              onFocus={() => { editingRef.current = true; }}
+              onBlur={() => { editingRef.current = false; save({}, true); }}
+              onChange={(e) => { setList(e.target.value); save({ list: e.target.value }); }}
+              className={numCls}
+            />
+          </div>
+          <div className="flex items-center gap-1">
+            <select
+              value={dType}
+              onChange={(e) => { const v = e.target.value as "percent" | "fixed"; setDType(v); save({ dType: v }, true); }}
+              className="rounded-[6px] border border-black/15 bg-white px-2 py-1 text-xs text-foreground outline-none focus:border-[var(--color-signal,#2563EB)]/60"
+            >
+              <option value="percent">% off</option>
+              <option value="fixed">$ off</option>
+            </select>
+            <input
+              type="number" min={0} step="0.01" value={dValue}
+              onFocus={() => { editingRef.current = true; }}
+              onBlur={() => { editingRef.current = false; save({}, true); }}
+              onChange={(e) => { setDValue(e.target.value); save({ dValue: e.target.value }); }}
+              className={numCls}
+            />
+          </div>
+        </div>
+      )}
+      <p className="text-[11px] text-foreground/45">
+        The server validates and recomputes the discount; a discount only shows when the list price is above the total.
+      </p>
+    </div>
+  );
+}
+
+/** Inline email editor for contactEmail (only value returned by the public payload). */
+function ContentEmailEditor({ value, proposalId }: { value: string | null; proposalId: string }) {
+  const [editing, setEditing] = useState(false);
+  const [email, setEmail] = useState(value ?? "");
+  const [invalid, setInvalid] = useState(false);
+  const { schedule, flush } = useAutosave(proposalId);
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  useEffect(() => { if (!editing) setEmail(value ?? ""); }, [value, editing]);
+
+  function commitIfValid(v: string) {
+    if (EMAIL_RE.test(v.trim())) { setInvalid(false); schedule({ contactEmail: v.trim() }); }
+    else setInvalid(!!v.trim());
+  }
+
+  if (editing) {
+    return (
+      <span className="inline-flex flex-col gap-0.5">
+        <input
+          type="email"
+          value={email}
+          autoFocus
+          onChange={(e) => { setEmail(e.target.value); commitIfValid(e.target.value); }}
+          onBlur={() => { flush(); setEditing(false); }}
+          placeholder="client@email.com"
+          className={cn(
+            "rounded-[5px] border-b bg-transparent px-1 py-0.5 text-sm text-foreground outline-none",
+            invalid ? "border-red-400" : "border-[var(--color-signal,#2563EB)]/60",
+          )}
+        />
+        {invalid && <span className="text-[10px] text-red-500">Enter a valid email</span>}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={() => setEditing(true)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setEditing(true); } }}
+      title="Click to edit"
+      className="group cursor-text rounded-[4px] border border-dashed border-transparent px-1 -mx-1 py-0.5 text-sm text-foreground/80 transition-colors duration-150 ease-out hover:border-[var(--color-signal,#2563EB)]/30 hover:bg-[var(--color-signal,#2563EB)]/[0.05]"
+    >
+      {email || "Add client email"}
+      <Pencil className="ml-1 inline-block h-3 w-3 align-middle text-[var(--color-signal,#2563EB)]/40 opacity-0 transition-opacity duration-150 ease-out group-hover:opacity-100" />
+    </span>
+  );
+}
+
+/** Inline date editor bound to a real proposal date field (draft only). */
+function ContentDateEditor({
+  value,
+  proposalId,
+  field,
+}: {
+  value: string | null | undefined;
+  proposalId: string;
+  field: "startDate" | "endDate";
+}) {
+  const [local, setLocal] = useState(value ? new Date(value).toISOString().slice(0, 10) : "");
+  const { schedule } = useAutosave(proposalId);
+  useEffect(() => { setLocal(value ? new Date(value).toISOString().slice(0, 10) : ""); }, [value]);
+  return (
+    <input
+      type="date"
+      value={local}
+      onChange={(e) => { setLocal(e.target.value); schedule({ [field]: e.target.value || null }, true); }}
+      className="cursor-pointer rounded-[5px] border border-dashed border-[var(--color-signal,#2563EB)]/30 bg-[var(--color-signal,#2563EB)]/[0.04] px-1.5 py-0.5 text-inherit outline-none transition-colors duration-150 ease-out hover:border-[var(--color-signal,#2563EB)]/50 focus:border-[var(--color-signal,#2563EB)]/70"
+    />
   );
 }
 
@@ -1108,6 +2154,14 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
       void: { icon: AlertTriangle, title: "Proposal voided", message: "This proposal is no longer active.", color: "muted" },
       failed: { icon: AlertTriangle, title: "Payment issue", message: "There was an issue with payment. Please contact us.", color: "red" },
       overdue: { icon: Clock, title: "Proposal overdue", message: "This proposal has passed its due date. Please contact us.", color: "amber" },
+      // CLIENT-FACING. A paying retainer client reopening their link previously fell through to
+      // the "Unavailable" fallback below, which reads like their agreement had been cancelled.
+      // These are the states a client can legitimately be in after they have paid.
+      active: { icon: Check, title: "Signed and active", message: "Your agreement is signed and your retainer is running. Thank you!", color: "green" },
+      completed: { icon: Check, title: "Term complete", message: "This term is complete and paid in full. Thank you!", color: "green" },
+      partial: { icon: Clock, title: "Payment in progress", message: "Thank you. We've received your first payment and the rest of your schedule is set up.", color: "green" },
+      past_due: { icon: AlertTriangle, title: "Payment issue", message: "A scheduled payment didn't go through. Please contact us so we can sort it out.", color: "amber" },
+      lost: { icon: AlertTriangle, title: "Proposal closed", message: "This proposal is no longer active.", color: "muted" },
     };
     const s = statusMap[data.status] ?? { icon: AlertTriangle, title: "Unavailable", message: "This proposal is not currently available.", color: "muted" as const };
     return <StatusScreen icon={s.icon} title={s.title} message={s.message} color={s.color} />;
@@ -1132,7 +2186,7 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
                 Proposal signed!
               </h1>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Pay your deposits to get started{proposalData.startDate ? ` on ${fmtDate(proposalData.startDate)}` : ""}.
+                Pay your deposits to get started{billingAnchor(proposalData as BillingTerms) ? ` on ${fmtDate(billingAnchor(proposalData as BillingTerms))}` : ""}.
               </p>
             </div>
 
@@ -1231,7 +2285,12 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
   const isManagement = proposal.type === "management";
   const isDraft = isPreview && proposal.status === "draft";
 
-  return (
+  // The per-proposal copy snapshot. The public route resolves it (snapshot → template →
+  // defaults) so it is present in practice; we still guard for null so an older draft, or a
+  // DB hiccup, falls back to the legacy hardcoded JSX byte-for-byte (rendered below).
+  const content = proposal.content ?? null;
+
+  const body = (
     <div className="min-h-screen bg-[#f5f5f0]">
       {/* Preview banner */}
       {isPreview && (
@@ -1275,9 +2334,23 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
               />
             </div>
 
-            {/* Document title */}
+            {/* Document title — from content when present, else the legacy hardcoded string */}
             <p className="text-sm font-bold text-foreground mb-1">
-              Service Agreement and Statement of Work
+              {isDraft && content ? (
+                <ContentTextEditor
+                  content={content}
+                  proposalId={proposal.id}
+                  getValue={(c) => c.docTitle}
+                  apply={(c, v) => ({ ...c, docTitle: v })}
+                  displayClassName="text-sm font-bold text-foreground"
+                  inputClassName="text-sm font-bold text-foreground"
+                  placeholder="Service Agreement and Statement of Work"
+                />
+              ) : content ? (
+                content.docTitle
+              ) : (
+                "Service Agreement and Statement of Work"
+              )}
             </p>
             {isDraft ? (
               <p className="text-sm text-muted-foreground mb-4">
@@ -1294,40 +2367,111 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
               <p className="text-sm text-muted-foreground mb-4">{proposal.title}</p>
             )}
 
+            {/* Draft-only recipient metadata. The client name flows into the intro's
+                {{client}} token; contactEmail is the send-to address. */}
+            {isDraft && (
+              <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded-[8px] border border-dashed border-[var(--color-signal,#2563EB)]/25 bg-[var(--color-signal,#2563EB)]/[0.03] px-3 py-2 text-sm print:hidden">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="text-xs font-bold uppercase tracking-wide text-foreground/50">Client</span>
+                  <InlineEditText
+                    value={proposal.contactName}
+                    proposalId={proposal.id}
+                    field="contactName"
+                    displayClassName="font-semibold text-foreground"
+                    inputClassName="font-semibold text-foreground"
+                    placeholder="Client name"
+                    onSave={(newName) => setSignerName(newName)}
+                  />
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="text-xs font-bold uppercase tracking-wide text-foreground/50">Send to</span>
+                  <ContentEmailEditor value={proposal.contactEmail} proposalId={proposal.id} />
+                </span>
+              </div>
+            )}
+
             <DocDivider />
 
-            {/* Opening paragraph */}
-            <p className="text-sm text-foreground/80 leading-relaxed mb-6">
-              This {isManagement ? "Agreement" : "agreement"} is made between Kracked Retention{" "}
-              {isManagement ? '("Service Provider")' : ""} and{" "}
-              {isDraft ? (
-                <InlineEditText
-                  value={proposal.contactName}
-                  proposalId={proposal.id}
-                  field="contactName"
-                  displayClassName="font-bold"
-                  inputClassName="font-bold"
-                  placeholder="Client name"
-                  onSave={(newName) => setSignerName(newName)}
-                />
+            {/* Opening paragraph (intro) — from content when present, else legacy JSX */}
+            {content ? (
+              isDraft ? (
+                <div className="mb-6">
+                  <ContentMarkdownEditor
+                    content={content}
+                    field="intro"
+                    proposalId={proposal.id}
+                    clientName={proposal.contactName}
+                    ariaLabel="Preamble"
+                    fillClientName
+                  />
+                </div>
               ) : (
-                <strong>{proposal.contactName}</strong>
-              )}{" "}
-              (&ldquo;Client&rdquo;) and becomes effective upon the
-              execution of this document or the commencement of services, whichever occurs first.
-            </p>
+                <DocMarkdown className="mb-6">{fillClient(content.intro, proposal.contactName)}</DocMarkdown>
+              )
+            ) : (
+              <p className="text-sm text-foreground/80 leading-relaxed mb-6">
+                This {isManagement ? "Agreement" : "agreement"} is made between Kracked Retention{" "}
+                {isManagement ? '("Service Provider")' : ""} and{" "}
+                {isDraft ? (
+                  <InlineEditText
+                    value={proposal.contactName}
+                    proposalId={proposal.id}
+                    field="contactName"
+                    displayClassName="font-bold"
+                    inputClassName="font-bold"
+                    placeholder="Client name"
+                    onSave={(newName) => setSignerName(newName)}
+                  />
+                ) : (
+                  <strong>{proposal.contactName}</strong>
+                )}{" "}
+                (&ldquo;Client&rdquo;) and becomes effective upon the
+                execution of this document or the commencement of services, whichever occurs first.
+              </p>
+            )}
 
-            {/* Project Scope */}
-            <p className="text-sm font-bold text-foreground mb-2">Project Scope</p>
-            <p className="text-sm text-foreground/80 mb-3">
-              Kracked Retention will fully manage and deliver the following
-              {isManagement ? " services for the Client's brand" : ""}:
-            </p>
+            {/* Project Scope framing — from content.scopeIntro when present, else legacy JSX */}
+            {content ? (
+              isDraft ? (
+                <div className="mb-1">
+                  <ContentMarkdownEditor
+                    content={content}
+                    field="scopeIntro"
+                    proposalId={proposal.id}
+                    clientName={proposal.contactName}
+                    ariaLabel="Scope framing"
+                  />
+                </div>
+              ) : (
+                <DocMarkdown className="mb-1">{content.scopeIntro}</DocMarkdown>
+              )
+            ) : (
+              <>
+                <p className="text-sm font-bold text-foreground mb-2">Project Scope</p>
+                <p className="text-sm text-foreground/80 mb-3">
+                  Kracked Retention will fully manage and deliver the following
+                  {isManagement ? " services for the Client's brand" : ""}:
+                </p>
+              </>
+            )}
 
+            {/* Deliverables: structured editor/display when items exist; else content default
+                scope (markdown) or the legacy serviceDescription/bullets fallback. */}
             {isDraft ? (
-              <InlineEditScope value={proposal.serviceDescription ?? ""} proposalId={proposal.id} />
+              // Legacy drafts with free-text scope and no structured deliverables keep the
+              // free-text editor so nothing is stranded; everything else gets the structured
+              // deliverables editor (the normal, content-backed path).
+              !proposal.deliverables?.items?.length && proposal.serviceDescription ? (
+                <InlineEditScope value={proposal.serviceDescription} proposalId={proposal.id} />
+              ) : (
+                <DeliverablesEditor deliverables={proposal.deliverables ?? null} proposalId={proposal.id} />
+              )
+            ) : proposal.deliverables && proposal.deliverables.items.length > 0 ? (
+              <DeliverablesDisplay deliverables={proposal.deliverables} />
             ) : proposal.serviceDescription ? (
               <ScopeDisplay text={proposal.serviceDescription} />
+            ) : content ? (
+              <DocMarkdown>{content.defaultScope}</DocMarkdown>
             ) : (
               <ul className="text-sm text-foreground/80 leading-relaxed list-disc pl-6 mb-2 space-y-1">
                 {isManagement ? (
@@ -1352,31 +2496,149 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
             <DocDivider />
 
             {/* Pricing */}
+            {isDraft && (
+              <div className="mb-2 space-y-2">
+                {content && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-[10px] border border-dashed border-[var(--color-signal,#2563EB)]/25 bg-[var(--color-signal,#2563EB)]/[0.03] p-3 text-sm text-foreground/80">
+                    <span className="text-xs font-bold uppercase tracking-wide text-foreground/60">Service label</span>
+                    <ContentTextEditor
+                      content={content}
+                      proposalId={proposal.id}
+                      getValue={(c) => c.serviceLabel}
+                      apply={(c, v) => ({ ...c, serviceLabel: v })}
+                      displayClassName="font-medium text-foreground"
+                      inputClassName="font-medium text-foreground"
+                      placeholder="Service label"
+                    />
+                  </div>
+                )}
+                <PricingEditor proposal={proposal} />
+                {/* Dates — invoice/start date and (project) end date live on the proposal. */}
+                <div className="flex flex-wrap items-center gap-4 rounded-[10px] border border-dashed border-[var(--color-signal,#2563EB)]/25 bg-[var(--color-signal,#2563EB)]/[0.03] p-3 text-sm text-foreground/80">
+                  <label className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wide text-foreground/60">Invoice / Start date</span>
+                    <ContentDateEditor value={proposal.startDate} proposalId={proposal.id} field="startDate" />
+                  </label>
+                  {!isManagement && (
+                    <label className="flex items-center gap-2">
+                      <span className="text-xs font-bold uppercase tracking-wide text-foreground/60">End date</span>
+                      <ContentDateEditor value={proposal.endDate} proposalId={proposal.id} field="endDate" />
+                    </label>
+                  )}
+                </div>
+              </div>
+            )}
             <PricingTable proposal={proposal} />
 
             <DocDivider />
 
-            {/* Agreement terms (legal sections — hardcoded per type to match PDF agreements) */}
-            {isManagement
-              ? <ManagementTerms isDraft={isDraft} proposalId={proposal.id} savedRates={proposal.additionalRates} />
-              : <ProjectTerms isDraft={isDraft} proposalId={proposal.id} savedRates={proposal.additionalRates} />
-            }
+            {/* Agreement terms. From content when present (additional-scope table + markdown
+                terms); else the legacy hardcoded per-type JSX (byte-for-byte unchanged). */}
+            {content ? (
+              <div className="text-sm text-foreground/80 leading-relaxed">
+                {isDraft ? (
+                  <>
+                    <ContentMarkdownEditor
+                      content={content}
+                      field="additionalScopeIntro"
+                      proposalId={proposal.id}
+                      clientName={proposal.contactName}
+                      ariaLabel="Additional scope intro"
+                    />
+                    <ContentRatesEditor content={content} proposalId={proposal.id} />
+                    <ContentMarkdownEditor
+                      content={content}
+                      field="terms"
+                      proposalId={proposal.id}
+                      clientName={proposal.contactName}
+                      ariaLabel="Legal terms"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <DocMarkdown>{content.additionalScopeIntro}</DocMarkdown>
+                    <ContentRatesDisplay rates={content.additionalRates} />
+                    <DocMarkdown>{content.terms}</DocMarkdown>
+                  </>
+                )}
+              </div>
+            ) : isManagement ? (
+              <ManagementTerms isDraft={isDraft} proposalId={proposal.id} savedRates={proposal.additionalRates} />
+            ) : (
+              <ProjectTerms isDraft={isDraft} proposalId={proposal.id} savedRates={proposal.additionalRates} />
+            )}
 
             <DocDivider />
 
-            {/* Acceptance section */}
-            <p className="text-sm font-bold text-foreground mb-3">Acceptance</p>
-            <AcceptanceText isManagement={isManagement} />
+            {/* Acceptance section — from content when present, else legacy JSX */}
+            {content ? (
+              isDraft ? (
+                <ContentMarkdownEditor
+                  content={content}
+                  field="acceptance"
+                  proposalId={proposal.id}
+                  clientName={proposal.contactName}
+                  ariaLabel="Acceptance"
+                />
+              ) : (
+                <DocMarkdown>{content.acceptance}</DocMarkdown>
+              )
+            ) : (
+              <>
+                <p className="text-sm font-bold text-foreground mb-3">Acceptance</p>
+                <AcceptanceText isManagement={isManagement} />
+              </>
+            )}
 
             {/* Signature block */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8 mt-6">
-              {/* Kracked Retention side */}
+              {/* Kracked Retention side — from content.signature when present, else legacy */}
               <div>
                 <p className="text-xs font-bold text-foreground mb-3">Kracked Retention</p>
                 <div className="space-y-2 text-sm text-foreground/80">
-                  <p><span className="font-semibold">Company:</span> KRACKED RETENTION</p>
-                  <p><span className="font-semibold">Title:</span> CEO</p>
-                  <p><span className="font-semibold">Full Name:</span> GAGE FLESHER</p>
+                  {content ? (
+                    <>
+                      <p>
+                        <span className="font-semibold">Company:</span>{" "}
+                        {isDraft ? (
+                          <ContentTextEditor
+                            content={content} proposalId={proposal.id}
+                            getValue={(c) => c.signature.company}
+                            apply={(c, v) => ({ ...c, signature: { ...c.signature, company: v } })}
+                            placeholder="Company"
+                          />
+                        ) : content.signature.company}
+                      </p>
+                      <p>
+                        <span className="font-semibold">Title:</span>{" "}
+                        {isDraft ? (
+                          <ContentTextEditor
+                            content={content} proposalId={proposal.id}
+                            getValue={(c) => c.signature.title}
+                            apply={(c, v) => ({ ...c, signature: { ...c.signature, title: v } })}
+                            placeholder="Title"
+                          />
+                        ) : content.signature.title}
+                      </p>
+                      <p>
+                        <span className="font-semibold">Full Name:</span>{" "}
+                        {isDraft ? (
+                          <ContentTextEditor
+                            content={content} proposalId={proposal.id}
+                            getValue={(c) => c.signature.name}
+                            apply={(c, v) => ({ ...c, signature: { ...c.signature, name: v } })}
+                            placeholder="Full name"
+                          />
+                        ) : content.signature.name}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p><span className="font-semibold">Company:</span> KRACKED RETENTION</p>
+                      <p><span className="font-semibold">Title:</span> CEO</p>
+                      <p><span className="font-semibold">Full Name:</span> GAGE FLESHER</p>
+                    </>
+                  )}
                 </div>
                 <div className="mt-4">
                   <p className="text-xs text-foreground/60 mb-1">Signature:</p>
@@ -1385,7 +2647,7 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
                       className="text-xl text-foreground/70 italic"
                       style={{ fontFamily: "Georgia, serif" }}
                     >
-                      Gage Flesher
+                      {content ? titleCaseName(content.signature.name) : "Gage Flesher"}
                     </span>
                   </div>
                   <p className="text-xs text-foreground/60">Date: {today}</p>
@@ -1463,6 +2725,7 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
                 {(() => {
                   const terms = proposal as BillingTerms;
                   const disc = discountInfo(terms);
+                  const mult = termMultiplier(terms);
                   return (
                     <div className="px-5 py-4 border-b border-border bg-muted/10">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
@@ -1477,7 +2740,7 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
                         className="text-2xl font-bold text-foreground"
                         style={{ fontFamily: "var(--font-heading)" }}
                       >
-                        {fmtAmount(proposal.totalAmount, proposal.currency)}
+                        {fmtAmount(fullTermTotal(terms), proposal.currency)}
                       </p>
                       {disc && (
                         <p className="text-xs font-semibold text-green-700 mt-0.5">
@@ -1544,6 +2807,31 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
                   </div>
                 )}
 
+                {/* 90-Day Management payment schedule (spread) */}
+                {(() => {
+                  const rows = managementSchedule(proposal as BillingTerms);
+                  if (!rows || rows.length === 0) return null;
+                  return (
+                    <div className="px-4 py-3 border-b border-border">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                        Payment Schedule
+                      </p>
+                      <div className="space-y-1.5">
+                        {rows.map((row, i) => (
+                          <div key={i} className="flex items-center justify-between gap-3">
+                            <span className="text-xs text-muted-foreground min-w-0 truncate">
+                              {row.label} · {row.when}
+                            </span>
+                            <span className="text-xs font-medium text-foreground tabular-nums shrink-0">
+                              {fmtAmount(row.amount, proposal.currency)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* Sign section */}
                 <div className="px-4 py-4">
                   <p className="text-xs font-semibold text-foreground mb-1">
@@ -1587,4 +2875,16 @@ export function ProposalSigningPage({ token, preview = false }: { token: string;
       </div>
     </div>
   );
+
+  // In draft mode, wrap the whole document in the shared autosave context so every inline
+  // editor reports through one calm indicator. Non-draft views render the body unchanged.
+  if (isDraft) {
+    return (
+      <SaveProvider>
+        {body}
+        <SaveIndicator />
+      </SaveProvider>
+    );
+  }
+  return body;
 }

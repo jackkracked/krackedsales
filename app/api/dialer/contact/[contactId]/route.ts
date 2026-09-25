@@ -4,6 +4,7 @@ import { getSessionUser } from "@/lib/auth/session";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { getCustomFieldMap } from "@/lib/ghl/custom-fields";
 import { resolveCustomFields, type FieldDef } from "@/lib/ghl/qualification";
+import { getContactFromMirror, resolveOpportunityFromMirror } from "@/lib/dialer/mirror-source";
 import { db } from "@/lib/db";
 import { calls, callInsights } from "@/lib/db/schema";
 
@@ -24,6 +25,8 @@ function rel(d: string | number | Date | null | undefined): string {
 interface GHLContact {
   firstName?: string; lastName?: string; name?: string; companyName?: string;
   email?: string; phone?: string; tags?: string[];
+  /** GoHighLevel's own timezone for this contact. Believed only when it suits the number's country. */
+  timezone?: string;
   customFields?: Array<{ id: string; value?: unknown; field_value?: unknown }>;
   dateAdded?: string;
 }
@@ -33,19 +36,24 @@ interface GHLContact {
  * cockpit shows, from real GHL + our DB. Every source is best-effort so a single
  * failure degrades to an empty section instead of breaking the whole load.
  */
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ contactId: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ contactId: string }> }) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { contactId } = await params;
 
+  // Default stays LIVE: flipping only contact+opportunity gives no speed win here (the load is
+  // bounded by the still-live message-history fetch) and the mirror's contact name can be
+  // lower-cased by GHL's list API. `?feed=mirror` opts into the mirror contact+opportunity.
+  const feed = req.nextUrl.searchParams.get("feed") === "mirror" ? "mirror" : "live";
+
   const [contactRes, fieldMapRes, notesRes, lastCallRes, messagesRes, oppRes] = await Promise.allSettled([
-    ghl.get<{ contact: GHLContact }>(`/contacts/${contactId}`),
+    feed === "live" ? ghl.get<{ contact: GHLContact }>(`/contacts/${contactId}`) : getContactFromMirror(contactId),
     getCustomFieldMap(),
     ghl.get<{ notes: Array<{ body?: string; userId?: string; dateAdded?: string; createdAt?: string }> }>(`/contacts/${contactId}/notes`),
     db().select().from(calls).leftJoin(callInsights, eq(callInsights.callId, calls.id))
       .where(eq(calls.contactId, contactId)).orderBy(desc(calls.startedAt)).limit(1),
     assembleMessages(contactId),
-    resolveOpportunity(contactId),
+    feed === "live" ? resolveOpportunity(contactId) : resolveOpportunityFromMirror(contactId),
   ]);
 
   const contact = contactRes.status === "fulfilled" ? (contactRes.value.contact ?? {}) : {};
@@ -88,6 +96,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ con
       name,
       company: contact.companyName?.trim() || "",
       phone: contact.phone ?? "",
+      // Lets the dialer tell what time it is where they are before it connects a call.
+      timezone: contact.timezone ?? null,
       email: contact.email ?? "",
       stage: tags[0] ?? "Lead",
       tags,

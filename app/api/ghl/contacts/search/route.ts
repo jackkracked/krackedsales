@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { or, ilike } from "drizzle-orm";
+import { or, and, ilike, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { localContacts } from "@/lib/db/schema";
 import { ghl, locationId } from "@/lib/ghl/client";
@@ -34,11 +34,20 @@ export async function GET(req: NextRequest) {
       })
       .from(localContacts)
       .where(
-        or(
-          ilike(localContacts.fullName, pattern),
-          ilike(localContacts.email, pattern),
-          ilike(localContacts.phone, pattern),
-          ilike(localContacts.companyName, pattern)
+        and(
+          // Contacts GoHighLevel no longer has must not be offerable in a picker — attaching
+          // a task, demo or call to a deleted contact writes to a record that cannot sync back.
+          isNull(localContacts.deletedInGhlAt),
+          or(
+            ilike(localContacts.fullName, pattern),
+            ilike(localContacts.email, pattern),
+            ilike(localContacts.phone, pattern),
+            ilike(localContacts.companyName, pattern),
+            // Searching by website is how Gage looks a brand up — he has the URL, not the
+            // person's name. Both harborheightscoffee.com and buruv.com were in the system
+            // the whole time and unfindable because nothing searched this column.
+            ilike(localContacts.website, pattern)
+          )
         )
       )
       .limit(10);

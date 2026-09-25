@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { getSessionUser } from "@/lib/auth/session";
 import { TelephonySettings } from "@/components/dialer/telephony-settings";
+import { CallingHoursSettings } from "@/components/dialer/calling-hours-settings";
 
 export const metadata = { title: "Telephony — Kracked Sales" };
 
@@ -45,11 +46,15 @@ export default async function TelephonySettingsPage() {
             Telephony
           </h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Connect Twilio to turn on the in-app dialer for your team.
+            Connect Twilio to turn on the in-app dialer, and set when the team is warned about
+            calling someone out of hours.
           </p>
         </header>
 
-        <TelephonySettings />
+        <div className="space-y-6">
+          <TelephonySettings />
+          <CallingHoursSettings />
+        </div>
       </div>
     </div>
   );

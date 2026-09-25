@@ -11,7 +11,7 @@
 
 export type DetailSource =
   | "charges_succeeded"        // Stripe succeeded charges (cash)
-  | "open_invoices_pastdue"    // Stripe open invoices past due (snapshot)
+  | "open_invoices"            // Stripe open (unpaid) invoices — one-off + subscription (snapshot)
   | "subs_active"              // Stripe active subscriptions (snapshot)
   | "subs_new"                 // Stripe subs created in range
   | "subs_canceled"            // Stripe subs canceled in range
@@ -56,8 +56,8 @@ export const METRIC_CATALOG: Record<string, MetricCatalogEntry> = {
   },
   outstandingPayments: {
     label: "Outstanding Payments",
-    explanation: "Open Stripe invoices that are past their due date — money currently owed to you. This is a live snapshot, not period-scoped.",
-    detail: { source: "open_invoices_pastdue" },
+    explanation: "All open (unpaid) Stripe invoices — every dollar currently owed to you across one-off billing and subscriptions, whether it's due soon or already overdue. A past-due or unpaid subscription appears here as its open invoice, so it's fully counted (no double-count). Live snapshot, not period-scoped.",
+    detail: { source: "open_invoices" },
   },
   outstanding: {
     label: "Outstanding Proposals",
@@ -100,8 +100,8 @@ export const METRIC_CATALOG: Record<string, MetricCatalogEntry> = {
   // ── Projects ─────────────────────────────────────────────────────────────────
   newProjectValue: {
     label: "New Project Value",
-    explanation: "Project-type proposals marked paid in our system. “In period” = paid date within the range.",
-    detail: { source: "proposals", params: { type: "project", dateField: "paidAt" } },
+    explanation: "Project-type proposals that have been won (a deposit or the full amount received), counted at the full project value, not the amount paid so far. “In period” = signed within the range.",
+    detail: { source: "proposals", params: { type: "project", dateField: "signedAt" } },
   },
 
   // ── Proposals ─────────────────────────────────────────────────────────────────
@@ -116,9 +116,9 @@ export const METRIC_CATALOG: Record<string, MetricCatalogEntry> = {
     detail: { source: "proposals", params: { status: "sent", dateField: "sentAt", scoped: "1" } },
   },
   mgmtProposalValueSent: {
-    label: "Mgmt Proposal Value Sent",
-    explanation: "Management-type proposals sent. “In period” = sent date within the range.",
-    detail: { source: "proposals", params: { status: "sent", type: "management", dateField: "sentAt" } },
+    label: "Mgmt Proposal Value Outstanding",
+    explanation: "Value of management proposals sent but not yet paid, as it stood on the last day of the selected period (today, for the current month). A proposal counts until it is paid or lost.",
+    detail: { source: "proposals", params: { type: "management" } },
   },
   mgmtProposalValueLost: {
     label: "Mgmt Proposal Value Lost",
@@ -126,9 +126,9 @@ export const METRIC_CATALOG: Record<string, MetricCatalogEntry> = {
     detail: { source: "proposals", params: { status: "lost", type: "management", dateField: "lostAt" } },
   },
   projProposalValueSent: {
-    label: "Project Proposal Value Sent",
-    explanation: "Project-type proposals sent. “In period” = sent date within the range.",
-    detail: { source: "proposals", params: { status: "sent", type: "project", dateField: "sentAt" } },
+    label: "Project Proposal Value Outstanding",
+    explanation: "Value of project proposals sent but not yet paid, as it stood on the last day of the selected period (today, for the current month). A proposal counts until it is paid or lost.",
+    detail: { source: "proposals", params: { type: "project" } },
   },
   projProposalValueLost: {
     label: "Project Proposal Value Lost",
@@ -210,7 +210,7 @@ export const METRIC_CATALOG: Record<string, MetricCatalogEntry> = {
   },
   totalExpenses: {
     label: "Total Expenses",
-    explanation: "Everything that left the business in the period: software + manual expenses + ad spend + Stripe processing fees + refunds.",
+    explanation: "Everything that left the business in the period: team salaries (pro-rated by the share of the month elapsed) + software + manual expenses + ad spend + Stripe processing fees.",
     detail: { source: "expenses_breakdown" },
   },
 

@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { proposals, proposalInstalments, softwareCosts, manualExpenses, projectStatuses } from "@/lib/db/schema";
+import { proposals, proposalInstalments, softwareCosts, manualExpenses, projectStatuses, teamSalaries } from "@/lib/db/schema";
 import { and, eq, gte, lt, inArray, isNotNull, sql } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
 import { stripe, hasStripe } from "@/lib/stripe/client";
 import type Stripe from "stripe";
 import { eachDayOfInterval, startOfDay, endOfDay, format } from "date-fns";
 import { listConfigs, getMetricValues } from "@/lib/kpi/engine";
+import { legacyChargesLocal, legacyPaidInvoicesLocal, legacySubsLocal, legacyRefundsLocal, legacyOpenInvoicesLocal } from "@/lib/kpi/engine/datasets/stripe-local";
+import { monthlyAmount } from "@/lib/stripe/cycle";
 
 export const dynamic = "force-dynamic";
 
@@ -47,15 +49,8 @@ async function paginateAll<T extends { id: string }>(
 }
 
 function toMonthlyCents(item: Stripe.SubscriptionItem): number {
-  const unitAmount = item.price.unit_amount ?? 0;
-  const interval = item.price.recurring?.interval ?? "month";
-  const count = item.price.recurring?.interval_count ?? 1;
-  switch (interval) {
-    case "year":  return unitAmount / (12 * count);
-    case "week":  return (unitAmount * 52) / (12 * count);
-    case "day":   return (unitAmount * 365) / (12 * count);
-    default:      return unitAmount / count;
-  }
+  // Shared helper: a 30-day cycle is the monthly retainer, not 1.0139 months. See lib/stripe/cycle.ts.
+  return monthlyAmount(item.price.unit_amount, item.price.recurring?.interval, item.price.recurring?.interval_count);
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
@@ -74,6 +69,9 @@ export async function GET(req: NextRequest) {
     }
 
     const { start, end } = range;
+    // Stripe read source: "local" computes from the local_stripe_* mirror (fast); default "live"
+    // hits Stripe's API. Rollout flag with parity proof — flip the default only once proven.
+    const stripeSource: "live" | "local" = searchParams.get("stripeSource") === "local" ? "local" : "live";
     const startUnix = Math.floor(start.getTime() / 1000);
     const endUnix = Math.floor(end.getTime() / 1000);
     const now = new Date();
@@ -97,24 +95,59 @@ export async function GET(req: NextRequest) {
     let retentionRate = 0;
     let activeSubsAtPeriodStart = 0;
     let outstandingPayments = 0;
-    let pastDueInvoiceCount = 0;
+    let outstandingInvoiceCount = 0;
 
-    if (hasStripe()) {
-      const s = stripe();
+    if (stripeSource === "local" || hasStripe()) {
+      let periodCharges: (Stripe.Charge & { balance_transaction: Stripe.BalanceTransaction | null })[];
+      let paidInvoices: Stripe.Invoice[];
+      let activeSubs: Stripe.Subscription[];
+      let cancelledSubs: Stripe.Subscription[];
+      let refundList: Stripe.Refund[];
+      let openInvoices: Stripe.Invoice[];
 
-      // Charges for cash collected
-      let periodCharges: (Stripe.Charge & { balance_transaction: Stripe.BalanceTransaction | null })[] = [];
-      try {
-        periodCharges = await paginateAll<Stripe.Charge & { balance_transaction: Stripe.BalanceTransaction | null }>((after) =>
-          s.charges.list({
-            created: { gte: startUnix, lt: endUnix },
-            expand: ["data.balance_transaction"],
-            limit: 100,
-            ...(after ? { starting_after: after } : {}),
-          }) as Promise<{ data: (Stripe.Charge & { balance_transaction: Stripe.BalanceTransaction | null })[]; has_more: boolean }>
-        );
-      } catch (e) {
-        console.error("[kpis/metrics] Charges fetch failed:", e);
+      if (stripeSource === "local") {
+        // Read the same universes from the local Stripe mirror (no live Stripe calls). The
+        // reductions below are byte-identical — only the source changes.
+        [periodCharges, paidInvoices, activeSubs, cancelledSubs, refundList, openInvoices] = await Promise.all([
+          legacyChargesLocal(start, end),
+          legacyPaidInvoicesLocal(start, end),
+          legacySubsLocal("active"),
+          legacySubsLocal("canceled"),
+          legacyRefundsLocal(start, end),
+          legacyOpenInvoicesLocal(),
+        ]);
+      } else {
+        const s = stripe();
+        // Fetch every Stripe universe we need CONCURRENTLY. Each is best-effort: a failure
+        // yields [] so one bad call can't 500 the page.
+        const [pc, pi, subsPair, rl, oi] = await Promise.all([
+          paginateAll<Stripe.Charge & { balance_transaction: Stripe.BalanceTransaction | null }>((after) =>
+            s.charges.list({
+              created: { gte: startUnix, lt: endUnix },
+              expand: ["data.balance_transaction"],
+              limit: 100,
+              ...(after ? { starting_after: after } : {}),
+            }) as Promise<{ data: (Stripe.Charge & { balance_transaction: Stripe.BalanceTransaction | null })[]; has_more: boolean }>
+          ).catch((e) => { console.error("[kpis/metrics] Charges fetch failed:", e); return [] as (Stripe.Charge & { balance_transaction: Stripe.BalanceTransaction | null })[]; }),
+          paginateAll<Stripe.Invoice>((after) =>
+            s.invoices.list({ status: "paid", created: { gte: startUnix, lt: endUnix }, limit: 100, ...(after ? { starting_after: after } : {}) })
+          ).catch((e) => { console.error("[kpis/metrics] Paid invoices fetch failed:", e); return [] as Stripe.Invoice[]; }),
+          (Promise.all([
+            paginateAll<Stripe.Subscription>((after) =>
+              s.subscriptions.list({ status: "active", limit: 100, ...(after ? { starting_after: after } : {}) })
+            ),
+            paginateAll<Stripe.Subscription>((after) =>
+              s.subscriptions.list({ status: "canceled", limit: 100, ...(after ? { starting_after: after } : {}) })
+            ),
+          ]) as Promise<[Stripe.Subscription[], Stripe.Subscription[]]>).catch((e) => { console.error("[kpis/metrics] Subscription fetch failed:", e); return [[], []] as [Stripe.Subscription[], Stripe.Subscription[]]; }),
+          paginateAll<Stripe.Refund>((after) =>
+            s.refunds.list({ created: { gte: startUnix, lt: endUnix }, limit: 100, ...(after ? { starting_after: after } : {}) })
+          ).catch((e) => { console.error("[kpis/metrics] Refunds fetch failed:", e); return [] as Stripe.Refund[]; }),
+          paginateAll<Stripe.Invoice>((after) =>
+            s.invoices.list({ status: "open", limit: 100, ...(after ? { starting_after: after } : {}) })
+          ).catch((e) => { console.error("[kpis/metrics] Open invoices fetch failed:", e); return [] as Stripe.Invoice[]; }),
+        ]);
+        periodCharges = pc; paidInvoices = pi; [activeSubs, cancelledSubs] = subsPair; refundList = rl; openInvoices = oi;
       }
 
       const succeededCharges = periodCharges.filter((c) => c.status === "succeeded");
@@ -134,15 +167,6 @@ export async function GET(req: NextRequest) {
       });
 
       // Paid invoices for project client detection
-      const paidInvoices = await paginateAll<Stripe.Invoice>((after) =>
-        s.invoices.list({
-          status: "paid",
-          created: { gte: startUnix, lt: endUnix },
-          limit: 100,
-          ...(after ? { starting_after: after } : {}),
-        })
-      );
-
       const isSubInvoice = (inv: Stripe.Invoice) => inv.parent?.type === "subscription_details";
 
       const projectCustomerIds = new Set(
@@ -153,22 +177,6 @@ export async function GET(req: NextRequest) {
       newProjectCount = projectCustomerIds.size;
       newProjectValue = paidInvoices.filter((inv) => !isSubInvoice(inv))
         .reduce((sum, inv) => sum + (inv.amount_paid ?? 0), 0) / 100;
-
-      // Subscriptions
-      let activeSubs: Stripe.Subscription[] = [];
-      let cancelledSubs: Stripe.Subscription[] = [];
-      try {
-        [activeSubs, cancelledSubs] = await Promise.all([
-          paginateAll<Stripe.Subscription>((after) =>
-            s.subscriptions.list({ status: "active", limit: 100, ...(after ? { starting_after: after } : {}) })
-          ),
-          paginateAll<Stripe.Subscription>((after) =>
-            s.subscriptions.list({ status: "canceled", limit: 100, ...(after ? { starting_after: after } : {}) })
-          ),
-        ]);
-      } catch (e) {
-        console.error("[kpis/metrics] Subscription fetch failed:", e);
-      }
 
       // Management client count (current active)
       managementClients = new Set(
@@ -182,8 +190,10 @@ export async function GET(req: NextRequest) {
       }, 0) / 100;
       mrr = managementMrr; // Total MRR includes management + software (added below)
 
-      // New management clients in period
-      const newSubs = [...activeSubs, ...cancelledSubs].filter(
+      // New management clients in period. A subscription that started AND was
+      // cancelled is not new recurring revenue, so canceled subs are excluded (the
+      // authoritative `newManagementMrr` engine config applies the same status filter).
+      const newSubs = activeSubs.filter(
         (sub) => sub.created >= startUnix && sub.created < endUnix
       );
       const newMgmtIds = new Set(newSubs.map((sub) => typeof sub.customer === "string" ? sub.customer : sub.customer.id));
@@ -220,61 +230,64 @@ export async function GET(req: NextRequest) {
         .filter((c) => c.status === "succeeded" && c.balance_transaction)
         .reduce((sum, c) => sum + (c.balance_transaction?.fee ?? 0), 0) / 100;
 
-      // Refunds
-      try {
-        const refundList = await paginateAll<Stripe.Refund>((after) =>
-          s.refunds.list({ created: { gte: startUnix, lt: endUnix }, limit: 100, ...(after ? { starting_after: after } : {}) })
-        );
-        refundsTotal = refundList.reduce((sum, r) => sum + r.amount, 0) / 100;
-      } catch (e) {
-        console.error("[kpis/metrics] Refunds fetch failed:", e);
-      }
+      // Refunds (already fetched concurrently above)
+      refundsTotal = refundList.reduce((sum, r) => sum + r.amount, 0) / 100;
 
-      // Outstanding payments — open invoices that are past their due date
-      // (Stripe's "Past due" filter = status `open` with a due_date in the past).
-      // This is a live snapshot of money owed, not period-scoped.
-      try {
-        const openInvoices = await paginateAll<Stripe.Invoice>((after) =>
-          s.invoices.list({ status: "open", limit: 100, ...(after ? { starting_after: after } : {}) })
-        );
-        const nowUnix = Math.floor(now.getTime() / 1000);
-        const pastDue = openInvoices.filter((inv) => inv.due_date != null && inv.due_date < nowUnix);
-        pastDueInvoiceCount = pastDue.length;
-        outstandingPayments = pastDue.reduce((sum, inv) => sum + (inv.amount_remaining ?? 0), 0) / 100;
-      } catch (e) {
-        console.error("[kpis/metrics] Open invoices fetch failed:", e);
-      }
+      // Outstanding payments — ALL open (finalized-unpaid) invoices: money owed across one-off
+      // billing AND subscriptions (a past-due/unpaid subscription is itself an open invoice), whether
+      // due soon or already overdue. Live snapshot, not period-scoped. (Fetched concurrently above.)
+      outstandingInvoiceCount = openInvoices.length;
+      outstandingPayments = openInvoices.reduce((sum, inv) => sum + (inv.amount_remaining ?? 0), 0) / 100;
     }
 
     // ─── Proposal metrics (shared across sections) ────────────────────────────
     // Fetch with dates so we can build daily series
     const [
       outstandingRows,
-      mgmtSentRows,
       mgmtLostRows,
-      projSentRows,
       projLostRows,
       projPaidRows,
+      openProposalRows,
     ] = await Promise.all([
       db().select({ totalAmount: proposals.totalAmount }).from(proposals)
         .where(inArray(proposals.status, ["sent", "signed", "partial"])),
-      db().select({ totalAmount: proposals.totalAmount, sentAt: proposals.sentAt }).from(proposals)
-        .where(and(eq(proposals.type, "management"), isNotNull(proposals.sentAt), gte(proposals.sentAt, start), lt(proposals.sentAt, end))),
       db().select({ totalAmount: proposals.totalAmount, lostAt: proposals.lostAt }).from(proposals)
         .where(and(eq(proposals.type, "management"), isNotNull(proposals.lostAt), gte(proposals.lostAt, start), lt(proposals.lostAt, end))),
-      db().select({ totalAmount: proposals.totalAmount, sentAt: proposals.sentAt }).from(proposals)
-        .where(and(eq(proposals.type, "project"), isNotNull(proposals.sentAt), gte(proposals.sentAt, start), lt(proposals.sentAt, end))),
       db().select({ totalAmount: proposals.totalAmount, lostAt: proposals.lostAt }).from(proposals)
         .where(and(eq(proposals.type, "project"), isNotNull(proposals.lostAt), gte(proposals.lostAt, start), lt(proposals.lostAt, end))),
-      db().select({ totalAmount: proposals.totalAmount, paidAt: proposals.paidAt }).from(proposals)
-        .where(and(eq(proposals.type, "project"), isNotNull(proposals.paidAt), gte(proposals.paidAt, start), lt(proposals.paidAt, end))),
+      // Won projects (deposit OR full payment received), keyed on signed date, counted at
+      // full value — matches the newProjectValue config (partials were previously missed).
+      db().select({ totalAmount: proposals.totalAmount, signedAt: proposals.signedAt }).from(proposals)
+        .where(and(eq(proposals.type, "project"), inArray(proposals.status, ["paid", "partial"]), isNotNull(proposals.signedAt), gte(proposals.signedAt, start), lt(proposals.signedAt, end))),
+      // Every SENT proposal (draft has no sentAt), any type — the universe for the
+      // as-of "Proposal Value Outstanding" balance, reconstructed in JS below.
+      db().select({ type: proposals.type, totalAmount: proposals.totalAmount, sentAt: proposals.sentAt, paidAt: proposals.paidAt, lostAt: proposals.lostAt, status: proposals.status }).from(proposals)
+        .where(isNotNull(proposals.sentAt)),
     ]);
 
     const outstanding = outstandingRows.reduce((sum, r) => sum + r.totalAmount, 0);
-    const mgmtProposalValueSent = mgmtSentRows.reduce((sum, r) => sum + r.totalAmount, 0);
     const mgmtProposalValueLost = mgmtLostRows.reduce((sum, r) => sum + r.totalAmount, 0);
-    const projProposalValueSent = projSentRows.reduce((sum, r) => sum + r.totalAmount, 0);
     const projProposalValueLost = projLostRows.reduce((sum, r) => sum + r.totalAmount, 0);
+
+    // ─── Proposal Value Outstanding — a BALANCE as of the period end, not a flow ──
+    // Value of proposals SENT but not yet paid/lost, photographed on the last day of
+    // the window (today, for the current month), so it's comparable month-to-month.
+    // Reconstructed from timestamps. Void excluded (no reliable void timestamp; all
+    // current voids are legacy test deals). Partials count at full value (not yet paid).
+    const asOfDate = new Date(Math.min(end.getTime(), now.getTime()));
+    const liveProposals = openProposalRows.filter((r) => r.status !== "void");
+    const outstandingAsOf = (type: "management" | "project", d: Date): number => {
+      const dm = d.getTime();
+      return liveProposals.reduce((sum, r) => {
+        if (r.type !== type || !r.sentAt) return sum;
+        if (new Date(r.sentAt).getTime() > dm) return sum;               // not sent yet, as of d
+        if (r.paidAt && new Date(r.paidAt).getTime() <= dm) return sum;  // already paid by d
+        if (r.lostAt && new Date(r.lostAt).getTime() <= dm) return sum;  // already lost by d
+        return sum + r.totalAmount;
+      }, 0);
+    };
+    const mgmtProposalValueSent = outstandingAsOf("management", asOfDate);
+    const projProposalValueSent = outstandingAsOf("project", asOfDate);
 
     // New Project Value/Count = project-type proposals marked PAID in our system
     // (overrides the earlier Stripe one-off-invoice definition, per product spec).
@@ -283,7 +296,7 @@ export async function GET(req: NextRequest) {
 
     // Build daily series for proposal metrics
     const sparkDays = eachDayOfInterval({ start, end: new Date(Math.min(end.getTime(), Date.now())) }).slice(0, 31);
-    function buildDailySeries(rows: { totalAmount: number; sentAt?: Date | null; lostAt?: Date | null; paidAt?: Date | null }[], dateField: "sentAt" | "lostAt" | "paidAt") {
+    function buildDailySeries(rows: { totalAmount: number; sentAt?: Date | null; lostAt?: Date | null; paidAt?: Date | null; signedAt?: Date | null }[], dateField: "sentAt" | "lostAt" | "paidAt" | "signedAt") {
       return sparkDays.map((day) => {
         const dayS = startOfDay(day).getTime();
         const dayE = endOfDay(day).getTime();
@@ -297,9 +310,15 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const mgmtSentSeries = buildDailySeries(mgmtSentRows, "sentAt");
-    const projSentSeries = buildDailySeries(projSentRows, "sentAt");
-    const projPaidSeries = buildDailySeries(projPaidRows, "paidAt");
+    // Outstanding is a balance: each point is the balance AS OF the end of that day (capped at now).
+    const outstandingSeries = (type: "management" | "project") =>
+      sparkDays.map((day) => ({
+        date: format(day, "MMM d"),
+        value: outstandingAsOf(type, new Date(Math.min(endOfDay(day).getTime(), asOfDate.getTime()))),
+      }));
+    const mgmtSentSeries = outstandingSeries("management");
+    const projSentSeries = outstandingSeries("project");
+    const projPaidSeries = buildDailySeries(projPaidRows, "signedAt");
 
     // ─── Expenses (software costs + manual expenses) ──────────────────────────
     const [softwareCostRows, manualExpenseRows] = await Promise.all([
@@ -311,6 +330,16 @@ export async function GET(req: NextRequest) {
 
     const softwareCostTotal = softwareCostRows.reduce((sum, r) => sum + r.monthlyCost, 0);
     const manualExpenseTotal = manualExpenseRows.reduce((sum, r) => sum + r.amount, 0);
+
+    // ─── Team salaries — monthly total pro-rated by % of the month elapsed in this window ──
+    const teamSalaryRows = await db().select({ monthlyAmount: teamSalaries.monthlyAmount }).from(teamSalaries).where(eq(teamSalaries.active, true));
+    const teamSalaryMonthly = teamSalaryRows.reduce((sum, r) => sum + r.monthlyAmount, 0);
+    const dayMs = 86400000;
+    const daysInStartMonth = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0)).getUTCDate();
+    const endOfTodayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) + dayMs;
+    const windowEnd = Math.min(end.getTime(), endOfTodayUtc); // never count future days
+    const elapsedDays = Math.max(0, Math.round((windowEnd - start.getTime()) / dayMs));
+    const teamCostTotal = teamSalaryMonthly * (elapsedDays / daysInStartMonth);
 
     // ─── Ad spend (total from Meta + TikTok) ─────────────────────────────────
     // Computed before totalExpenses because ad spend is an expense in that total.
@@ -339,11 +368,13 @@ export async function GET(req: NextRequest) {
     const totalAdSpend = metaAdSpend + tiktokAdSpend;
 
     // Ad spend is part of total expenses (and therefore reduces net P/L).
-    const totalExpenses = softwareCostTotal + manualExpenseTotal + processingFees + refundsTotal + totalAdSpend;
+    // Mirrors the configured `totalExpenses` combine (software + manual + ad spend +
+    // Stripe fees + team). Refunds are tracked separately and intentionally excluded.
+    const totalExpenses = softwareCostTotal + manualExpenseTotal + processingFees + totalAdSpend + teamCostTotal;
     const netPL = cashCollected - totalExpenses;
 
-    // Total MRR = management MRR + software costs
-    mrr = managementMrr + softwareCostTotal;
+    // Total MRR = active Stripe subscriptions only (software is a COST, not recurring revenue).
+    mrr = managementMrr;
 
     // ─── Active Projects ──────────────────────────────────────────────────────
     // A project is ACTIVE the moment its proposal is paid, and stays active until
@@ -406,10 +437,12 @@ export async function GET(req: NextRequest) {
         failedPayments,
         softwareCosts: softwareCostTotal,
         manualExpenses: manualExpenseTotal,
+        teamCosts: teamCostTotal,
+        teamSalaryMonthly,
         newManagementCount,
         newProjectCount,
         clientChurnCount,
-        pastDueInvoiceCount,
+        outstandingInvoiceCount,
       },
     };
 
@@ -423,12 +456,29 @@ export async function GET(req: NextRequest) {
         const engineVals = await getMetricValues(
           enabled.map((c) => c.metricKey),
           { start, end },
-          { isAdmin: true, userId: user.id },
+          { isAdmin: true, userId: user.id, stripeSource },
         );
         const overrides: Record<string, number> = {};
         for (const [k, r] of Object.entries(engineVals)) {
           if (r && !r.unconfigured) overrides[k] = r.value;
         }
+        // Churned Management MRR is a LAGGING metric: it shows the calendar month immediately BEFORE
+        // the one you're viewing (viewing July → June's churn; viewing April → March's), so you can
+        // analyse churn month-to-month and never see an incomplete in-progress month. (New MRR stays live.)
+        try {
+          const prevStart = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() - 1, 1));
+          const prevEnd = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+          const churnPrev = await getMetricValues(["churnedManagementMrr"], { start: prevStart, end: prevEnd }, { isAdmin: true, userId: user.id, stripeSource });
+          const cv = churnPrev.churnedManagementMrr;
+          if (cv && !cv.unconfigured) overrides.churnedManagementMrr = cv.value;
+        } catch (e) {
+          console.error("[kpis/metrics] churn previous-month override failed", e);
+        }
+        // "Proposal Value Outstanding" is an as-of-period-end BALANCE (see the as-of block above),
+        // which the generic engine (a period-range flow sum) can't express. Force our reconstructed
+        // balance to win over the engine's current-snapshot for these two keys.
+        overrides.mgmtProposalValueSent = mgmtProposalValueSent;
+        overrides.projProposalValueSent = projProposalValueSent;
         for (const section of [body.business, body.management, body.project, body.sales] as Record<string, unknown>[]) {
           for (const key of Object.keys(section)) {
             if (key in overrides) section[key] = overrides[key];

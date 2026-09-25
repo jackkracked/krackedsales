@@ -32,7 +32,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const effectiveEmail = recipientEmail || proposal.contactEmail;
 
     let stripeCustomerId = proposal.stripeCustomerId ?? null;
-    let stripeInvoiceId = proposal.stripeInvoiceId ?? null;
+    const stripeInvoiceId = proposal.stripeInvoiceId ?? null;
 
     if (hasStripe() && effectiveEmail) {
       // Create or retrieve Stripe customer
@@ -48,7 +48,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         } else {
           const customer = await stripe().customers.create({
             name: proposal.contactName,
-            email: effectiveEmail,
+            // Stripe receipts/invoices go to the separate billing email when one is set.
+            email: proposal.billingEmail || effectiveEmail,
             metadata: { ghl_contact_id: proposal.ghlContactId },
           });
           stripeCustomerId = customer.id;
@@ -76,6 +77,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       // at SIGN time. See app/api/proposals/[id]/sign/route.ts.
     }
 
+    // NOTE: the payment schedule is deliberately NOT frozen here. The 90-day clock starts when
+    // the client PAYS the first payment, not when the proposal is sent or signed, and Stripe
+    // anchors the subscription to that same moment. Freezing at send would lock in dates
+    // computed from `startDate`, which is only ever an estimate: a proposal sent on the 3rd and
+    // paid on the 7th would be four days out for the whole term. The freeze happens on first
+    // payment instead, in ninety-day-fulfillment.ts, once the real anchor is known.
     await db()
       .update(proposals)
       .set({
@@ -102,9 +109,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // Prefer the editable "proposal_sent" template; fall back to the built-in email.
     let emailWarning: string | null = null;
     try {
+      const ccList = (proposal.ccEmails as string[] | null) ?? [];
+      const cc = ccList.filter((e) => e && e !== effectiveEmail);
       const templated = effectiveEmail ? await renderTransactional("proposal_sent", { ...proposal, contactEmail: effectiveEmail }) : null;
       if (templated && effectiveEmail) {
-        await sendRenderedEmail(effectiveEmail, templated.subject, templated.html);
+        await sendRenderedEmail(effectiveEmail, templated.subject, templated.html, cc.length ? cc : undefined);
       } else {
         await sendProposalLinkEmail({
           contactName: proposal.contactName,
@@ -113,6 +122,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           totalAmount: proposal.totalAmount,
           currency: proposal.currency,
           serviceDescription: proposal.serviceDescription,
+          ccEmails: ccList,
           token: proposal.token,
           type: proposal.type,
         });

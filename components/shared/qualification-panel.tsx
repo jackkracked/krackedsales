@@ -164,12 +164,34 @@ export function QualificationPreview({
   contactId,
   limit = 4,
   onViewAll,
+  items: overrideItems,
+  title,
 }: {
   contactId: string | null | undefined;
   limit?: number;
   onViewAll?: () => void;
+  /**
+   * Pre-resolved Q&A that REPLACES the GHL-derived list.
+   *
+   * The Leads Centre passes the exact questions from the Meta form the lead actually
+   * submitted. GHL's own field names are paraphrases and two are pure operator shorthand —
+   * this section was rendering "OPEN TEXT FIELD" and "REVENUE RANGE" as if they were
+   * questions, and captioning one answer with "What's your current email situation?" when
+   * the form asked "Who runs your email right now?". Different questions.
+   *
+   * Omitted everywhere else (Inbox, contact modal), which keeps fetching from GHL as before.
+   */
+  items?: { label: string; value: string }[];
+  /** Defaults to "Qualification". */
+  title?: string;
 }) {
-  const { items, isLoading } = useQualification(contactId);
+  const fetched = useQualification(contactId);
+  // Hooks must run unconditionally, so the fetch still happens; its result is simply unused
+  // when the caller supplies resolved items.
+  const items = overrideItems
+    ? overrideItems.map((i) => ({ ...i, isUrl: false }) as QualItem)
+    : fetched.items;
+  const isLoading = overrideItems ? false : fetched.isLoading;
 
   if (isLoading) {
     return (
@@ -192,7 +214,7 @@ export function QualificationPreview({
   return (
     <section>
       <div className="flex items-center justify-between mb-2.5">
-        <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em]">Qualification</p>
+        <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em]">{title ?? "Qualification"}</p>
         {(more > 0 || onViewAll) && onViewAll && (
           <button
             onClick={onViewAll}

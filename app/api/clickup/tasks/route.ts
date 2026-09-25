@@ -4,7 +4,7 @@ import { clickup, demoListId } from "@/lib/clickup/client";
 import { mapStageToBucket } from "@/lib/utils/demo-stage";
 import { fromClickUpTimestamp } from "@/lib/utils/date";
 import { db } from "@/lib/db";
-import { demoSentDates, demoCurrentStageTimes } from "@/lib/db/schema";
+import { demoSentDates, demoCurrentStageTimes, demoGhlLinks } from "@/lib/db/schema";
 import { processTimeInStatusBatch } from "@/lib/clickup/time-in-status";
 import type { ClickUpTask, ClickUpTasksResponse } from "@/lib/clickup/types";
 
@@ -28,6 +28,12 @@ export interface EnrichedTask {
   url: string;
   miroUrl: string | null;
   brandHubUrl: string | null;
+  /**
+   * The GHL contact this demo belongs to, resolved through `demo_ghl_links`. A ClickUp task
+   * carries no CRM identity of its own, so without this the demo tracker cannot offer the
+   * Demo Link field. Null when the demo was never linked to a contact.
+   */
+  ghlContactId: string | null;
 }
 
 // ─── Enrich a single ClickUp task with DB overrides ──────────────────────────
@@ -35,7 +41,8 @@ export interface EnrichedTask {
 function enrichTask(
   task: ClickUpTask,
   sentAt: Date | null,
-  minutesInStage: number | null
+  minutesInStage: number | null,
+  ghlContactId: string | null
 ): EnrichedTask {
   const created = fromClickUpTimestamp(task.date_created);
 
@@ -89,6 +96,7 @@ function enrichTask(
     url: task.url,
     miroUrl,
     brandHubUrl,
+    ghlContactId,
   };
 }
 
@@ -133,7 +141,7 @@ export async function GET() {
 
     // ── 2. Load DB overrides in parallel ──────────────────────────────────
     const database = db();
-    const [sentRows, stageRows] = await Promise.all([
+    const [sentRows, stageRows, linkRows] = await Promise.all([
       database
         .select()
         .from(demoSentDates)
@@ -142,19 +150,25 @@ export async function GET() {
         .select()
         .from(demoCurrentStageTimes)
         .where(inArray(demoCurrentStageTimes.clickupTaskId, taskIds)),
+      database
+        .select({ clickupTaskId: demoGhlLinks.clickupTaskId, ghlContactId: demoGhlLinks.ghlContactId })
+        .from(demoGhlLinks)
+        .where(inArray(demoGhlLinks.clickupTaskId, taskIds)),
     ]);
 
     const sentMap = new Map(sentRows.map((r) => [r.clickupTaskId, r.sentAt]));
     const stageMap = new Map(
       stageRows.map((r) => [r.clickupTaskId, r.minutesInStage])
     );
+    const linkMap = new Map(linkRows.map((r) => [r.clickupTaskId, r.ghlContactId]));
 
     // ── 3. Enrich tasks ────────────────────────────────────────────────────
     const enriched = parentTasks.map((t) =>
       enrichTask(
         t,
         sentMap.get(t.id) ?? null,
-        stageMap.has(t.id) ? stageMap.get(t.id)! : null
+        stageMap.has(t.id) ? stageMap.get(t.id)! : null,
+        linkMap.get(t.id) ?? null
       )
     );
 

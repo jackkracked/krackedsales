@@ -9,7 +9,8 @@ import {
   StyleSheet,
 } from "@react-pdf/renderer";
 import { format } from "date-fns";
-import { priceSuffix, discountInfo, clientSentence, type BillingTerms } from "@/lib/proposals/billing";
+import { priceSuffix, discountInfo, discountSentence, clientSentence, fullTermTotal, termMultiplier, managementSchedule, billingAnchor, fmtDay, type BillingTerms } from "@/lib/proposals/billing";
+import type { Deliverables, DeliverableGroup } from "@/lib/proposals/content";
 
 const LOGO_PATH = path.join(process.cwd(), "public", "kracked-logo.png");
 
@@ -39,13 +40,42 @@ export interface ProposalForPdf {
   listAmount?: number | null;
   discountType?: string | null;
   discountValue?: number | null;
+  // "recurring" | "first_payment" | "total" — decides whether the discount repeats. Without it
+  // a once-off discount reads as recurring and the document prints the wrong money.
+  discountScope?: string | null;
   startDate: Date | string | null;
+  // 90-Day Management billing display fields.
+  managementOption?: string | null;
+  autoRebillMode?: string | null;
+  firstPaymentSplit?: Array<{ amount: number; offsetDays?: number }> | null;
+  contractStartAt?: Date | string | null;
+  // Frozen schedule for an already-sent proposal; rendered verbatim when present.
+  scheduleSnapshot?: Array<{ label: string; when: string; amount: number }> | null;
   endDate: Date | string | null;
   signedAt?: Date | string | null;
   instalments: InstalmentForPdf[];
   agreementTerms: string;
   signatureData?: string | null;
+  // Structured, line-by-line deliverables (package/builder). When present + populated they
+  // replace the legacy serviceDescription block in the scope section. Legacy proposals leave
+  // this null and render exactly as before.
+  deliverables?: Deliverables | null;
+  // Optional per-proposal acceptance copy (markdown). Falls back to the hardcoded block below.
+  acceptance?: string | null;
+  // Per-proposal scope prose (markdown) — the edited "Project Scope" section shown on the web.
+  // When present it IS the scope (heading + intro + bullets); the PDF renders it verbatim so the
+  // download matches the on-screen proposal. Falls back to the hardcoded scope when absent.
+  scopeIntro?: string | null;
+  // Pricing-table service label (from content). Falls back to the derived label.
+  serviceLabel?: string | null;
 }
+
+// Group ordering + labels, mirrored from the web signing page (DELIVERABLE_GROUPS).
+const DELIVERABLE_GROUPS: { key: DeliverableGroup; label: string }[] = [
+  { key: "included", label: "Included" },
+  { key: "exclusive", label: "Exclusive to your plan" },
+  { key: "custom", label: "Additional" },
+];
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -107,6 +137,33 @@ const s = StyleSheet.create({
     borderColor: "#ddd",
   },
   tableCellBold: { fontFamily: "Helvetica-Bold" },
+  // Structured deliverables
+  dlvCountRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 },
+  dlvCountStat: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    borderWidth: 0.5,
+    borderColor: "#dcdcdc",
+    backgroundColor: "#fafafa",
+    borderRadius: 3,
+    paddingVertical: 3,
+    paddingHorizontal: 7,
+  },
+  dlvCountValue: { fontFamily: "Helvetica-Bold", fontSize: 10, color: "#1a1a1a", marginRight: 4 },
+  dlvCountLabel: { fontSize: 8, color: "#666" },
+  dlvGroup: { marginBottom: 7 },
+  dlvGroupLabel: {
+    fontFamily: "Helvetica-Bold",
+    fontSize: 7,
+    letterSpacing: 0.5,
+    color: "#8a8a8a",
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
+  dlvItemRow: { flexDirection: "row", marginBottom: 3 },
+  dlvGlyph: { fontSize: 8.5, color: "#7a7a7a", width: 11, lineHeight: 1.5 },
+  dlvItemLabel: { fontFamily: "Helvetica-Bold", fontSize: 8.5, color: "#1a1a1a", lineHeight: 1.5 },
+  dlvItemDetail: { fontSize: 8.5, color: "#777", lineHeight: 1.5 },
   // Sig block
   sigRow: { flexDirection: "row", gap: 28, marginTop: 16 },
   sigCol: { flex: 1 },
@@ -302,20 +359,96 @@ function MarkdownSection({ content }: { content: string }) {
   return <>{elements}</>;
 }
 
+// ─── Structured Deliverables ──────────────────────────────────────────────────
+
+/** True when there is at least one line-item to render. Count-only deliverables (no items)
+ *  still fall back to serviceDescription, matching the web (which gates on items.length). */
+function hasDeliverableItems(d?: Deliverables | null): d is Deliverables {
+  return !!d && Array.isArray(d.items) && d.items.length > 0;
+}
+
+function DeliverablesSection({ deliverables }: { deliverables: Deliverables }) {
+  const emails = deliverables.emails ?? 0;
+  const popUps = deliverables.popUps ?? 0;
+  const hasCounts = emails > 0 || popUps > 0;
+
+  const populated = DELIVERABLE_GROUPS.map((g) => ({
+    ...g,
+    items: deliverables.items
+      .filter((i) => i.group === g.key)
+      .sort((a, b) => a.order - b.order),
+  })).filter((g) => g.items.length > 0);
+
+  // Only label the groups when more than one is present, same rule as the web.
+  const showLabels = populated.length > 1;
+
+  return (
+    <View style={{ marginBottom: 6 }}>
+      {hasCounts && (
+        <View style={s.dlvCountRow}>
+          {emails > 0 && (
+            <View style={s.dlvCountStat}>
+              <Text style={s.dlvCountValue}>{emails}</Text>
+              <Text style={s.dlvCountLabel}>
+                {emails === 1 ? "Email campaign / flow" : "Email campaigns + flows"}
+              </Text>
+            </View>
+          )}
+          {popUps > 0 && (
+            <View style={s.dlvCountStat}>
+              <Text style={s.dlvCountValue}>{popUps}</Text>
+              <Text style={s.dlvCountLabel}>
+                {popUps === 1 ? "Pop-up redesign" : "Pop-up redesigns"}
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      {populated.map((g) => (
+        <View key={g.key} style={s.dlvGroup}>
+          {showLabels && <Text style={s.dlvGroupLabel}>{g.label}</Text>}
+          {g.items.map((it) => (
+            <View key={it.id} style={s.dlvItemRow}>
+              <Text style={s.dlvGlyph}>{"✓"}</Text>
+              <Text style={{ flex: 1 }}>
+                <Text style={s.dlvItemLabel}>{it.label}</Text>
+                {it.detail ? <Text style={s.dlvItemDetail}>{` — ${it.detail}`}</Text> : null}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 // ─── Pricing Table ────────────────────────────────────────────────────────────
 
 function PricingSection({ proposal }: { proposal: ProposalForPdf }) {
   const isManagement = proposal.type === "management";
   // Model-accurate suffix (never a hard-coded "/mo") + discount, from the shared helper.
-  const suffix = priceSuffix(proposal as BillingTerms);
-  const disc = discountInfo(proposal as BillingTerms);
-  const totalLabel = `${fmtAmt(proposal.totalAmount, proposal.currency)}${suffix}`;
+  const terms = proposal as BillingTerms;
+  const suffix = priceSuffix(terms);
+  const disc = discountInfo(terms);
+  // One shared sentence for web + PDF, so the client cannot read two different explanations.
+  const discSentence = discountSentence(terms, (n) => fmtAmt(n, proposal.currency));
+  // 90-Day Management leads with the full 90-day total (monthly × 3); mult is 1 for everything else.
+  const mult = termMultiplier(terms);
+  const totalLabel = `${fmtAmt(fullTermTotal(terms), proposal.currency)}${suffix}`;
+  const mgmtSchedule = managementSchedule(terms);
 
-  const serviceLabel = isManagement
-    ? "Kracked Retention Email + SMS Marketing Management"
-    : (proposal.serviceDescription?.split("\n")[0] ?? "Project Services");
+  const serviceLabel = proposal.serviceLabel?.trim()
+    ? proposal.serviceLabel
+    : isManagement
+      ? "Kracked Retention Email + SMS Marketing Management"
+      : (proposal.serviceDescription?.split("\n")[0] ?? "Project Services");
 
-  const invoiceDate = proposal.startDate ? fmtDate(proposal.startDate) : fmtDate(new Date());
+  // fmtDay (UTC, "10 Aug 2026") not fmtDate: fmtDate renders in the SERVER's local zone and in
+  // MM/DD/YYYY, so the same proposal could print a different day here than in the schedule
+  // above, and "08/10/2026" reads as 8 October to anyone outside the US. Same anchor as the
+  // sentence and the schedule.
+  const invoiceDate = fmtDay(billingAnchor(terms)) ?? fmtDay(new Date()) ?? "";
 
   return (
     <View>
@@ -354,13 +487,27 @@ function PricingSection({ proposal }: { proposal: ProposalForPdf }) {
         </View>
       </View>
 
-      {disc && (
-        <Text style={s.bodyMb}>
-          A {disc.pct}% discount has been applied to the list price of {fmtAmt(disc.listAmount, proposal.currency)} (a saving of {fmtAmt(disc.saved, proposal.currency)}).
-        </Text>
-      )}
+      {discSentence && <Text style={s.bodyMb}>{discSentence}</Text>}
       {isManagement && (
-        <Text style={s.bodyMb}>{clientSentence(proposal as BillingTerms)}</Text>
+        <Text style={s.bodyMb}>{clientSentence(terms)}</Text>
+      )}
+
+      {/* 90-Day Management payment schedule (spread) — mirrors the project instalment breakdown */}
+      {mgmtSchedule && mgmtSchedule.length > 0 && (
+        <View style={s.tableWrap}>
+          <View style={s.tableRow}>
+            <Text style={s.tableCellHead}>Payment Schedule</Text>
+            <Text style={s.tableCellHead}>Date</Text>
+            <Text style={s.tableCellHeadR}>Amount</Text>
+          </View>
+          {mgmtSchedule.map((row, i) => (
+            <View key={i} style={s.tableRow}>
+              <Text style={s.tableCell}>{row.label}</Text>
+              <Text style={s.tableCell}>{row.when}</Text>
+              <Text style={s.tableCellR}>{fmtAmt(row.amount, proposal.currency)}</Text>
+            </View>
+          ))}
+        </View>
       )}
 
       {/* Invoice date table */}
@@ -403,34 +550,51 @@ export function AgreementPdf({ proposal }: { proposal: ProposalForPdf }) {
           effective upon the execution of this document or the commencement of services, whichever occurs first.
         </Text>
 
-        {/* Scope */}
-        <Text style={s.sectionTitle}>Project Scope</Text>
-        <Text style={s.bodyMb}>
-          Kracked Retention will fully manage and deliver the following
-          {isManagement ? " services for the Client's brand" : ""}:
-        </Text>
-
-        {proposal.serviceDescription ? (
-          <View style={{ paddingLeft: 10, borderLeftWidth: 1.5, borderColor: "#d0d0d0", marginBottom: 6 }}>
-            <Text style={s.body}>{proposal.serviceDescription}</Text>
-          </View>
+        {/* Scope — prefer the per-proposal edited scope (content.scopeIntro), rendered verbatim so
+            the download matches the on-screen proposal. Only legacy proposals with no scope prose
+            fall back to the hardcoded heading + intro + default bullets. */}
+        {proposal.scopeIntro && proposal.scopeIntro.trim() ? (
+          <MarkdownSection content={proposal.scopeIntro} />
         ) : (
-          <View style={{ paddingLeft: 10, marginBottom: 6 }}>
-            {isManagement ? (
-              <>
-                <Text style={s.bodyMb}>• Email + SMS Marketing Management — Strategy, copywriting, design, and implementation</Text>
-                <Text style={s.bodyMb}>• Campaign Calendar Planning — Monthly planning, ideation, strategy, and execution</Text>
-                <Text style={s.bodyMb}>• Optimization & Reporting — Monthly reporting and quarterly flow deep dives</Text>
-                <Text style={s.bodyMb}>• Creative Delivery — All designs delivered in Miro for review</Text>
-              </>
-            ) : (
-              <>
-                <Text style={s.bodyMb}>• Strategy, copy, design, and implementation included</Text>
-                <Text style={s.bodyMb}>• All designs delivered in Miro for review</Text>
-                <Text style={s.bodyMb}>• All designs available in Figma for future use</Text>
-                <Text style={s.bodyMb}>• Kick-off call & project completion call</Text>
-              </>
+          <>
+            <Text style={s.sectionTitle}>Project Scope</Text>
+            <Text style={s.bodyMb}>
+              Kracked Retention will fully manage and deliver the following
+              {isManagement ? " services for the Client's brand" : ""}:
+            </Text>
+            {!hasDeliverableItems(proposal.deliverables) && (
+              proposal.serviceDescription ? (
+                <View style={{ paddingLeft: 10, borderLeftWidth: 1.5, borderColor: "#d0d0d0", marginBottom: 6 }}>
+                  <Text style={s.body}>{proposal.serviceDescription}</Text>
+                </View>
+              ) : (
+                <View style={{ paddingLeft: 10, marginBottom: 6 }}>
+                  {isManagement ? (
+                    <>
+                      <Text style={s.bodyMb}>• Email + SMS Marketing Management — Strategy, copywriting, design, and implementation</Text>
+                      <Text style={s.bodyMb}>• Campaign Calendar Planning — Monthly planning, ideation, strategy, and execution</Text>
+                      <Text style={s.bodyMb}>• Optimization & Reporting — Monthly reporting and quarterly flow deep dives</Text>
+                      <Text style={s.bodyMb}>• Creative Delivery — All designs delivered in Miro for review</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={s.bodyMb}>• Strategy, copy, design, and implementation included</Text>
+                      <Text style={s.bodyMb}>• All designs delivered in Miro for review</Text>
+                      <Text style={s.bodyMb}>• All designs available in Figma for future use</Text>
+                      <Text style={s.bodyMb}>• Kick-off call & project completion call</Text>
+                    </>
+                  )}
+                </View>
+              )
             )}
+          </>
+        )}
+
+        {/* Structured, line-by-line deliverables (counts + grouped items) — shown when populated,
+            supplementing the scope prose (e.g. package proposals). */}
+        {hasDeliverableItems(proposal.deliverables) && (
+          <View style={{ paddingLeft: 10, marginBottom: 6 }}>
+            <DeliverablesSection deliverables={proposal.deliverables} />
           </View>
         )}
 
@@ -445,23 +609,29 @@ export function AgreementPdf({ proposal }: { proposal: ProposalForPdf }) {
 
         <View style={s.divider} />
 
-        {/* Acceptance */}
-        <Text style={s.sectionTitle}>Acceptance</Text>
-        <Text style={s.bodyMb}>
-          The Client named below acknowledges and agrees to the terms outlined in this Statement of Work.
-          Both parties confirm they have the proper authority to enter into this agreement on behalf of
-          their respective companies.
-        </Text>
-        <Text style={s.bodyMb}>
-          The Client authorizes Kracked Retention to invoice for the agreed-upon purchase and payment plan.
-          The Client certifies that they are an authorized user of the provided payment method and will not
-          dispute the payment, provided it aligns with the terms of this agreement.
-        </Text>
-        <Text style={s.bodyMb}>
-          The Client represents and warrants that they are authorized to execute this payment authorization
-          and indemnifies Kracked Retention, the bank, and the payment processor from any claims, damages,
-          or losses arising from authorized transactions under this agreement.
-        </Text>
+        {/* Acceptance — prefer per-proposal content copy (markdown), else the legacy block. */}
+        {proposal.acceptance ? (
+          <MarkdownSection content={proposal.acceptance} />
+        ) : (
+          <>
+            <Text style={s.sectionTitle}>Acceptance</Text>
+            <Text style={s.bodyMb}>
+              The Client named below acknowledges and agrees to the terms outlined in this Statement of Work.
+              Both parties confirm they have the proper authority to enter into this agreement on behalf of
+              their respective companies.
+            </Text>
+            <Text style={s.bodyMb}>
+              The Client authorizes Kracked Retention to invoice for the agreed-upon purchase and payment plan.
+              The Client certifies that they are an authorized user of the provided payment method and will not
+              dispute the payment, provided it aligns with the terms of this agreement.
+            </Text>
+            <Text style={s.bodyMb}>
+              The Client represents and warrants that they are authorized to execute this payment authorization
+              and indemnifies Kracked Retention, the bank, and the payment processor from any claims, damages,
+              or losses arising from authorized transactions under this agreement.
+            </Text>
+          </>
+        )}
 
         {/* Signature block */}
         <View style={s.sigRow}>

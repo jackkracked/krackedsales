@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, Phone } from "lucide-react";
+import { Plus, Phone, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import type { CampaignSummary } from "./mock-data";
 
@@ -14,12 +14,17 @@ export function CampaignRail({
   onSelect,
   onNewCampaign,
   loading,
+  isAdmin,
+  onDeleteCampaign,
 }: {
   campaigns: CampaignSummary[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onNewCampaign: () => void;
   loading?: boolean;
+  /** Admins get a per-campaign delete affordance. */
+  isAdmin?: boolean;
+  onDeleteCampaign?: (id: string, name: string) => void;
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -50,39 +55,58 @@ export function CampaignRail({
           const total = c.counts.total;
           const pct = total > 0 ? Math.round((c.counts.completed / total) * 100) : 0;
           const selected = c.id === selectedId;
+          const canDelete = isAdmin && !!onDeleteCampaign;
           return (
-            <button
+            <div
               key={c.id}
-              type="button"
-              onClick={() => onSelect(c.id)}
               className={cn(
-                "group w-full rounded-[10px] border px-3 py-3 text-left transition-all duration-150",
+                "group relative rounded-[10px] border transition-all duration-150",
                 selected ? "border-primary/30 bg-primary/[0.05]" : "border-transparent hover:border-border/70 hover:bg-muted/40",
               )}
             >
-              <div className="flex items-start justify-between gap-2">
-                <p className={cn("text-[13px] font-semibold leading-tight", selected ? "text-foreground" : "text-foreground/90")}>{c.name}</p>
-                <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[9.5px] font-semibold text-muted-foreground tabular-nums">
-                  <Phone className="h-2.5 w-2.5" />
-                  {c.counts.queued}
-                </span>
-              </div>
-              <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-muted">
-                <div className="h-full rounded-full bg-info transition-all" style={{ width: `${pct}%` }} />
-              </div>
-              <div className="mt-1.5 flex items-center justify-between">
-                <span className="text-[10px] font-medium text-muted-foreground tabular-nums">
-                  {c.counts.completed} reached · {c.counts.queued} left
-                </span>
-                <div className="flex -space-x-1.5">
-                  {c.reps.map((r) => (
-                    <span key={r.userId} title={r.name} className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-primary/10 text-[8px] font-bold text-primary ring-2 ring-background">
-                      {initials(r.name)}
-                    </span>
-                  ))}
+              <button
+                type="button"
+                onClick={() => onSelect(c.id)}
+                className="w-full rounded-[10px] px-3 py-3 text-left"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className={cn("text-[13px] font-semibold leading-tight", selected ? "text-foreground" : "text-foreground/90")}>{c.name}</p>
+                  <span className={cn(
+                    "shrink-0 mt-0.5 inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[9.5px] font-semibold text-muted-foreground tabular-nums transition-opacity",
+                    canDelete && "group-hover:opacity-0",
+                  )}>
+                    <Phone className="h-2.5 w-2.5" />
+                    {c.counts.queued}
+                  </span>
                 </div>
-              </div>
-            </button>
+                <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-muted">
+                  <div className="h-full rounded-full bg-info transition-all" style={{ width: `${pct}%` }} />
+                </div>
+                <div className="mt-1.5 flex items-center justify-between">
+                  <span className="text-[10px] font-medium text-muted-foreground tabular-nums">
+                    {c.counts.completed} reached · {c.counts.queued} left
+                  </span>
+                  <div className="flex -space-x-1.5">
+                    {c.reps.map((r) => (
+                      <span key={r.userId} title={r.name} className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-primary/10 text-[8px] font-bold text-primary ring-2 ring-background">
+                        {initials(r.name)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </button>
+              {canDelete && (
+                <button
+                  type="button"
+                  title="Delete campaign"
+                  aria-label={`Delete campaign ${c.name}`}
+                  onClick={(e) => { e.stopPropagation(); onDeleteCampaign!(c.id, c.name); }}
+                  className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-[7px] text-muted-foreground/60 opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           );
         })}
       </div>

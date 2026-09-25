@@ -6,6 +6,7 @@ import { getSessionUser } from "@/lib/auth/session";
 import { stripe, hasStripe } from "@/lib/stripe/client";
 import Stripe from "stripe";
 import { eachDayOfInterval, startOfDay, endOfDay } from "date-fns";
+import { monthlyAmount } from "@/lib/stripe/cycle";
 
 export const dynamic = "force-dynamic";
 
@@ -48,21 +49,16 @@ async function paginateAll<T extends { id: string }>(
 
 // Normalise a subscription price to monthly amount in dollars
 function toMonthlyCents(item: Stripe.SubscriptionItem): number {
-  const unitAmount = item.price.unit_amount ?? 0;
-  const interval = item.price.recurring?.interval ?? "month";
-  const count = item.price.recurring?.interval_count ?? 1;
-  switch (interval) {
-    case "year":  return unitAmount / (12 * count);
-    case "week":  return (unitAmount * 52) / (12 * count);
-    case "day":   return (unitAmount * 365) / (12 * count);
-    default:      return unitAmount / count; // month
-  }
+  // Shared helper: a 30-day cycle is the monthly retainer, not 1.0139 months. See lib/stripe/cycle.ts.
+  return monthlyAmount(item.price.unit_amount, item.price.recurring?.interval, item.price.recurring?.interval_count);
 }
 
 export async function GET(req: NextRequest) {
   try {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    // Company money (Stripe MRR/cash/ad spend) — admins only.
+    if (user.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const { searchParams } = new URL(req.url);
     const range = parseRange(searchParams);
@@ -80,8 +76,11 @@ export async function GET(req: NextRequest) {
       db().select({ totalAmount: proposals.totalAmount }).from(proposals).where(
         inArray(proposals.status, ["sent", "signed"])
       ),
+      // "failed" counts as overdue too. Under automatic collection a declined card sets the
+      // row to failed, and a pending-only filter would make overdue revenue DROP at the exact
+      // moment collection got worse. app/api/stripe/backfill/route.ts already pairs them.
       db().select({ amount: proposalInstalments.amount }).from(proposalInstalments).where(
-        and(eq(proposalInstalments.status, "pending"), lt(proposalInstalments.dueDate, now))
+        and(inArray(proposalInstalments.status, ["pending", "failed"]), lt(proposalInstalments.dueDate, now))
       ),
       db().select({ totalAmount: proposals.totalAmount }).from(proposals).where(
         and(isNotNull(proposals.sentAt), gte(proposals.sentAt, start), lt(proposals.sentAt, end))

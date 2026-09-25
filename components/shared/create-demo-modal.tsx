@@ -246,6 +246,10 @@ export function CreateDemoModal({
         "Contact Name": contactName ?? "",
         "Opportunity ID": opportunityId ?? "",
         "Comment Lead ID": commentLeadId ?? "",
+        // The REAL GHL contact id. Two jobs: it stops promoteMetaLeadToGhl creating a
+        // duplicate contact for someone who already exists, and it gives the demo board a
+        // genuine contact linkage instead of an opportunity id in a contact column.
+        "Contact ID": contactId ?? "",
         // When set (Meta/TikTok conversation), the demo webhook creates a real GHL lead
         // tagged with this platform. Empty for normal GHL email leads.
         "Lead Platform": platform ?? "",

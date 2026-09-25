@@ -34,9 +34,27 @@ interface GHLCalendarEvent {
  * startTime >= dateAdded (you can't book a call in the past), so nothing booked in-window can
  * have a start time before the window start.
  */
+/**
+ * Which calendars represent a BOOKED CALL with a prospect.
+ *
+ * Matching on "intro call" or "demo" alone silently excluded every Strategy Session and
+ * Clarity Call calendar — real booked calls, taken by the closer. Measured 1-7 Aug 2026:
+ * 5 counted, 1 missed on "Taylor's Strategy Sessions Calendar.". Small in that window only
+ * because volume was low; structurally it was dropping a whole category of call.
+ *
+ * Personal calendars are excluded explicitly: "Bloo io's Personal Calendar" is not sales.
+ *
+ * This is a BUSINESS definition, not a technical one. The endpoint returns `byCalendar` and
+ * `excludedCalendars` in its response so the split is always auditable rather than buried in
+ * a regex — if a calendar is on the wrong side, that response says so.
+ */
+const BOOKED_CALL_PATTERNS = ["intro call", "demo", "strategy", "clarity call", "consult"];
+const NOT_A_BOOKED_CALL = ["personal calendar"];
+
 function isBookedCallCalendar(name: string): boolean {
   const n = name.toLowerCase();
-  return n.includes("intro call") || n.includes("demo");
+  if (NOT_A_BOOKED_CALL.some((p) => n.includes(p))) return false;
+  return BOOKED_CALL_PATTERNS.some((p) => n.includes(p));
 }
 
 /** UTC ms for a wall-clock day boundary (00:00:00, or 23:59:59.999) in BUSINESS_TZ, DST-safe. */
@@ -68,7 +86,11 @@ export async function GET(req: NextRequest) {
   try {
     const loc = locationId();
     const calData = await ghl.get<{ calendars?: GHLCalendar[] }>(`/calendars/?locationId=${loc}`);
-    const cals = (calData.calendars ?? []).filter((c) => c.id && isBookedCallCalendar(c.name ?? ""));
+    const allCals = (calData.calendars ?? []).filter((c) => c.id);
+    const cals = allCals.filter((c) => isBookedCallCalendar(c.name ?? ""));
+    // Every calendar deliberately left out, named. A booked-call number that quietly omits a
+    // calendar is indistinguishable from a slow week — this makes the choice inspectable.
+    const excludedCalendars = allCals.filter((c) => !isBookedCallCalendar(c.name ?? "")).map((c) => c.name);
 
     const perCalendar = await Promise.all(
       cals.map(async (cal) => {
@@ -105,6 +127,7 @@ export async function GET(req: NextRequest) {
       count,
       appointments: all.length,
       byCalendar: perCalendar.map((c) => ({ name: c.name, appointments: c.events?.length ?? 0 })).filter((c) => c.appointments > 0),
+      excludedCalendars,
     });
   } catch (err) {
     console.error("[/api/ghl/opportunities/booked-calls]", err);

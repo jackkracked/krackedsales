@@ -18,6 +18,7 @@ import { GoalProgressBars } from "@/components/dashboard/goal-progress/goal-prog
 import { ScrollToTop } from "@/components/layout/scroll-to-top";
 import { FathomNudgeBanner } from "@/components/fathom/fathom-nudge-banner";
 import { useFathomAutoSync } from "@/lib/fathom/use-fathom-sync";
+import { TodayList } from "@/components/dashboard/today/today-list";
 
 function getGreeting(tz: string): string {
   const h = getHours(toZonedDate(new Date(), tz));
@@ -94,12 +95,12 @@ export function RepDashboard({ userId, userName, email, ghlUserId }: RepDashboar
           {getGreeting(tz)}, {firstName}
         </h1>
         <p data-r10n-greeting-date className="text-sm text-muted-foreground mt-0.5">{today}</p>
-        {summaryData?.summary?.content && (
-          <p className="text-sm text-foreground/75 leading-relaxed mt-3">
-            {summaryData.summary.content}
-          </p>
-        )}
       </div>
+
+      {/* Today — replaces the AI paragraph that used to sit under the greeting. That paragraph
+          ended "1,549 open leads requiring attention" and told Gage to chase six clients who had
+          already signed and paid. This is a finite list of things he can actually finish. */}
+      <TodayList />
 
       {/* Tasks strip — full width, above calls */}
       <TasksStrip />

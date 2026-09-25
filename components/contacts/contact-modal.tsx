@@ -9,12 +9,14 @@ import {
   ArrowUp, FileText, MessageSquare, ChevronDown, ChevronLeft, ChevronRight,
   Receipt, Send, PenLine, DollarSign,
 } from "lucide-react";
-import { MessageComposer } from "@/components/shared/message-composer";
-import { ChatBubble, SmartBanner, groupMessages } from "@/components/shared/chat-bubble";
+import { MessageThread } from "@/components/inbox/message-thread";
+import { ReplyComposer } from "@/components/inbox/reply-composer";
 import { cn } from "@/lib/utils/cn";
 import { Avatar } from "@/components/ui/avatar";
 import { DemoLinksRow } from "@/components/shared/demo-links-row";
-import { formatDate, formatDateTime, relativeTime } from "@/lib/utils/date";
+import { CreateOpportunityPanel } from "@/components/shared/create-opportunity-panel";
+import { DemoLinkField } from "@/components/shared/demo-link-field";
+import { formatDate, relativeTime } from "@/lib/utils/date";
 import { parseQualificationNote, isQualificationNote, looksLikeUrl, cleanUrl } from "@/lib/utils/url";
 import type { UnifiedContact, TimelineEvent } from "@/lib/contacts/types";
 import { outcomeMeta, OUTCOME_TONES } from "@/lib/activity/outcomes";
@@ -29,7 +31,15 @@ import { PLATFORM_BADGE, RESPONSE_CONFIG } from "@/lib/contacts/configs";
 
 interface CustomField { id: string; contactUid: string; fieldName: string; fieldValue: string; createdAt: string; }
 interface GHLNote { id: string; body: string; dateAdded?: string; createdAt?: string; }
-interface GHLMessage { id: string; emailMessageId?: string; body?: string; direction?: "inbound" | "outbound"; messageType?: string; dateAdded: string; meta?: { email?: { subject?: string; messageIds?: string[] } }; }
+// Canonical shape, not a local copy. This file used to declare its own narrower GHLMessage
+// (body optional), which silently diverged from lib/ghl/types.ts and made the messages
+// incompatible with the shared MessageThread the Inbox uses.
+import type { GHLMessage } from "@/lib/ghl/types";
+import { QuickActionsBar } from "@/components/shared/quick-actions-bar";
+import { CreateTaskModal } from "@/components/shared/create-task-modal";
+import { BookingLinkModal } from "@/components/shared/booking-link-modal";
+import { CreateDemoModal } from "@/components/shared/create-demo-modal";
+import { CreateAuditModal } from "@/components/shared/create-audit-modal";
 
 type RightTab = "timeline" | "calls" | "notes" | "qualification" | "proposals";
 
@@ -54,7 +64,12 @@ const CAT_CONFIG: Record<string, { label: string; className: string }> = {
 
 interface ContactProposalSummary { ltv: number; paidCount: number; }
 
-function LeftPanel({ contact, onViewQualification }: { contact: UnifiedContact; onViewQualification?: () => void }) {
+function LeftPanel({ contact, onViewQualification, onQuickAction }: {
+  contact: UnifiedContact;
+  onViewQualification?: () => void;
+  /** Opens a create modal. Owned by ContactModal so this panel stays presentational. */
+  onQuickAction?: (action: "task" | "demo" | "audit") => void;
+}) {
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [addingField, setAddingField] = useState(false);
@@ -177,50 +192,68 @@ function LeftPanel({ contact, onViewQualification }: { contact: UnifiedContact; 
         </section>
 
         {/* Pipeline */}
-        {contact.stage && (
+        {(contact.stage || contact.ghlContactId) && (
           <section>
             <p data-r10n-modal-section className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em] mb-2.5">Pipeline</p>
             <div className="space-y-2">
-              {/* Stage — click to move (when there's an opportunity) */}
-              {contact.opportunityId ? (
-                <button
-                  onClick={() => setStageOpen(true)}
-                  title="Click to move stage"
-                  data-r10n-stage-pill
-                  data-status={stageStatus(localStage.name)}
-                  style={{ "--r10n-stage": r10nStageColor(localStage.name) } as Record<string, string>}
-                  className={cn(
-                    "group/st inline-flex items-center gap-1 max-w-full rounded-full border px-2.5 py-1 text-[11px] font-medium cursor-pointer transition-all hover:brightness-[0.97] hover:ring-2 hover:ring-primary/20",
-                    stageClass(localStage.name)
-                  )}
-                >
-                  <GitMerge className="w-3 h-3 shrink-0 opacity-70" />
-                  <span className="truncate">{localStage.name}</span>
-                  <ChevronDown className="w-3 h-3 shrink-0 opacity-40 group-hover/st:opacity-80 transition-opacity" />
-                </button>
-              ) : (
-                <div className="flex items-start gap-2">
-                  <GitMerge className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
-                  <span className="text-xs text-foreground/80 leading-snug">{localStage.name}</span>
-                </div>
+              {/* Stage, status and value only exist once there IS an opportunity. */}
+              {contact.stage && (
+                <>
+                {/* Stage — click to move (when there's an opportunity) */}
+                {contact.opportunityId ? (
+                  <button
+                    onClick={() => setStageOpen(true)}
+                    title="Click to move stage"
+                    data-r10n-stage-pill
+                    data-status={stageStatus(localStage.name)}
+                    style={{ "--r10n-stage": r10nStageColor(localStage.name) } as Record<string, string>}
+                    className={cn(
+                      "group/st inline-flex items-center gap-1 max-w-full rounded-full border px-2.5 py-1 text-[11px] font-medium cursor-pointer transition-all hover:brightness-[0.97] hover:ring-2 hover:ring-primary/20",
+                      stageClass(localStage.name)
+                    )}
+                  >
+                    <GitMerge className="w-3 h-3 shrink-0 opacity-70" />
+                    <span className="truncate">{localStage.name}</span>
+                    <ChevronDown className="w-3 h-3 shrink-0 opacity-40 group-hover/st:opacity-80 transition-opacity" />
+                  </button>
+                ) : (
+                  <div className="flex items-start gap-2">
+                    <GitMerge className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                    <span className="text-xs text-foreground/80 leading-snug">{localStage.name}</span>
+                  </div>
+                )}
+                {contact.opportunityStatus && (
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <span data-r10n-opp-status data-status={contact.opportunityStatus} className={cn("text-xs font-medium", {
+                      open: "text-primary", won: "text-emerald-600", lost: "text-rose-500", abandoned: "text-muted-foreground",
+                    }[contact.opportunityStatus])}>
+                      {contact.opportunityStatus.charAt(0).toUpperCase() + contact.opportunityStatus.slice(1)}
+                    </span>
+                  </div>
+                )}
+                {contact.monetaryValue != null && contact.monetaryValue > 0 && (
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <span className="text-xs text-foreground/80">${contact.monetaryValue.toLocaleString()}</span>
+                  </div>
+                )}
+                </>
               )}
-              {contact.opportunityStatus && (
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                  <span data-r10n-opp-status data-status={contact.opportunityStatus} className={cn("text-xs font-medium", {
-                    open: "text-primary", won: "text-emerald-600", lost: "text-rose-500", abandoned: "text-muted-foreground",
-                  }[contact.opportunityStatus])}>
-                    {contact.opportunityStatus.charAt(0).toUpperCase() + contact.opportunityStatus.slice(1)}
-                  </span>
-                </div>
+
+              {/* No opportunity anywhere: offer to create one, in the slot where a stage
+                  would otherwise sit. `oppRefs` is checked too, so a contact with a won or
+                  lost deal that no longer populates `stage` is not offered a second one. */}
+              {contact.ghlContactId && !contact.opportunityId && (contact.oppRefs?.length ?? 0) === 0 && (
+                <CreateOpportunityPanel
+                  contactId={contact.ghlContactId}
+                  contactName={contact.name ?? ""}
+                  defaultSource={contact.source ?? null}
+                />
               )}
-              {contact.monetaryValue != null && contact.monetaryValue > 0 && (
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                  <span className="text-xs text-foreground/80">${contact.monetaryValue.toLocaleString()}</span>
-                </div>
-              )}
+
               <DemoLinksRow contactId={contact.ghlContactId} />
+              <DemoLinkField contactId={contact.ghlContactId} className="mt-3" />
             </div>
           </section>
         )}
@@ -265,6 +298,10 @@ function LeftPanel({ contact, onViewQualification }: { contact: UnifiedContact; 
           </section>
         )}
 
+        {/* Quick actions — Gage: "add a place here where we can submit a demo for people that
+            aren't opportunities yet made in GHL". Self-contained state rather than a parent
+            callback, because ContactModal is rendered from three different places (contacts,
+            leads, and the dashboard conversations strip) and only one of them owns these modals. */}
         {/* Custom fields */}
         <section>
           <div className="flex items-center justify-between mb-2">
@@ -327,6 +364,7 @@ function LeftPanel({ contact, onViewQualification }: { contact: UnifiedContact; 
           }}
         />
       )}
+
     </div>
   );
 }
@@ -433,153 +471,12 @@ function TimelineTab({ contact }: { contact: UnifiedContact }) {
 // GHL stores outbound automation emails as plain text with [url] bracket patterns.
 // Convert to renderable HTML: image URLs → <img>, other URLs → <a>, text → <p>.
 
-function ghlBodyToHtml(body: string): string {
-  const IMAGE_EXT = /\.(jpe?g|png|gif|webp|svg)(\?|$)/i;
-  const lines = body.split(/\n/);
-  const parts: string[] = [];
-
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) { parts.push("<br/>"); continue; }
-
-    const processed = line.replace(/\[([^\]]+)\]/g, (_, url) => {
-      const trimmed = url.trim();
-      if (!/^https?:\/\//i.test(trimmed)) return `[${trimmed}]`;
-      if (IMAGE_EXT.test(trimmed) || trimmed.includes("/media/")) {
-        return `<img src="${trimmed}" alt="Attached image" onerror="this.style.display='none'" style="max-width:100%;height:auto;display:block;margin:8px 0;" />`;
-      }
-      return `<a href="${trimmed}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;">${trimmed}</a>`;
-    });
-
-    if (/^<img\s/i.test(processed.trim())) {
-      parts.push(processed);
-    } else {
-      parts.push(`<p style="margin:0 0 6px;font-size:14px;line-height:1.55;">${processed}</p>`);
-    }
-  }
-
-  return `<html><body style="font-family:sans-serif;padding:12px 16px;margin:0;color:#111;">${parts.join("")}</body></html>`;
-}
 
 // ─── Email card (collapsible email renderer) ───────────────────────────────────
 
-function EmailCard({ message }: { message: GHLMessage }) {
-  const [open, setOpen] = useState(false);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const inbound = message.direction === "inbound";
-  const subject = message.meta?.email?.subject ?? "(no subject)";
-
-  // Step 1: if emailMessageId isn't on the message directly, fetch the single
-  // message record — GHL includes emailMessageId there even when the list doesn't.
-  const directEmailMsgId = message.emailMessageId ?? message.meta?.email?.messageIds?.[0];
-
-  const { data: singleMsg } = useQuery<Record<string, unknown>>({
-    queryKey: ["msg-single", message.id],
-    queryFn: () => fetch(`/api/ghl/conversations/messages/${message.id}`).then((r) => r.json()),
-    enabled: open && !directEmailMsgId,
-    staleTime: 10 * 60 * 1000,
-  });
-
-  const emailMsgId: string | undefined =
-    directEmailMsgId ??
-    (singleMsg?.emailMessageId as string | undefined) ??
-    (singleMsg?.meta as Record<string, unknown> | undefined)?.email
-      ? ((singleMsg?.meta as Record<string, Record<string, unknown>>)?.email?.messageIds as string[])?.[0]
-      : undefined;
-
-  // Step 2: fetch full email HTML using the email-layer ID
-  const { data: emailDetail, isLoading: detailLoading } = useQuery<Record<string, unknown>>({
-    queryKey: ["email-detail", emailMsgId],
-    queryFn: () => fetch(`/api/ghl/conversations/messages/email/${emailMsgId}`).then((r) => r.json()),
-    enabled: open && !!emailMsgId,
-    staleTime: 10 * 60 * 1000,
-  });
-
-  // GHL email detail: HTML is in `body`. Also try html / htmlBody as fallbacks.
-  const detailHtml: string | null =
-    (emailDetail && !emailDetail.error)
-      ? ((emailDetail.body as string) ??
-         (emailDetail.html as string) ??
-         (emailDetail.htmlBody as string) ??
-         null)
-      : null;
-
-  // Only use detailHtml if it actually contains HTML tags
-  const detailHtmlIsHtml = detailHtml ? /<[a-z][\s\S]*>/i.test(detailHtml) : false;
-
-  // Fall back to parsing the bracket-format body
-  const rawBody = message.body ?? "";
-  const isRawHtml = /<[a-z][\s\S]*>/i.test(rawBody);
-  const fallbackHtml = isRawHtml ? rawBody : ghlBodyToHtml(rawBody);
-  const renderedHtml = detailHtmlIsHtml ? detailHtml! : fallbackHtml;
-
-  function handleIframeLoad() {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-
-    // Resize to fit content — retry after images load (they inflate scrollHeight)
-    const fit = () => {
-      try {
-        const doc = iframe.contentDocument;
-        if (!doc) return;
-        // Ensure all images have loaded before measuring
-        const imgs = Array.from(doc.images);
-        const pending = imgs.filter((img) => !img.complete);
-        if (pending.length > 0) {
-          Promise.all(pending.map((img) => new Promise((res) => { img.onload = res; img.onerror = res; }))).then(fit);
-          return;
-        }
-        const h = doc.documentElement.scrollHeight;
-        if (h > 0) iframe.style.height = `${Math.min(h + 16, 600)}px`;
-      } catch { /* cross-origin guard */ }
-    };
-    fit();
-  }
-
-  return (
-    <div className="rounded-[10px] border border-border/60 bg-card overflow-hidden">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-muted/40 transition-colors text-left"
-      >
-        <Mail className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-medium text-foreground truncate">{subject}</p>
-          <p className="text-[11px] text-muted-foreground mt-px">
-            {inbound ? "Received" : "Sent"} · {formatDateTime(message.dateAdded)}
-          </p>
-        </div>
-        <ChevronDown
-          className={cn("w-3.5 h-3.5 text-muted-foreground shrink-0 transition-transform duration-200", open && "rotate-180")}
-        />
-      </button>
-
-      {open && (
-        <div className="border-t border-border/50">
-          {detailLoading ? (
-            <div className="flex items-center justify-center h-20 text-muted-foreground">
-              <RefreshCw className="w-4 h-4 animate-spin" />
-            </div>
-          ) : (
-            <iframe
-              ref={iframeRef}
-              srcDoc={renderedHtml}
-              sandbox="allow-same-origin allow-popups"
-              onLoad={handleIframeLoad}
-              className="w-full border-none block"
-              style={{ minHeight: 160, height: 400 }}
-              title="Email preview"
-            />
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function MessagesTab({ contact, onFieldSaved }: { contact: UnifiedContact; onFieldSaved?: (field: string, value: string) => void }) {
   const queryClient = useQueryClient();
-  const endRef = useRef<HTMLDivElement>(null);
 
   function handleFieldSaved(field: string, value: string) {
     // Refresh the contact data on the left panel
@@ -588,14 +485,23 @@ function MessagesTab({ contact, onFieldSaved }: { contact: UnifiedContact; onFie
     onFieldSaved?.(field, value);
   }
 
-  const { data: convData, isLoading: convLoading } = useQuery<{ conversations: Array<{ id: string }> }>({
+  const { data: convData, isLoading: convLoading } = useQuery<{
+    conversations: Array<{ id: string; type?: string; lastMessageType?: string; avatarUrl?: string | null }>;
+  }>({
     queryKey: ["contact-conv-id", contact.ghlContactId],
     queryFn: () => fetch(`/api/ghl/conversations?contactId=${contact.ghlContactId}&limit=5`).then((r) => r.json()),
     enabled: !!contact.ghlContactId,
     staleTime: 5 * 60 * 1000,
   });
 
-  const convId = convData?.conversations?.[0]?.id;
+  const conv = convData?.conversations?.[0];
+  const convId = conv?.id;
+  /** The thread's own channel. ReplyComposer needs it: a channel that cannot be initiated cold
+   *  (Messenger, Instagram) is only offered when it IS the current thread. */
+  const convChannelType = conv?.lastMessageType ?? conv?.type ?? "TYPE_SMS";
+  /** The real profile photo GHL holds for this contact (Instagram/Facebook), normalised to
+   *  `avatarUrl` by /api/ghl/conversations. Same source the Inbox header uses. */
+  const convAvatarUrl = conv?.avatarUrl ?? null;
 
   const { data: msgData, isLoading: msgLoading, refetch } = useQuery<{ messages: GHLMessage[] }>({
     queryKey: ["contact-msgs", convId],
@@ -604,6 +510,8 @@ function MessagesTab({ contact, onFieldSaved }: { contact: UnifiedContact; onFie
     staleTime: 30 * 1000,
   });
 
+  /** Exactly what the Inbox hands MessageThread: untouched, newest-first. */
+  const rawMessages = msgData?.messages ?? [];
   const messages = [...(msgData?.messages ?? [])]
     .filter((m) => {
       const t = (m.messageType ?? "").toUpperCase();
@@ -613,7 +521,6 @@ function MessagesTab({ contact, onFieldSaved }: { contact: UnifiedContact; onFie
     })
     .sort((a, b) => new Date(a.dateAdded).getTime() - new Date(b.dateAdded).getTime());
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages.length]);
 
   if (convLoading || msgLoading) {
     return (
@@ -627,50 +534,44 @@ function MessagesTab({ contact, onFieldSaved }: { contact: UnifiedContact; onFie
     );
   }
 
-  const regularMessages = messages.filter((m) => !(m.messageType ?? "").includes("EMAIL"));
-  const groupedRegular = groupMessages(regularMessages);
-  const groupedMap = new Map(groupedRegular.map((g) => [g.msg.id, g]));
-
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex-1 overflow-y-auto px-4 py-4">
-        {/* Smart contact enrichment banner */}
-        {messages.length > 0 && contact.ghlContactId && (
-          <SmartBanner messages={messages} contactId={contact.ghlContactId} onFieldSaved={(f, v) => handleFieldSaved(f, v)} />
-        )}
+      {/* THE SAME COMPONENTS THE INBOX USES.
+          This modal used to render its own thread (an inline messages.map with local ChatBubble /
+          EmailCard) and the older MessageComposer, while the Inbox had moved to MessageThread +
+          ReplyComposer. Two implementations of the same screen drift, and they had: different
+          spacing (the email card butted against the message above it), no contact avatars, and —
+          the reason this surfaced — MessageComposer offered Facebook to every contact, so sending
+          a demo to an ad-form lead with no Messenger thread failed with
+          `400 Contact has no Facebook id`. ReplyComposer already models that rule correctly.
 
-        {!messages.length
-          ? <EmptyState icon={MessageCircle} message="No messages yet" />
-          : messages.map((m) => {
-              const isEmail = (m.messageType ?? "").includes("EMAIL");
+          MessageThread owns its own scroll container, so there is deliberately no
+          overflow-y-auto wrapper here: nesting scrollers is what previously broke the sticky bar
+          in the Leads drawer.
 
-              if (isEmail) {
-                return <EmailCard key={m.id} message={m} />;
-              }
-
-              const grouped = groupedMap.get(m.id);
-              return (
-                <ChatBubble
-                  key={m.id}
-                  body={m.body ?? ""}
-                  direction={m.direction === "inbound" ? "inbound" : "outbound"}
-                  dateAdded={m.dateAdded}
-                  isGroupedWithPrev={grouped?.isGroupedWithPrev}
-                  isGroupedWithNext={grouped?.isGroupedWithNext}
-                  contactId={contact.ghlContactId ?? undefined}
-                  onFieldSaved={(f, v) => handleFieldSaved(f, v)}
-                />
-              );
-            })
-        }
-        <div ref={endRef} />
-      </div>
+          Messages are passed RAW (newest-first, as GHL returns them). MessageThread reverses
+          internally; the old local sort was ascending, and handing it a pre-sorted array would
+          display the whole conversation backwards. */}
+      {!messages.length ? (
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+          <EmptyState icon={MessageCircle} message="No messages yet" />
+        </div>
+      ) : (
+        <MessageThread
+          messages={rawMessages}
+          contactId={contact.ghlContactId ?? undefined}
+          contactName={contact.name}
+          contactAvatarUrl={convAvatarUrl}
+          onFieldSaved={(f, v) => handleFieldSaved(f, v)}
+        />
+      )}
       {convId && contact.ghlContactId && (
-        <MessageComposer
+        <ReplyComposer
           conversationId={convId}
           contactId={contact.ghlContactId}
-          messages={messages}
-          onSent={() => { setTimeout(() => refetch(), 600); }}
+          defaultChannelType={convChannelType}
+          contactPhone={contact.phone ?? null}
+          contactEmail={contact.email ?? null}
         />
       )}
     </div>
@@ -800,6 +701,13 @@ const STATUS_STYLES: Record<string, string> = {
   failed:   "bg-red-50 text-red-700",
   void:     "bg-muted text-muted-foreground",
   overdue:  "bg-orange-50 text-orange-700",
+  // Without these a paying retainer client fell back to the DRAFT style, reading as "not sent
+  // yet". Matches the hues used by components/proposals/proposal-status-badge.tsx.
+  partial:  "bg-orange-50 text-orange-700",
+  active:   "bg-teal-50 text-teal-700",
+  completed:"bg-slate-100 text-slate-600",
+  past_due: "bg-red-50 text-red-700",
+  lost:     "bg-red-50 text-red-600",
 };
 
 function fmtMoney(n: number) {
@@ -938,6 +846,8 @@ export function ContactModal({
   const tabs = RIGHT_TABS.filter((t) => !t.ghlOnly || isGHL);
   const [activeTab, setActiveTab] = useState<RightTab>(initialTab && tabs.find((t) => t.id === initialTab) ? initialTab : tabs[0].id);
   const [fieldOverrides, setFieldOverrides] = useState<Record<string, string>>({});
+  const [quickAction, setQuickAction] = useState<"task" | "demo" | "audit" | null>(null);
+  const [headerBookingOpen, setHeaderBookingOpen] = useState(false);
   const hasSavedRef = useRef(false);
 
   // Build a contact with overrides applied so the left panel updates instantly
@@ -1028,8 +938,24 @@ export function ContactModal({
               </div>
             </div>
           </div>
+          {/* Everything on the right is ONE cluster, pinned to the edge. Left as separate
+              children of a `justify-between` header they spread across the empty middle and
+              read as unanchored. */}
+          <div className="ml-auto flex shrink-0 items-center gap-2 pl-3">
+          {/* Quick actions live here, not in the scrolling left panel: below the fold on a
+              laptop they were invisible, which is the opposite of quick. */}
+          {enrichedContact.ghlContactId && (
+            <QuickActionsBar
+              actions={[
+                { key: "task", label: "Task", onClick: () => setQuickAction("task") },
+                { key: "demo", label: "Demo", onClick: () => setQuickAction("demo") },
+                { key: "audit", label: "Audit", onClick: () => setQuickAction("audit") },
+                { key: "book", label: "Book", onClick: () => setHeaderBookingOpen(true) },
+              ]}
+            />
+          )}
           {inQueue && (
-            <div className="flex items-center gap-0.5 ml-3 shrink-0">
+            <div className="flex items-center gap-0.5 shrink-0 border-l border-border pl-2">
               <span className="text-xs tabular-nums text-muted-foreground mr-1.5 select-none">
                 {queueIndex! + 1} / {queue!.length}
               </span>
@@ -1051,15 +977,59 @@ export function ContactModal({
               </button>
             </div>
           )}
-          <button onClick={handleClose} className="p-1.5 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors ml-1 shrink-0">
+          <button onClick={handleClose} aria-label="Close" className="p-1.5 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0">
             <X className="w-4 h-4" />
           </button>
+          </div>
         </div>
+
+        {headerBookingOpen && enrichedContact.ghlContactId && (
+          <BookingLinkModal
+            contactId={enrichedContact.ghlContactId}
+            contactName={enrichedContact.name}
+            contactPhone={enrichedContact.phone}
+            contactEmail={enrichedContact.email}
+            onClose={() => setHeaderBookingOpen(false)}
+          />
+        )}
 
         {/* Three-pane body: contact info | detail tabs | messages */}
         <div className="flex flex-1 min-h-0">
           {/* Left: static contact info */}
-          <LeftPanel contact={enrichedContact} onViewQualification={() => setActiveTab("qualification")} />
+          <LeftPanel
+            contact={enrichedContact}
+            onViewQualification={() => setActiveTab("qualification")}
+            onQuickAction={setQuickAction}
+          />
+
+          {/* Quick-action modals. Each is handed the real ghlContactId: that is what stops a demo
+              submission creating a duplicate GHL contact for someone who already exists, and it
+              forwards any existing opportunity so nobody lands in a pipeline twice. */}
+          {quickAction === "task" && (
+            <CreateTaskModal
+              contactId={enrichedContact.ghlContactId ?? undefined}
+              contactName={enrichedContact.name}
+              onClose={() => setQuickAction(null)}
+            />
+          )}
+          {quickAction === "demo" && (
+            <CreateDemoModal
+              contactId={enrichedContact.ghlContactId ?? undefined}
+              contactName={enrichedContact.name}
+              contactEmail={enrichedContact.email ?? undefined}
+              contactPhone={enrichedContact.phone ?? undefined}
+              opportunityId={enrichedContact.opportunityId ?? undefined}
+              opportunitySource={enrichedContact.platform ?? undefined}
+              onClose={() => setQuickAction(null)}
+            />
+          )}
+          {quickAction === "audit" && (
+            <CreateAuditModal
+              contactId={enrichedContact.ghlContactId ?? undefined}
+              contactName={enrichedContact.name}
+              onClose={() => setQuickAction(null)}
+            />
+          )}
 
           {/* Middle: tabbed detail content */}
           <div className="flex flex-col flex-[2_2_0] min-w-0 min-h-0 border-r border-border">

@@ -12,6 +12,7 @@ import {
 import { relativeTime, formatDate } from "@/lib/utils/date";
 import { Avatar } from "@/components/ui/avatar";
 import { ContactModal } from "./contact-modal";
+import { CustomersView } from "./customers-view";
 import { FilterSheet } from "./filter-sheet";
 import { CreateAuditModal } from "@/components/shared/create-audit-modal";
 import { CreateDemoModal } from "@/components/shared/create-demo-modal";
@@ -99,7 +100,7 @@ function SkeletonRow({ i }: { i: number }) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export function ContactsClient() {
+export function ContactsClient({ isAdmin = false }: { isAdmin?: boolean }) {
   const [search, setSearch]                   = useState("");
   const [debounced, setDebounced]             = useState("");
   const [filters, setFilters]                 = useState<ContactFilters>(EMPTY_FILTERS);
@@ -114,6 +115,7 @@ export function ContactsClient() {
   const [demoContact, setDemoContact]         = useState<UnifiedContact | null>(null);
   const [stageContact, setStageContact]       = useState<UnifiedContact | null>(null);
   const [openContactTab, setOpenContactTab]   = useState<"timeline" | undefined>(undefined);
+  const [view, setView]                       = useState<"contacts" | "customers">("contacts");
   const [smartLists, setSmartLists]           = useState<SmartList[]>([]);
   const [activeListId, setActiveListId]       = useState<string | null>(null);
   const [activePreset, setActivePreset]       = useState("all");
@@ -279,19 +281,31 @@ export function ContactsClient() {
     queryClient.invalidateQueries({ queryKey: ["contacts"] });
   }
 
-  // Stage summary pills: render the server's authoritative per-stage totals (the
-  // whole pipeline population, not the current 50-row page), so each pill's number
-  // is the true count in that stage and matches the filtered list exactly. The
-  // server computes these over the unfiltered set, so the bar stays stable and
-  // accurate even while a stage filter is active.
-  const stageBar: Array<[string, number]> = Object.entries(
-    (data?.stageCounts ?? {}) as Record<string, number>
-  )
-    .filter(([s]) => s && s !== "Unknown")
-    .sort((a, b) => b[1] - a[1]);
+  // The stage summary pill bar was REMOVED (Jack, 2026-08-07). Its counts came from the
+  // opportunity mirror, which drifts from GoHighLevel — "Unresponsive (Demo Not Started)"
+  // read 46 here against 0 in GHL. A prominent, confidently-wrong number is worse than no
+  // number, and Filters → Pipeline & Stage already does this properly. Filtering by stage
+  // still works; only the inaccurate shortcut is gone.
 
   return (
     <div data-r10n-contacts className="flex flex-col flex-1 min-h-0 gap-2.5">
+
+      {isAdmin && (
+        <div className="inline-flex items-center gap-0.5 rounded-[9px] border border-border bg-card p-0.5 shrink-0 w-fit">
+          {(["contacts", "customers"] as const).map((v) => (
+            <button key={v} onClick={() => setView(v)} data-active={view === v ? "true" : "false"}
+              className={cn("px-3.5 py-1.5 text-[13px] font-medium rounded-[7px] capitalize transition-colors",
+                view === v ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+              {v}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {view === "customers" ? (
+        <CustomersView onOpenContact={(c) => { setOpenContactTab(undefined); setOpenContact(c); }} />
+      ) : (
+      <>
 
       {/* ── Toolbar ── */}
       <div className="flex items-center gap-2.5 flex-wrap shrink-0">
@@ -445,39 +459,6 @@ export function ContactsClient() {
         )}
       </div>
 
-      {/* ── Stage summary bar — click a stage to filter the list to it ── */}
-      {stageBar.length > 0 && (
-        <div data-r10n-stagebar className="flex items-center gap-2 overflow-x-auto shrink-0">
-          {stageBar.map(([stage, count]) => {
-            const active = filters.stageName === stage;
-            return (
-              <button
-                key={stage}
-                onClick={() => toggleStage(stage)}
-                title={active ? "Clear stage filter" : `Filter to ${stage}`}
-                data-r10n-stage-pill
-                data-status={stageStatus(stage)}
-                data-active={active ? "true" : "false"}
-                style={{ "--r10n-stage": r10nStageColor(stage) } as Record<string, string>}
-                className={cn(
-                  "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium border whitespace-nowrap transition-all cursor-pointer hover:brightness-[0.97]",
-                  stageClass(stage),
-                  active ? "ring-2 ring-primary/40 shadow-sm" : "opacity-90 hover:opacity-100"
-                )}
-              >
-                {stage}
-                <span data-r10n-stage-count className="tabular-nums font-bold">{count}</span>
-              </button>
-            );
-          })}
-          {filters.stageName && (
-            <button onClick={() => toggleStage(filters.stageName!)} data-r10n-clearall className="text-[10px] text-muted-foreground hover:text-foreground px-1 whitespace-nowrap">
-              Clear
-            </button>
-          )}
-        </div>
-      )}
-
       {/* ── Table ── */}
       <div data-r10n-table className="flex-1 min-h-0 overflow-auto rounded-[10px] border border-border bg-card">
         <table className="w-full border-collapse text-sm">
@@ -571,6 +552,9 @@ export function ContactsClient() {
             <PageBtn onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}><ChevronRight className="w-3.5 h-3.5" /></PageBtn>
           </div>
         </div>
+      )}
+
+      </>
       )}
 
       {openContact && (() => {
@@ -886,6 +870,11 @@ function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMe
             <div className="flex items-center gap-1.5">
               <p data-r10n-table-name className="text-sm font-medium text-foreground leading-tight truncate max-w-[180px]">{c.name}</p>
               {c.dnd && <span title="Do not contact"><Ban className="w-3 h-3 text-red-500 shrink-0" /></span>}
+              {c.isCustomer && (
+                <span title={c.customerStatus === "active" ? "Active customer" : "Past customer"}
+                  className={cn("shrink-0 inline-flex items-center justify-center h-4 w-4 rounded-full text-[9px] font-bold leading-none",
+                    c.customerStatus === "active" ? "bg-success/12 text-success" : "bg-muted text-muted-foreground")}>$</span>
+              )}
             </div>
             {c.email && <p data-r10n-table-sub className="text-[11px] text-muted-foreground truncate max-w-[180px] leading-tight">{c.email}</p>}
           </div>
@@ -993,7 +982,13 @@ function ContactRow({ contact: c, repName, selected, onSelect, onClick, onOpenMe
         {c.hasProposal ? (
           <span data-r10n-dot data-status={c.proposalStatus} className={cn(
             "w-2 h-2 rounded-full inline-block",
-            c.proposalStatus === "paid" ? "bg-emerald-500" :
+            // "completed" joins paid (collected in full); "active" gets its own teal, matching
+            // the status pill. Without these a paying client showed the same dead grey dot as a
+            // draft or a voided proposal.
+            c.proposalStatus === "paid" || c.proposalStatus === "completed" ? "bg-emerald-500" :
+            c.proposalStatus === "active" ? "bg-teal-500" :
+            c.proposalStatus === "past_due" ? "bg-red-500" :
+            c.proposalStatus === "partial" ? "bg-orange-500" :
             c.proposalStatus === "signed" ? "bg-blue-500" :
             c.proposalStatus === "sent" ? "bg-amber-500" :
             "bg-muted-foreground"

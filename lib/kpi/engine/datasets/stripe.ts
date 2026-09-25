@@ -20,6 +20,8 @@
 import Stripe from "stripe";
 import { stripe, hasStripe } from "@/lib/stripe/client";
 import type { DatasetDef, LoadCtx, RawRow } from "../types";
+import { loadChargesLocal, loadInvoicesLocal, loadSubscriptionsLocal } from "./stripe-local";
+import { monthlyAmount } from "@/lib/stripe/cycle";
 
 // ─── Shared helpers (mirrors the existing routes) ──────────────────────────────
 
@@ -50,15 +52,8 @@ function customerName(
 /** Normalise a subscription item's price to a monthly dollar amount (matches stripe-series). */
 function toMonthlyDollars(item: Stripe.SubscriptionItem | undefined): number {
   if (!item) return 0;
-  const unit = item.price.unit_amount ?? 0;
-  const interval = item.price.recurring?.interval ?? "month";
-  const count = item.price.recurring?.interval_count ?? 1;
-  switch (interval) {
-    case "year":  return unit / (12 * count) / 100;
-    case "week":  return (unit * 52) / (12 * count) / 100;
-    case "day":   return (unit * 365) / (12 * count) / 100;
-    default:      return unit / count / 100; // month
-  }
+  // Shared helper: a 30-day cycle is the monthly retainer, not 1.0139 months. See lib/stripe/cycle.ts.
+  return monthlyAmount(item.price.unit_amount, item.price.recurring?.interval, item.price.recurring?.interval_count) / 100;
 }
 
 const isSubInvoice = (inv: Stripe.Invoice) =>
@@ -108,7 +103,9 @@ export const stripeCharges: DatasetDef = {
     sublabel: (row.description as string) || undefined,
   }),
   rowAmount: (row: RawRow) => Number(row.amount ?? 0),
-  load: async ({ fetchStart, fetchEnd }: LoadCtx): Promise<RawRow[]> => {
+  load: async (loadCtx: LoadCtx): Promise<RawRow[]> => {
+    if (loadCtx.ctx?.stripeSource === "local") return loadChargesLocal(loadCtx);
+    const { fetchStart, fetchEnd } = loadCtx;
     if (!hasStripe()) return [];
     const s = stripe();
     const startUnix = Math.floor(fetchStart.getTime() / 1000);
@@ -186,7 +183,9 @@ export const stripeInvoices: DatasetDef = {
     sublabel: (row.number as string) || undefined,
   }),
   rowAmount: (row: RawRow) => Number(row.amount_paid ?? 0),
-  load: async ({ fetchStart, fetchEnd }: LoadCtx): Promise<RawRow[]> => {
+  load: async (loadCtx: LoadCtx): Promise<RawRow[]> => {
+    if (loadCtx.ctx?.stripeSource === "local") return loadInvoicesLocal(loadCtx);
+    const { fetchStart, fetchEnd } = loadCtx;
     if (!hasStripe()) return [];
     const s = stripe();
     const startUnix = Math.floor(fetchStart.getTime() / 1000);
@@ -256,7 +255,9 @@ export const stripeSubscriptions: DatasetDef = {
     sublabel: (row.status as string) || undefined,
   }),
   rowAmount: (row: RawRow) => Number(row.monthly_amount ?? 0),
-  load: async ({ fetchStart, fetchEnd }: LoadCtx): Promise<RawRow[]> => {
+  load: async (loadCtx: LoadCtx): Promise<RawRow[]> => {
+    if (loadCtx.ctx?.stripeSource === "local") return loadSubscriptionsLocal(loadCtx);
+    const { fetchStart, fetchEnd } = loadCtx;
     if (!hasStripe()) return [];
     const s = stripe();
     try {

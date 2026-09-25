@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { X, PhoneCall, Check, Plus, RefreshCw } from "lucide-react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils/cn";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -146,7 +147,9 @@ function AddToDialerModal({
   const primaryBusy = createMutation.isPending || addMutation.isPending;
   const errorMsg = createMutation.error?.message ?? addMutation.error?.message ?? null;
 
-  return (
+  // Portal to <body> so an ancestor `transform` (the kanban board's drag layer) can't turn
+  // this fixed overlay into a container-relative box that drifts to a corner and clips.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "var(--overlay)" }}>
       <div
         data-r10n-card
@@ -295,6 +298,7 @@ function AddToDialerModal({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

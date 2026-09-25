@@ -10,6 +10,7 @@ import { MetricSection } from "./metric-section";
 import { AcquisitionEconomicsSection } from "./acquisition-economics-section";
 import { MetricCell, fmtCurrency, fmtNumber, type MetricDef, type MetricTarget, type DateWindow, fmtValue } from "./metric-cell";
 import { KpiDetailSheet } from "./KpiDetailSheet";
+import { AdEfficiency } from "./ad-efficiency";
 import { KpiConfigurator } from "./kpi-configurator";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { balancedRows, type MetricValue } from "./balanced-metric-grid";
@@ -275,13 +276,13 @@ export function KpisClient() {
       cashCollected: { value: b.cashCollected, spark: b.cashSeries },
       outstandingPayments: {
         value: b.outstandingPayments,
-        sub: data._raw?.pastDueInvoiceCount
-          ? `${data._raw.pastDueInvoiceCount} invoice${data._raw.pastDueInvoiceCount === 1 ? "" : "s"} past due`
-          : "None past due",
+        sub: data._raw?.outstandingInvoiceCount
+          ? `${data._raw.outstandingInvoiceCount} open invoice${data._raw.outstandingInvoiceCount === 1 ? "" : "s"}`
+          : "Nothing outstanding",
       },
       outstanding: { value: b.outstanding },
       totalMrr: { value: b.totalMrr },
-      totalExpenses: { value: b.totalExpenses, sub: `Software: ${fmtCurrency(data._raw?.softwareCosts)} · Manual: ${fmtCurrency(data._raw?.manualExpenses)} · Fees: ${fmtCurrency(data._raw?.processingFees)} · Refunds: ${fmtCurrency(data._raw?.refunds)}` },
+      totalExpenses: { value: b.totalExpenses, sub: `Team: ${fmtCurrency(data._raw?.teamCosts)} · Software: ${fmtCurrency(data._raw?.softwareCosts)} · Manual: ${fmtCurrency(data._raw?.manualExpenses)} · Fees: ${fmtCurrency(data._raw?.processingFees)}` },
       netPL: { value: b.netPL, sub: b.netPL >= 0 ? "Profitable" : "Net loss" },
     };
   }, [data]);
@@ -346,6 +347,8 @@ export function KpisClient() {
     }
   }
 
+  const [activeTab, setActiveTab] = useState<"business" | "ads">("business");
+
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6">
@@ -397,6 +400,25 @@ export function KpisClient() {
           </div>
         </div>
 
+        {/* Tabs — Business KPIs vs Ad Efficiency */}
+        <div className="mb-6 flex items-center gap-1 rounded-lg bg-muted p-1 w-fit">
+          {([["business", "Business KPIs"], ["ads", "Ad Efficiency"]] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={cn(
+                "rounded-md px-4 py-1.5 text-sm font-medium transition-colors",
+                activeTab === key ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === "ads" && <AdEfficiency />}
+
+        {activeTab === "business" && (<>
         {/* Date picker */}
         <div className="mb-6">
           <DateRangePicker
@@ -509,6 +531,7 @@ export function KpisClient() {
         {/* Acquisition economics (CAC / contribution) — admin-only: the same engine also powers
             the sensitive company P&L, so it stays behind the admin gate. Full model lives on /money. */}
         {isAdmin && <AcquisitionEconomicsSection />}
+        </>)}
       </div>
 
       {detailMetric && (

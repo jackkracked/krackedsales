@@ -10,7 +10,7 @@ import { toZonedDate } from "@/lib/utils/timezone";
 import { ProposalStatusBadge } from "./proposal-status-badge";
 import { ActivityTimeline } from "./engagement";
 import { BillingActivity } from "./billing-activity";
-import { discountInfo, clientSentence, type BillingTerms } from "@/lib/proposals/billing";
+import { discountInfo, clientSentence, fullTermTotal, termMultiplier, managementSchedule, isNinetyDay, billingAnchor, type BillingTerms } from "@/lib/proposals/billing";
 
 interface Instalment {
   id: string;
@@ -21,6 +21,8 @@ interface Instalment {
   paidAt: string | null;
   isDeposit?: boolean;
   stripeHostedUrl?: string | null;
+  /** Null means NO INVOICE EXISTS. Not "unpaid": nobody has been asked. */
+  stripeInvoiceId?: string | null;
 }
 
 interface Proposal {
@@ -49,12 +51,22 @@ interface Proposal {
   listAmount?: number | null;
   discountType?: string | null;
   discountValue?: number | null;
+  discountScope?: string | null;
   startDate?: string | null;
+  // 90-Day Management billing display fields.
+  managementOption?: string | null;
+  autoRebillMode?: string | null;
+  firstPaymentSplit?: Array<{ amount: number; offsetDays?: number }> | null;
+  contractStartAt?: string | null;
   expiresAt?: string | null;
   hasDeposit?: boolean;
   depositTotal?: number | null;
   depositsPaidTotal?: number | null;
   subscriptionCreatedAt?: string | null;
+  /** Term progress for a 90-day spread retainer, supplied by the API from
+   *  lib/proposals/status.ts. Absent for every other proposal type, and absent until the
+   *  derivation is wired into the proposals endpoints — the UI simply renders nothing then. */
+  termProgress?: { collected: number; expected: number; amountCollected: number | null; amountExpected: number | null } | null;
 }
 
 interface ProposalDetailSlideOverProps {
@@ -124,22 +136,49 @@ function ScopeDisplay({ text }: { text: string }) {
   );
 }
 
-function InstalmentBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    pending: "bg-muted text-muted-foreground",
-    paid: "bg-green-50 text-green-700",
-    failed: "bg-red-50 text-red-700",
-    overdue: "bg-amber-50 text-amber-700",
+/**
+ * What is actually happening with this payment.
+ *
+ * WHY THIS IS NOT JUST `status`
+ * The row's status only ever said "pending", which covered two completely different situations:
+ * an invoice sitting with the client waiting to be paid, and NO INVOICE HAVING EVER BEEN RAISED.
+ * The second is the one that cost us: nine clients and $20,975 sat unbilled for six weeks and
+ * this screen showed them as "1 of 2 paid, one pending", indistinguishable from a payment that
+ * was simply not due yet. Nobody could have spotted it here, because it was not shown.
+ *
+ * So the absence of an invoice now has its own, louder label.
+ */
+function InstalmentBadge({ inst }: { inst: Instalment }) {
+  const overdue = !!inst.dueDate && new Date(inst.dueDate) < new Date();
+  const kind =
+    inst.status === "paid" ? "paid"
+    : inst.status === "failed" ? "failed"
+    : inst.status === "cancelled" ? "cancelled"
+    : !inst.stripeInvoiceId ? "not-billed"
+    : overdue ? "awaiting"
+    : "scheduled";
+
+  const look: Record<string, { label: string; className: string; title: string }> = {
+    paid:        { label: "Paid",        className: "bg-green-50 text-green-700",  title: "Collected" },
+    failed:      { label: "Failed",      className: "bg-red-50 text-red-700",      title: "The payment was declined. It blocks the next instalment until it is resolved." },
+    cancelled:   { label: "Cancelled",   className: "bg-muted text-muted-foreground", title: "This payment was cancelled and will not be collected." },
+    "not-billed":{ label: "Not billed",  className: "bg-amber-100 text-amber-800 ring-1 ring-inset ring-amber-300", title: "No invoice exists for this payment yet, so the client has not been asked for it. It is raised automatically once the previous instalment is paid." },
+    awaiting:    { label: "Awaiting",    className: "bg-amber-50 text-amber-700",  title: "Invoiced and past its due date, not yet paid." },
+    scheduled:   { label: "Scheduled",   className: "bg-blue-50 text-blue-700",    title: "Invoiced and set to collect on its due date." },
   };
+  const v = look[kind];
+
   return (
     <span
       data-r10n-status-pill
-      data-status={status}
+      data-status={kind}
+      title={v.title}
       className={cn(
-      "inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-semibold uppercase tracking-wide",
-      styles[status] ?? "bg-muted text-muted-foreground"
-    )}>
-      {status}
+        "inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-semibold uppercase tracking-wide",
+        v.className,
+      )}
+    >
+      {v.label}
     </span>
   );
 }
@@ -152,13 +191,31 @@ function InstalmentTable({ proposal, onUpdate }: { proposal: Proposal; onUpdate:
 
   async function togglePaid(inst: Instalment) {
     const newStatus = inst.status === "paid" ? "pending" : "paid";
+
+    // ASK FIRST. This used to colour a badge. It now cancels the Stripe invoice for this
+    // instalment and raises the NEXT one, which for a client with a card on file is a real
+    // debit. A single mis-click on a row should not move a customer's money.
+    const warning = newStatus === "paid"
+      ? `Mark instalment ${inst.instalmentNumber} as paid?\n\n` +
+        `This cancels any Stripe invoice for it and schedules the next instalment, which will ` +
+        `charge the client's saved payment method on its due date.`
+      : `Mark instalment ${inst.instalmentNumber} as unpaid again?`;
+    if (!window.confirm(warning)) return;
+
     setLoadingId(inst.id);
     try {
-      await fetch(`/api/proposals/${proposal.id}/instalments/${inst.id}`, {
+      const res = await fetch(`/api/proposals/${proposal.id}/instalments/${inst.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),
       });
+      if (!res.ok) {
+        // Never show a payment as changed when the server refused. The old code updated the
+        // row on screen regardless, so a 403 looked exactly like success.
+        const { error } = await res.json().catch(() => ({ error: "" }));
+        window.alert(error || "That change was not saved.");
+        return;
+      }
       setLocalInstalments((prev) =>
         prev.map((i) => i.id === inst.id ? { ...i, status: newStatus, paidAt: newStatus === "paid" ? new Date().toISOString() : null } : i)
       );
@@ -169,6 +226,12 @@ function InstalmentTable({ proposal, onUpdate }: { proposal: Proposal; onUpdate:
   }
 
   const paidCount = localInstalments.filter((i) => i.status === "paid").length;
+  // Money nobody has asked for. Worth its own line, because the progress bar counts what has
+  // been PAID and is perfectly happy to show "1 of 2" for a payment that was never even raised.
+  const unbilled = localInstalments.filter(
+    (i) => !["paid", "cancelled", "superseded_by_subscription"].includes(i.status) && !i.stripeInvoiceId,
+  );
+  const unbilledTotal = unbilled.reduce((t, i) => t + i.amount, 0);
 
   return (
     <div data-r10n-proposal-subtable className="bg-muted/30 rounded-[8px] overflow-hidden border border-border/60">
@@ -184,6 +247,21 @@ function InstalmentTable({ proposal, onUpdate }: { proposal: Proposal; onUpdate:
               style={{ width: `${(paidCount / localInstalments.length) * 100}%` }}
             />
           </div>
+        </div>
+      )}
+      {unbilled.length > 0 && (
+        <div
+          data-r10n-proposal-unbilled
+          className="px-3 py-2 bg-amber-50 border-b border-amber-200 text-[11px] leading-relaxed text-amber-900"
+        >
+          <span className="font-semibold">
+            {fmtAmount(unbilledTotal, proposal.currency)} has no invoice raised
+          </span>
+          {" "}
+          {unbilled.length === 1 ? "on this plan." : `across ${unbilled.length} payments.`}{" "}
+          {unbilled.length === localInstalments.length - paidCount && paidCount > 0
+            ? "It is raised automatically once the previous payment clears."
+            : "The next one is raised automatically as each payment clears."}
         </div>
       )}
       <table className="w-full text-sm">
@@ -209,7 +287,7 @@ function InstalmentTable({ proposal, onUpdate }: { proposal: Proposal; onUpdate:
                   {fmtCalendarDate(inst.dueDate)}
                 </td>
                 <td className="px-3 py-2">
-                  <InstalmentBadge status={inst.status} />
+                  <InstalmentBadge inst={inst} />
                 </td>
                 {canMarkPaid && (
                   <td className="px-3 py-2 text-right">
@@ -375,7 +453,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
         <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-border shrink-0">
           <div className="min-w-0 pr-3">
             <div className="flex items-center gap-2 flex-wrap">
-              <ProposalStatusBadge status={proposal.status} />
+              <ProposalStatusBadge status={proposal.status} management={proposal.type === "management"} />
               <span
                 data-r10n-proposal-type
                 className={cn(
@@ -422,6 +500,10 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
             const terms = proposal as BillingTerms;
             const disc = discountInfo(terms);
             const isMgmt = proposal.type === "management";
+            // 90-Day Management leads with the full 90-day total (monthly × 3); mult is 1 elsewhere.
+            const mult = termMultiplier(terms);
+            const mgmtSchedule = managementSchedule(terms);
+  const termProgress = proposal.termProgress ?? null;
             return (
               <div data-r10n-proposal-hero className="text-center py-4 px-4 bg-muted/30 rounded-[10px]">
                 {disc && (
@@ -434,7 +516,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                   className="text-3xl font-bold text-foreground"
                   style={{ fontFamily: "var(--font-heading)" }}
                 >
-                  {fmtAmount(proposal.totalAmount, proposal.currency)}
+                  {fmtAmount(fullTermTotal(terms), proposal.currency)}
                 </p>
                 {disc && (
                   <p data-r10n-proposal-discount className="text-xs font-semibold text-green-700 mt-0.5">
@@ -443,6 +525,28 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                 )}
                 {isMgmt && (
                   <p data-r10n-proposal-hero-meta className="text-xs text-muted-foreground mt-1.5 leading-snug">{clientSentence(terms)}</p>
+                )}
+                {mgmtSchedule && mgmtSchedule.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-border/60 text-left space-y-1">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1 text-center">Payment Schedule</p>
+                    {termProgress && (
+                      // The full progress line lives here rather than in the list, where the pill
+                      // carries only the counter. Says collected-vs-contracted in one read.
+                      <p data-r10n-term-progress className="text-[11px] text-muted-foreground text-center mb-1.5 tabular-nums">
+                        <span className="font-semibold text-foreground">{termProgress.collected} of {termProgress.expected}</span>
+                        {" collected"}
+                        {termProgress.amountCollected != null && termProgress.amountExpected != null && (
+                          <> · {fmtAmount(termProgress.amountCollected, proposal.currency)} of {fmtAmount(termProgress.amountExpected, proposal.currency)}</>
+                        )}
+                      </p>
+                    )}
+                    {mgmtSchedule.map((row, i) => (
+                      <div key={i} className="flex items-center justify-between gap-3">
+                        <span className="text-xs text-muted-foreground min-w-0 truncate">{row.label} · {row.when}</span>
+                        <span className="text-xs font-medium text-foreground tabular-nums shrink-0">{fmtAmount(row.amount, proposal.currency)}</span>
+                      </div>
+                    ))}
+                  </div>
                 )}
                 {proposal.paymentStructure === "instalment" && totalCount > 0 && (
                   <p data-r10n-proposal-hero-meta className="text-xs text-muted-foreground mt-1">
@@ -469,6 +573,41 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
               </div>
             ))}
           </div>
+
+          {/* Signed agreement — prominent view/download of the legal record */}
+          {proposal.signedAt && (
+            <div className="rounded-[8px] border border-green-600/30 bg-green-600/[0.05] p-3.5">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-green-600/15">
+                  <Check className="w-3.5 h-3.5 text-green-700" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-foreground">Signed agreement on file</p>
+                  <p className="text-[10px] text-muted-foreground">Signed {fmtDate(proposal.signedAt, tz)} · signature, timestamp & IP stored</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <a
+                  href={`/api/proposals/${proposal.id}/pdf`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-foreground bg-card border border-border rounded-[7px] hover:border-foreground/40 transition-colors"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  View signed agreement
+                </a>
+                <a
+                  href={`/api/proposals/${proposal.id}/pdf`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-green-700 rounded-[7px] hover:bg-green-800 transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Download PDF
+                </a>
+              </div>
+            </div>
+          )}
 
           {/* Prospect activity timeline (opens / clicks / views) */}
           <ActivityTimeline
@@ -508,14 +647,21 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
               <div data-r10n-proposal-tile className="flex items-center gap-2 px-3 py-2.5 bg-muted/30 rounded-[8px] border border-border/60">
                 <Repeat data-r10n-proposal-tile-icon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                 <span className="text-sm text-foreground/80">
-                  {fmtAmount(proposal.totalAmount, proposal.currency)} every{" "}
-                  {proposal.billingIntervalCount && proposal.billingIntervalCount > 1
-                    ? `${proposal.billingIntervalCount} ${proposal.billingInterval}s`
-                    : proposal.billingInterval}
+                  {isNinetyDay(proposal as BillingTerms)
+                    // 90-day: the full-term total framed as monthly × 3, so it agrees with the hero
+                    // ($4,500) instead of showing the raw monthly rate.
+                    ? `${fmtAmount(fullTermTotal(proposal as BillingTerms), proposal.currency)} over the 90-day term (${fmtAmount(proposal.totalAmount, proposal.currency)}/mo × 3)`
+                    : `${fmtAmount(proposal.totalAmount, proposal.currency)} every ${
+                        proposal.billingIntervalCount && proposal.billingIntervalCount > 1
+                          ? `${proposal.billingIntervalCount} ${proposal.billingInterval}s`
+                          : proposal.billingInterval
+                      }`}
                 </span>
-                {proposal.startDate && (
+                {billingAnchor(proposal as BillingTerms) && (
                   <span className="text-xs text-muted-foreground ml-auto">
-                    from {fmtCalendarDate(proposal.startDate)}
+                    {/* Same anchor as the payment schedule rendered above, so this "from" date
+                        cannot quote a different day once contractStartAt is set. */}
+                    from {fmtCalendarDate(billingAnchor(proposal as BillingTerms)!.toISOString())}
                   </span>
                 )}
               </div>
@@ -574,7 +720,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
                               {fmtCalendarDate(inst.dueDate)}
                             </td>
                             <td className="px-3 py-2">
-                              <InstalmentBadge status={inst.status} />
+                              <InstalmentBadge inst={inst} />
                             </td>
                             <td className="px-3 py-2 text-right">
                               {inst.stripeHostedUrl && inst.status !== "paid" && (
@@ -855,7 +1001,10 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
           {/* Deposit reconciliation is fully automatic (Stripe webhook + settleDeposits). No manual button. */}
 
           {/* Mark as Paid — manual backfill for existing clients */}
-          {!["paid", "void"].includes(proposal.status) && (
+          {/* Aligned with InstalmentTable's own canMarkPaid. "active"/"completed" are derived from
+              the subscription, so overwriting them by hand would be immediately undone and would
+              also clobber a live term. */}
+          {!["paid", "void", "active", "completed", "past_due", "lost"].includes(proposal.status) && (
             <div className="space-y-2">
               <div
                 className="overflow-hidden transition-all duration-300 ease-out"
@@ -912,7 +1061,7 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
           )}
 
           {/* Mark as Lost — for proposals that won't close */}
-          {!["paid", "void", "lost"].includes(proposal.status) && (
+          {!["paid", "void", "lost", "active", "completed"].includes(proposal.status) && (
             <div className="space-y-2">
               {markLostStep === "idle" ? (
                 <button

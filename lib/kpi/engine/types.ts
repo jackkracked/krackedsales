@@ -31,6 +31,9 @@ export interface EngineCtx {
   /** GHL user id for rep-scoping GHL datasets (opportunities by assignee). */
   ghlUserId?: string | null;
   isAdmin?: boolean;
+  /** Stripe read source. "local" reads the local_stripe_* mirror (fast); default "live" hits
+   *  Stripe's API. Used to roll out the mirror behind a flag with parity proof. */
+  stripeSource?: "live" | "local";
 }
 
 // ─── Fields, operators, aggregations ─────────────────────────────────────────

@@ -14,6 +14,7 @@ import Stripe from "stripe";
 import { stripe, hasStripe } from "@/lib/stripe/client";
 import type { Bucket } from "./buckets";
 import { bucketSum } from "./buckets";
+import { monthlyAmount } from "@/lib/stripe/cycle";
 
 async function paginateAll<T extends { id: string }>(
   fetcher: (startingAfter?: string) => Promise<{ data: T[]; has_more: boolean }>,
@@ -31,17 +32,8 @@ async function paginateAll<T extends { id: string }>(
 
 /** Normalise a subscription item's price to a monthly dollar amount. */
 function toMonthlyDollars(item: Stripe.SubscriptionItem): number {
-  const unitAmount = item.price.unit_amount ?? 0;
-  const interval = item.price.recurring?.interval ?? "month";
-  const count = item.price.recurring?.interval_count ?? 1;
-  let monthlyCents: number;
-  switch (interval) {
-    case "year":  monthlyCents = unitAmount / (12 * count); break;
-    case "week":  monthlyCents = (unitAmount * 52) / (12 * count); break;
-    case "day":   monthlyCents = (unitAmount * 365) / (12 * count); break;
-    default:      monthlyCents = unitAmount / count; // month
-  }
-  return monthlyCents / 100;
+  // Shared helper: a 30-day cycle is the monthly retainer, not 1.0139 months. See lib/stripe/cycle.ts.
+  return monthlyAmount(item.price.unit_amount, item.price.recurring?.interval, item.price.recurring?.interval_count) / 100;
 }
 
 interface ChargePoint { created: number; amount: number } // created = unix seconds, amount = dollars

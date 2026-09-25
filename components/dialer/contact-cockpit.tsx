@@ -8,6 +8,7 @@ import { CreateDemoModal } from "@/components/shared/create-demo-modal";
 import { CreateAuditModal } from "@/components/shared/create-audit-modal";
 import { EmailCard } from "./email-card";
 import type { CampaignDetail, DialerContact, RosterContact, Sentiment } from "./mock-data";
+import { DemoLinkField } from "@/components/shared/demo-link-field";
 
 const SENTIMENT: Record<Sentiment, { label: string; cls: string }> = {
   positive: { label: "Positive", cls: "bg-success-subtle text-success" },
@@ -194,6 +195,9 @@ function LoadedContact({ contact, isPreview, onSkip, onBack, onToast, stageLabel
               </ol>
             ) : <Empty>No activity yet.</Empty>}
           </Section>
+
+          {/* Demo Link — reachable mid-call without leaving the dialer */}
+          <DemoLinkField contactId={contact.id} className="px-1" />
         </div>
       </div>
 

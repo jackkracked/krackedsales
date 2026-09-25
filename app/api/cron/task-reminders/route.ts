@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { tasks, notifications } from "@/lib/db/schema";
+import { tasks, notifications, users } from "@/lib/db/schema";
 import { eq, and, isNotNull, gte, lt, isNull } from "drizzle-orm";
+import { sendSlackDm, taskDmBlocks } from "@/lib/slack/dm";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -10,9 +11,13 @@ export const maxDuration = 60;
  * Cron: task reminders
  * Runs twice daily via Vercel Cron:
  *   - 5pm UTC (0 17 * * *) — notify about tasks due tomorrow
- *   - 9am UTC (0 9 * * *)  — notify about tasks due today
+ *   - 9am UTC (0 9 * * *)  — notify about tasks due today, and chase anything overdue
  *
  * Checks the hour to determine which notification to fire.
+ *
+ * Every notification is ALSO a Slack DM when the assignee has a linked Slack account
+ * (`users.slack_user_id`). In-app stays the durable record: Slack is best-effort and never
+ * blocks or fails the run, so an unlinked teammate simply gets the in-app one.
  */
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
@@ -107,9 +112,73 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ sent: toInsert.length, type });
+    // ── Slack DMs for the same set ───────────────────────────────────────────────────
+    // Looked up once per run rather than per task: a person with six due tasks is one query.
+    const slackSent = await dmEach(
+      dueTasks.map((t) => ({
+        userId: t.userId!,
+        heading: isDueTomorrow ? "Task due tomorrow" : "Task due today",
+        task: t,
+      })),
+    );
+
+    // ── Overdue chase, mornings only ─────────────────────────────────────────────────
+    // Jack, 2026-09-22: daily until it is done, not once. Runs on the 9am pass only, so an
+    // overdue task produces one nudge a day rather than two.
+    let overdueSent = 0;
+    if (isDueToday) {
+      const startOfToday = new Date(now);
+      startOfToday.setUTCHours(0, 0, 0, 0);
+      const overdue = await db()
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.completed, false), isNotNull(tasks.userId), lt(tasks.dueDate, startOfToday)));
+      overdueSent = await dmEach(
+        overdue.map((t) => ({ userId: t.userId!, heading: "Still overdue", task: t })),
+      );
+    }
+
+    return NextResponse.json({ sent: toInsert.length, type, slackSent, overdueSent });
   } catch (err) {
     console.error("[GET /api/cron/task-reminders]", err);
     return NextResponse.json({ error: "Failed to send task reminders" }, { status: 500 });
   }
+}
+
+/**
+ * DM a batch of task reminders, one per task, resolving each person's Slack id once.
+ * Returns how many were actually delivered, so the cron response tells the truth.
+ */
+async function dmEach(
+  items: Array<{ userId: string; heading: string; task: typeof tasks.$inferSelect }>,
+): Promise<number> {
+  if (items.length === 0) return 0;
+
+  const ids = [...new Set(items.map((i) => i.userId))];
+  const people = new Map<string, { slackUserId: string | null; timezone: string | null }>();
+  for (const id of ids) {
+    const [u] = await db()
+      .select({ slackUserId: users.slackUserId, timezone: users.timezone })
+      .from(users)
+      .where(eq(users.id, id))
+      .limit(1);
+    if (u) people.set(id, u);
+  }
+
+  let sent = 0;
+  for (const { userId, heading, task } of items) {
+    const person = people.get(userId);
+    if (!person?.slackUserId) continue; // no linked Slack: the in-app notification stands
+    const { text, blocks } = taskDmBlocks({
+      heading,
+      title: task.title,
+      dueDate: task.dueDate,
+      priority: task.priority,
+      contactName: task.contactName,
+      assignedByName: task.assignedByName,
+      timezone: person.timezone,
+    });
+    if (await sendSlackDm({ slackUserId: person.slackUserId, text, blocks })) sent++;
+  }
+  return sent;
 }

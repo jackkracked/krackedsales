@@ -1232,8 +1232,8 @@ h1, h2, h3, h4, h5, h6 {
   color: #6E7179;
 }
 [data-theme="r10n"] [data-r10n-segmented-btn][data-active="true"] {
-  background-color: #1C1C21 !important;
-  color: #F4F4F5 !important;
+  background-color: var(--r10n-signal) !important;
+  color: #FFFFFF !important;
   box-shadow: none !important;
   border-radius: var(--radius-sm) !important;
 }
@@ -1249,7 +1249,7 @@ h1, h2, h3, h4, h5, h6 {
 [data-theme="r10n"] [data-r10n-channelpill][data-active="true"] {
   background-color: var(--r10n-signal) !important;
   border-color: var(--r10n-signal) !important;
-  color: #10131A !important;
+  color: #FFFFFF !important;
 }
 
 /* ══ CONVERSATION LIST ROWS ══
@@ -1332,11 +1332,42 @@ h1, h2, h3, h4, h5, h6 {
 [data-theme="r10n"] [data-r10n-convo-unreaddot] {
   background-color: var(--r10n-signal) !important;
 }
-/* Avatar channel badge (SMS/IG/FB glyph): cool the pastel fills to an obsidian
-   block so the list reads as one calm system, not seven colours. */
+/* Avatar channel badge (SMS/IG/FB/email glyph): a soft, light signal-blue chip
+   with the blue glyph + a panel-bg ring — one calm, airy system on white, not
+   seven saturated colours or a harsh black block. Shared by the list AND the
+   thread so both surfaces read identically. */
 [data-theme="r10n"] [data-r10n-convo-channelbadge] {
-  background-color: #1C1C21 !important;
-  color: #F4F4F5 !important;
+  background-color: #EEF4FF !important;
+  color: var(--r10n-signal) !important;
+}
+[data-theme="r10n"] [data-r10n-convo-channelbadge] svg {
+  color: var(--r10n-signal) !important;
+}
+
+/* ── Multi-select (bulk actions): every accent uses the signal blue, never the R10N
+      obsidian --primary. Checkbox fill, checked/selected row wash, the select-all row,
+      and the "Actions" button all read as one calm blue system. ── */
+[data-theme="r10n"] [data-r10n-checkbox][aria-checked="true"],
+[data-theme="r10n"] [data-r10n-checkbox][aria-checked="mixed"] {
+  background-color: var(--r10n-signal) !important;
+  border-color: var(--r10n-signal) !important;
+  color: #FFFFFF !important;
+}
+[data-theme="r10n"] [data-r10n-checkbox]:hover {
+  border-color: color-mix(in srgb, var(--r10n-signal) 55%, var(--border)) !important;
+}
+[data-theme="r10n"] [data-r10n-convo-row][data-checked="true"] {
+  background-color: rgba(37, 99, 235, 0.06) !important;
+}
+[data-theme="r10n"] [data-r10n-select-row][data-active="true"] {
+  background-color: rgba(37, 99, 235, 0.06) !important;
+}
+[data-theme="r10n"] [data-r10n-bulk-btn] {
+  background-color: var(--r10n-signal) !important;
+  color: #FFFFFF !important;
+}
+[data-theme="r10n"] [data-r10n-bulk-btn]:hover {
+  background-color: var(--r10n-signal-dim) !important;
 }
 
 /* ── Thread header: clean canvas, hairline rule. Name = Space Grotesk identity;
@@ -1357,7 +1388,7 @@ h1, h2, h3, h4, h5, h6 {
   letter-spacing: 0.02em;
   color: #9A9CA2;
 }
-/* Pipeline button → flat obsidian-hairline pill, mono label, lime hover edge. */
+/* Pipeline button → flat hairline pill, mono label, soft signal-blue hover edge. */
 [data-theme="r10n"] [data-r10n-thread-action] {
   border-color: var(--border) !important;
   border-radius: var(--radius) !important;
@@ -1367,31 +1398,30 @@ h1, h2, h3, h4, h5, h6 {
   text-transform: uppercase;
 }
 [data-theme="r10n"] [data-r10n-thread-action]:hover {
-  border-color: #1C1C21 !important;
-  background-color: transparent !important;
-  box-shadow: inset 0 0 0 1px var(--r10n-signal);
+  border-color: var(--r10n-signal) !important;
+  background-color: rgba(37, 99, 235, 0.04) !important;
+  box-shadow: none;
 }
 [data-theme="r10n"] [data-r10n-thread-action-icon] {
   color: #6E7179 !important;
 }
 
 /* ══ MESSAGE BUBBLES ══
-   Outbound = obsidian/primary block, white text. Inbound = white with a hairline
-   border + the flat shadow. Tighter radius. Timestamps → mono. Drops the navy
-   drop-shadows from the GHL bubbles. */
-[data-theme="r10n"] [data-r10n-bubble] {
-  border-radius: var(--radius-card) !important;
-}
+   Light + airy, GHL-style. Outbound (us) = a whisper of blue (#EEF4FF) with dark
+   #1C1C21 text; inbound (contact) = white with a hairline border. Both ~16px with
+   a 5px tail (set inline on the component). No heavy shadows — flat/barely-there.
+   Timestamps → mono. */
 [data-theme="r10n"] [data-r10n-bubble][data-dir="out"] {
-  background-color: var(--primary) !important;
-  color: var(--primary-foreground) !important;
+  background-color: #EEF4FF !important;
+  color: #1C1C21 !important;
+  border: 1px solid rgba(37, 99, 235, 0.10) !important;
   box-shadow: none !important;
 }
 [data-theme="r10n"] [data-r10n-bubble][data-dir="in"] {
   background-color: var(--card) !important;
-  color: var(--foreground) !important;
+  color: #1C1C21 !important;
   border: 1px solid var(--border) !important;
-  box-shadow: var(--shadow-flat) !important;
+  box-shadow: none !important;
 }
 [data-theme="r10n"] [data-r10n-bubble-time] {
   font-family: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1519,9 +1549,10 @@ h1, h2, h3, h4, h5, h6 {
 [data-theme="r10n"] [data-r10n-smartbanner-item] {
   color: #6E7179 !important;
 }
-/* "Add all" → flat obsidian pill, lime hover edge (the add-lead idiom). */
+/* "Add all" → soft signal-blue pill, the single interactive accent (was obsidian). */
 [data-theme="r10n"] [data-r10n-smartbanner-addall] {
-  background-color: #1C1C21 !important;
+  background-color: var(--r10n-signal) !important;
+  color: #FFFFFF !important;
   border-radius: var(--radius) !important;
   font-family: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px;
@@ -1529,8 +1560,8 @@ h1, h2, h3, h4, h5, h6 {
   text-transform: uppercase;
 }
 [data-theme="r10n"] [data-r10n-smartbanner-addall]:hover {
-  background-color: #000000 !important;
-  box-shadow: inset 0 0 0 1px var(--r10n-signal);
+  background-color: var(--r10n-signal-dim) !important;
+  box-shadow: none;
 }
 [data-theme="r10n"] [data-r10n-smartbanner-dismiss] {
   color: #9A9CA2;
@@ -1540,28 +1571,29 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* ══ REPLY COMPOSER ══
-   Flat R10N input (hairline, var(--input)), calm obsidian focus (no navy ring/
-   glow). Obsidian send button with a lime hover/active edge. Mono helper text. */
+   Light + airy. Flat input on the panel white, calm signal-blue focus (soft, no
+   glow). Send button = the soft signal blue used sparingly for the interactive
+   action. Mono helper text in calm grey. */
 [data-theme="r10n"] [data-r10n-composer] {
   background-color: var(--card);
   border-color: var(--border);
 }
 [data-theme="r10n"] [data-r10n-composer-field] {
-  background-color: var(--input) !important;
+  background-color: var(--card) !important;
   border-color: var(--border) !important;
   border-radius: var(--radius) !important;
 }
 [data-theme="r10n"] [data-r10n-composer-field]:focus-within {
-  border-color: #1C1C21 !important;
-  box-shadow: none !important;
+  border-color: var(--r10n-signal) !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10) !important;
 }
 /* Meta composers use a bare textarea (no wrapper) — flatten its focus too. */
 [data-theme="r10n"] [data-r10n-composer-input] {
   border-radius: var(--radius) !important;
 }
 [data-theme="r10n"] [data-r10n-composer-input]:focus {
-  border-color: #1C1C21 !important;
-  box-shadow: none !important;
+  border-color: var(--r10n-signal) !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10) !important;
 }
 [data-theme="r10n"] [data-r10n-composer-via],
 [data-theme="r10n"] [data-r10n-composer-kbd] {
@@ -1576,23 +1608,52 @@ h1, h2, h3, h4, h5, h6 {
   letter-spacing: 0.02em;
   color: #1C1C21 !important;
 }
-/* Send button: obsidian block, mono label, lime hover/active edge. Overrides the
-   navy hover + navy drop-shadow on the active state. */
+/* Send button: the signal blue as the single interactive accent (was obsidian),
+   mono label, a slightly deeper blue on hover. */
 [data-theme="r10n"] [data-r10n-composer-send] {
   border-radius: var(--radius) !important;
 }
 [data-theme="r10n"] [data-r10n-composer-send][data-can-send="true"] {
-  background-color: #1C1C21 !important;
+  background-color: var(--r10n-signal) !important;
+  color: #FFFFFF !important;
   box-shadow: none !important;
 }
 [data-theme="r10n"] [data-r10n-composer-send][data-can-send="true"]:hover {
-  background-color: #000000 !important;
-  box-shadow: inset 0 0 0 1px var(--r10n-signal) !important;
+  background-color: var(--r10n-signal-dim) !important;
+  box-shadow: none !important;
 }
-/* The Meta send buttons (square, no data-can-send) get the lime edge on hover. */
+/* The Meta send buttons (square, no data-can-send) get the same blue on hover. */
 [data-theme="r10n"] [data-r10n-composer-send]:not([data-can-send]):hover {
-  background-color: #000000 !important;
-  box-shadow: inset 0 0 0 1px var(--r10n-signal) !important;
+  background-color: var(--r10n-signal) !important;
+  color: #FFFFFF !important;
+  box-shadow: none !important;
+}
+/* Composer tools (quick messages + attach) + the quick-message add/save actions → signal blue,
+   never the R10N obsidian --primary. */
+[data-theme="r10n"] [data-r10n-composer-tool]:hover,
+[data-theme="r10n"] [data-r10n-composer-tool][aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--r10n-signal) 45%, var(--border)) !important;
+  color: var(--r10n-signal) !important;
+  background-color: rgba(37, 99, 235, 0.05) !important;
+}
+[data-theme="r10n"] [data-r10n-quickmsg-add] {
+  color: var(--r10n-signal) !important;
+}
+[data-theme="r10n"] [data-r10n-quickmsg-add]:hover {
+  background-color: rgba(37, 99, 235, 0.07) !important;
+}
+[data-theme="r10n"] [data-r10n-quickmsg-save] {
+  background-color: var(--r10n-signal) !important;
+  color: #FFFFFF !important;
+}
+[data-theme="r10n"] [data-r10n-quickmsg-save]:hover:not(:disabled) {
+  background-color: var(--r10n-signal-dim) !important;
+}
+/* Quick-messages Settings tab: the "In chat" badge → signal blue. (The active toggle reuses the
+   shared [data-r10n-settings-toggle] treatment.) */
+[data-theme="r10n"] [data-r10n-quickmsg-badge] {
+  background-color: rgba(37, 99, 235, 0.12) !important;
+  color: var(--r10n-signal-dim) !important;
 }
 
 /* ══ LEAD-DETAILS + META LEAD SIDEBARS ══
@@ -1659,15 +1720,15 @@ h1, h2, h3, h4, h5, h6 {
   border-radius: var(--radius) !important;
 }
 [data-theme="r10n"] [data-r10n-quickaction]:hover {
-  border-color: #1C1C21 !important;
-  background-color: transparent !important;
+  border-color: var(--r10n-signal) !important;
+  background-color: rgba(37, 99, 235, 0.04) !important;
 }
 [data-theme="r10n"] [data-r10n-quickaction-icon] {
   background-color: var(--muted) !important;
   border-radius: var(--radius-sm) !important;
 }
 [data-theme="r10n"] [data-r10n-quickaction]:hover [data-r10n-quickaction-icon] {
-  background-color: #1C1C21 !important;
+  background-color: #EEF4FF !important;
 }
 [data-theme="r10n"] [data-r10n-quickaction]:hover [data-r10n-quickaction-icon] svg {
   color: var(--r10n-signal) !important;
@@ -2064,6 +2125,45 @@ h1, h2, h3, h4, h5, h6 {
   background-color: rgba(37, 99, 235, 0.16) !important;
   border-color: color-mix(in srgb, var(--r10n-signal) 50%, transparent) !important;
   color: #1D4ED8 !important;
+}
+/* Untitled's Toggle paints its "on" track `bg-card` and its "off" track `bg-muted/60`. In this
+   theme both are near-white, so an admin genuinely cannot tell whether a day is switched on.
+   The input sits inside a span, not directly under the label, so the `:has()` must not use a
+   child combinator: the first attempt did and silently matched nothing.
+   The component is fine; its colour mapping just never reached our palette. Rendered and
+   confirmed 2026-09-25 on /settings/telephony. */
+[data-theme="r10n"] label:has(input[role="switch"]:checked) > div {
+  background-color: var(--primary) !important;
+  --tw-ring-color: transparent !important;
+}
+[data-theme="r10n"] label:has(input[role="switch"]:checked) > div > div {
+  background-color: #fff !important;
+}
+
+/* Instalment pills. "not-billed" is the one that matters: it means NOBODY HAS BEEN ASKED for
+   this money, as opposed to asked and waiting. That distinction stayed invisible for six weeks
+   and cost $20,975, so it gets the loudest treatment on the screen and never blends into the
+   neutral default. See components/proposals/proposal-detail-slide-over.tsx. */
+[data-theme="r10n"] [data-r10n-status-pill][data-status="not-billed"] {
+  background-color: rgba(217, 119, 6, 0.16) !important;
+  border-color: rgba(217, 119, 6, 0.55) !important;
+  color: #92400E !important;
+}
+[data-theme="r10n"] [data-r10n-status-pill][data-status="awaiting"] {
+  background-color: rgba(217, 119, 6, 0.08) !important;
+  border-color: rgba(217, 119, 6, 0.30) !important;
+  color: #B45309 !important;
+}
+/* Invoiced and simply waiting for its date: calm, because nothing is wrong. */
+[data-theme="r10n"] [data-r10n-status-pill][data-status="scheduled"] {
+  background-color: rgba(37, 99, 235, 0.08) !important;
+  border-color: rgba(37, 99, 235, 0.28) !important;
+  color: #1D4ED8 !important;
+}
+[data-theme="r10n"] [data-r10n-status-pill][data-status="failed"] {
+  background-color: rgba(215, 38, 61, 0.10) !important;
+  border-color: color-mix(in srgb, var(--destructive) 32%, transparent) !important;
+  color: var(--destructive) !important;
 }
 [data-theme="r10n"] [data-r10n-status-pill][data-status="signed"] {
   background-color: rgba(31, 164, 99, 0.10) !important;
@@ -2937,6 +3037,49 @@ h1, h2, h3, h4, h5, h6 {
    The whole footer is built on bg-primary (auto-obsidian under r10n). We retint
    the pastel SECONDARY actions: the positive ones (signed-pay / mark-paid /
    deposit) → lime; mark-lost → amber; the "paid" confirmation → green. */
+/* ── Proposal builder: SELECTED cards use the signal blue, never the black primary fill.
+   Kills the "morbid" solid-black selected state; matches R10N's tinted-state colour language. ── */
+[data-theme="r10n"] [data-r10n-proposal-choice][data-active="true"] {
+  background-color: rgba(37, 99, 235, 0.07) !important;
+  border-color: color-mix(in srgb, var(--r10n-signal) 45%, transparent) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--r10n-signal) 16%, transparent),
+              0 12px 28px -20px rgba(37, 99, 235, 0.5) !important;
+}
+[data-theme="r10n"] [data-r10n-choice-icon][data-active="true"] {
+  background-color: var(--r10n-signal) !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 4px 12px -6px rgba(37, 99, 235, 0.55) !important;
+}
+[data-theme="r10n"] [data-r10n-choice-radio][data-active="true"] {
+  background-color: var(--r10n-signal) !important;
+  border-color: var(--r10n-signal) !important;
+}
+/* Segmented pill (cadence / after-90-days) → signal blue, not black. */
+[data-theme="r10n"] [data-r10n-seg-pill] {
+  background-color: var(--r10n-signal) !important;
+}
+/* Project flow pills when selected → signal-blue tint (matches the choice cards). */
+[data-theme="r10n"] [data-r10n-proposal-flowpill][data-selected="true"] {
+  background-color: rgba(37, 99, 235, 0.10) !important;
+  border-color: color-mix(in srgb, var(--r10n-signal) 45%, transparent) !important;
+  color: #1D4ED8 !important;
+}
+/* Key figures (e.g. the summary price) → signal blue. */
+[data-theme="r10n"] [data-r10n-signal-text] { color: var(--r10n-signal) !important; }
+/* "Most Popular" badge → signal-blue chip (not black). */
+[data-theme="r10n"] [data-r10n-signal-chip] { background-color: var(--r10n-signal) !important; color: #FFFFFF !important; }
+/* Generic selected toggle (discount %/$) → signal blue, not black. */
+[data-theme="r10n"] [data-r10n-sel][data-active="true"] {
+  background-color: var(--r10n-signal) !important;
+  color: #FFFFFF !important;
+}
+/* CC recipient pills → signal-blue tint (not flat grey). */
+[data-theme="r10n"] [data-r10n-cc-pill] {
+  background-color: rgba(37, 99, 235, 0.08) !important;
+  border-color: color-mix(in srgb, var(--r10n-signal) 40%, transparent) !important;
+  color: #1D4ED8 !important;
+}
+
 [data-theme="r10n"] [data-r10n-proposal-cta="primary"] {
   background-color: #1C1C21 !important;
   color: #FFFFFF !important;
@@ -8711,3 +8854,143 @@ h1, h2, h3, h4, h5, h6 {
 .rmd-body-editor .rmd-pill.ProseMirror-selectednode {
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--primary) 40%, transparent);
 }
+
+/* ─── RichTextEditor (proposal copy) — visual formatting inside the WYSIWYG ─── */
+.rte-content { min-height: 120px; outline: none; }
+.rte-content:focus { outline: none; }
+.rte-content p { margin: 0 0 0.6rem; line-height: 1.6; color: var(--foreground); }
+.rte-content p:last-child { margin-bottom: 0; }
+.rte-content strong { font-weight: 700; }
+.rte-content em { font-style: italic; }
+.rte-content a { color: var(--primary); text-decoration: underline; }
+.rte-content h2 { font-size: 1.05rem; font-weight: 700; margin: 0.4rem 0 0.5rem; color: var(--foreground); }
+.rte-content h3 { font-size: 0.95rem; font-weight: 700; margin: 0.4rem 0 0.4rem; color: var(--foreground); }
+.rte-content ul { list-style: disc; padding-left: 1.4rem; margin: 0 0 0.6rem; }
+.rte-content ol { list-style: decimal; padding-left: 1.4rem; margin: 0 0 0.6rem; }
+.rte-content li { margin: 0.15rem 0; line-height: 1.55; }
+.rte-content hr { border: none; border-top: 1px solid var(--border); margin: 0.9rem 0; }
+/* Empty-editor placeholder (Tiptap adds is-empty/is-editor-empty on the first node) */
+.rte-wrap .is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  opacity: 0.6;
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* ─── Untitled UI badge palette ───────────────────────────────────────────────────────────
+   Additive ONLY. Every name here is new (`--color-utility-*`), so no existing class in this
+   app resolves differently because of it — Tailwind v4 emits a utility only for a token that
+   is referenced, and nothing of ours references these.
+
+   They exist because Untitled UI's badges carry twelve colour variants and our own palette has
+   six semantic roles, so mapping them onto ours would have collapsed twelve distinct statuses
+   into a handful. `brand` is keyed to the R10N navy so the default badge reads as ours.
+   Everything Untitled expresses semantically (surfaces, text, borders, focus) is mapped to our
+   tokens in the components themselves rather than redefined here. */
+@theme {
+  --color-utility-brand-50: #EAF0F5;
+  --color-utility-brand-100: #D3E0EA;
+  --color-utility-brand-200: #A8C2D6;
+  --color-utility-brand-300: #7FA4C1;
+  --color-utility-brand-400: #4C7FA3;
+  --color-utility-brand-500: #0F3A5C;
+  --color-utility-brand-600: #0C2F4B;
+  --color-utility-brand-700: #09243A;
+  --color-utility-neutral-50: #F8F8F7;
+  --color-utility-neutral-100: #F0EFED;
+  --color-utility-neutral-200: #E0DDD8;
+  --color-utility-neutral-300: #C9C4BC;
+  --color-utility-neutral-400: #9B958B;
+  --color-utility-neutral-500: #6E6960;
+  --color-utility-neutral-600: #524E47;
+  --color-utility-neutral-700: #3A3733;
+  --color-utility-slate-50: #F8FAFC;
+  --color-utility-slate-100: #F1F5F9;
+  --color-utility-slate-200: #E2E8F0;
+  --color-utility-slate-300: #CBD5E1;
+  --color-utility-slate-400: #94A3B8;
+  --color-utility-slate-500: #64748B;
+  --color-utility-slate-600: #475569;
+  --color-utility-slate-700: #334155;
+  --color-utility-red-50: #FEF2F2;
+  --color-utility-red-100: #FEE2E2;
+  --color-utility-red-200: #FECACA;
+  --color-utility-red-300: #FCA5A5;
+  --color-utility-red-400: #F87171;
+  --color-utility-red-500: #EF4444;
+  --color-utility-red-600: #DC2626;
+  --color-utility-red-700: #B91C1C;
+  --color-utility-orange-50: #FFF7ED;
+  --color-utility-orange-100: #FFEDD5;
+  --color-utility-orange-200: #FED7AA;
+  --color-utility-orange-300: #FDBA74;
+  --color-utility-orange-400: #FB923C;
+  --color-utility-orange-500: #F97316;
+  --color-utility-orange-600: #EA580C;
+  --color-utility-orange-700: #C2410C;
+  --color-utility-yellow-50: #FEFCE8;
+  --color-utility-yellow-100: #FEF9C3;
+  --color-utility-yellow-200: #FEF08A;
+  --color-utility-yellow-300: #FDE047;
+  --color-utility-yellow-400: #FACC15;
+  --color-utility-yellow-500: #EAB308;
+  --color-utility-yellow-600: #CA8A04;
+  --color-utility-yellow-700: #A16207;
+  --color-utility-green-50: #F0FDF4;
+  --color-utility-green-100: #DCFCE7;
+  --color-utility-green-200: #BBF7D0;
+  --color-utility-green-300: #86EFAC;
+  --color-utility-green-400: #4ADE80;
+  --color-utility-green-500: #22C55E;
+  --color-utility-green-600: #16A34A;
+  --color-utility-green-700: #15803D;
+  --color-utility-sky-50: #F0F9FF;
+  --color-utility-sky-100: #E0F2FE;
+  --color-utility-sky-200: #BAE6FD;
+  --color-utility-sky-300: #7DD3FC;
+  --color-utility-sky-400: #38BDF8;
+  --color-utility-sky-500: #0EA5E9;
+  --color-utility-sky-600: #0284C7;
+  --color-utility-sky-700: #0369A1;
+  --color-utility-blue-50: #EFF6FF;
+  --color-utility-blue-100: #DBEAFE;
+  --color-utility-blue-200: #BFDBFE;
+  --color-utility-blue-300: #93C5FD;
+  --color-utility-blue-400: #60A5FA;
+  --color-utility-blue-500: #3B82F6;
+  --color-utility-blue-600: #2563EB;
+  --color-utility-blue-700: #1D4ED8;
+  --color-utility-indigo-50: #EEF2FF;
+  --color-utility-indigo-100: #E0E7FF;
+  --color-utility-indigo-200: #C7D2FE;
+  --color-utility-indigo-300: #A5B4FC;
+  --color-utility-indigo-400: #818CF8;
+  --color-utility-indigo-500: #6366F1;
+  --color-utility-indigo-600: #4F46E5;
+  --color-utility-indigo-700: #4338CA;
+  --color-utility-purple-50: #FAF5FF;
+  --color-utility-purple-100: #F3E8FF;
+  --color-utility-purple-200: #E9D5FF;
+  --color-utility-purple-300: #D8B4FE;
+  --color-utility-purple-400: #C084FC;
+  --color-utility-purple-500: #A855F7;
+  --color-utility-purple-600: #9333EA;
+  --color-utility-purple-700: #7E22CE;
+  --color-utility-pink-50: #FDF2F8;
+  --color-utility-pink-100: #FCE7F3;
+  --color-utility-pink-200: #FBCFE8;
+  --color-utility-pink-300: #F9A8D4;
+  --color-utility-pink-400: #F472B6;
+  --color-utility-pink-500: #EC4899;
+  --color-utility-pink-600: #DB2777;
+  --color-utility-pink-700: #BE185D;
+}
+
+/* Untitled's tooltip arrow positions itself with these. Four variants, additive, used only by
+   components/untitled/base/tooltip. */
+@custom-variant in-placement-top (&:is([data-placement="top"] *));
+@custom-variant in-placement-bottom (&:is([data-placement="bottom"] *));
+@custom-variant in-placement-left (&:is([data-placement="left"] *));
+@custom-variant in-placement-right (&:is([data-placement="right"] *));

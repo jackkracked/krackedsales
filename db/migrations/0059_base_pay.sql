@@ -1,0 +1,16 @@
+-- 0059: Per-person base pay, the one number the commission sheet types by hand.
+--
+-- WHY ON `users` AND NOT IN `team_salaries`
+-- `team_salaries` already holds monthly amounts, but it is a list of DELIVERY roles (Strategist,
+-- Copywriter, Tech, Designer) feeding the Total Expenses KPI. It has no row for Kelsey, Alice or
+-- Gage and no link to a user id. Overloading it would mean one table answering two unrelated
+-- questions, and a sales rep's pay silently changing the company's cost line.
+--
+-- Jack, 2026-09-22: "We should set base pay in admin and this will reflect." So it is editable
+-- in team settings beside commission %, which is the other half of the same person's pay.
+--
+-- CENTS, as an integer. Kelsey's sheet says 1500, and a float that renders as 1499.9999999 on
+-- someone's payslip is not a bug anyone should have to explain.
+--
+-- Additive and idempotent. Defaults to 0, so nobody is credited pay they were not given.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS base_pay_cents integer NOT NULL DEFAULT 0;

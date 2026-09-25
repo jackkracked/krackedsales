@@ -24,13 +24,21 @@ const URL_RE = new RegExp(
 const PHONE_RE =
   /(?:\+?1[-.\s]?)?\(?(\d{3})\)?[-.\s]?(\d{3})[-.\s]?(\d{4})(?!\d)/g;
 
-// Domains that are GHL internals or other system hosts — never shown as enrichable
+// Domains that are GHL internals, our own infrastructure, or asset hosts. None of these is
+// ever a CONTACT's data, so offering them for enrichment only invites saving a storage bucket
+// or one of our own demo pages as a client's website.
 const BLOCKED_DOMAINS = [
   "blooio.com",        // GHL file attachment CDN
   "msgsndr.com",       // GHL messaging infrastructure
   "leadconnectorhq.com",
   "highlevel.com",
   "gohighlevel.com",
+  // GHL stores message media in a Google bucket, so attachments surfaced as "contact data".
+  // The paths give it away: storage.googleapis.com/msgsndr/...
+  "storage.googleapis.com",
+  // Ours. Every demo we send is demo.krackedretention.com/<client>, so it was being detected
+  // on exactly the threads where we had just sent one. The apex covers every subdomain.
+  "krackedretention.com",
 ];
 
 function isBlockedDomain(url: string): boolean {
@@ -50,7 +58,9 @@ export interface ExtractedData {
   phones: string[];
 }
 
-export function extractContactData(text: string): ExtractedData {
+export function extractContactData(text: string | null | undefined): ExtractedData {
+  // Media/story/reaction messages (e.g. Instagram) can have no text body — never crash on them.
+  if (!text) return { urls: [], emails: [], phones: [] };
   const emails = [...(text.match(EMAIL_RE) ?? [])];
 
   // Strip emails before URL matching to avoid matching email domains as URLs
@@ -109,17 +119,28 @@ export interface ExistingContactData {
  * form (so "Acme.com" vs "https://acme.com/" match). Powers the inbox rule: only ever
  * surface data we don't already have.
  */
+/** Collapse values that are equal once normalized (e.g. "http://x.com" + "x.com" + "www.x.com/"),
+ *  keeping the first, so a detected website only ever shows as ONE chip. */
+function dedupeNormalized(type: "url" | "email" | "phone", arr: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of arr) {
+    const n = normalizeForCompare(type, v);
+    if (n && !seen.has(n)) { seen.add(n); out.push(v); }
+  }
+  return out;
+}
+
 export function filterAlreadyOnFile(
   data: ExtractedData,
   existing: ExistingContactData | undefined | null
 ): ExtractedData {
-  if (!existing) return data;
-  const haveEmail = existing.email ? normalizeForCompare("email", existing.email) : null;
-  const havePhone = existing.phone ? normalizeForCompare("phone", existing.phone) : null;
-  const haveWebsite = existing.website ? normalizeForCompare("url", existing.website) : null;
+  const haveEmail = existing?.email ? normalizeForCompare("email", existing.email) : null;
+  const havePhone = existing?.phone ? normalizeForCompare("phone", existing.phone) : null;
+  const haveWebsite = existing?.website ? normalizeForCompare("url", existing.website) : null;
   return {
-    urls: haveWebsite ? data.urls.filter((v) => normalizeForCompare("url", v) !== haveWebsite) : data.urls,
-    emails: haveEmail ? data.emails.filter((v) => normalizeForCompare("email", v) !== haveEmail) : data.emails,
-    phones: havePhone ? data.phones.filter((v) => normalizeForCompare("phone", v) !== havePhone) : data.phones,
+    urls: dedupeNormalized("url", data.urls).filter((v) => !haveWebsite || normalizeForCompare("url", v) !== haveWebsite),
+    emails: dedupeNormalized("email", data.emails).filter((v) => !haveEmail || normalizeForCompare("email", v) !== haveEmail),
+    phones: dedupeNormalized("phone", data.phones).filter((v) => !havePhone || normalizeForCompare("phone", v) !== havePhone),
   };
 }

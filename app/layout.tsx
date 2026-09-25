@@ -5,7 +5,6 @@ import {
   Space_Grotesk,
   JetBrains_Mono,
 } from "next/font/google";
-import { cookies } from "next/headers";
 import { Toaster } from "sonner";
 import { SkewGuard } from "@/components/system/skew-guard";
 import "./globals.css";
@@ -45,16 +44,17 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Admin-only r10n theme. SSR-read the cookie so there is no flash of the wrong
-  // theme. With no cookie (the default for everyone) no data-theme is set, so the
-  // app renders exactly as it does today.
-  const cookieStore = await cookies();
-  const r10nOn = cookieStore.get("r10n_theme")?.value === "on";
+  // r10n is THE theme now (Jack, 2026-08-25: "we'll just stick with the r10n theme, we won't
+  // use that old theme"). It used to be an admin-only cookie opt-in, which meant anyone WITHOUT
+  // the cookie — Gage, Kelsey, Alice — silently kept the old look. Setting it unconditionally is
+  // what actually retires the old theme; hiding the toggle alone would have stranded them on it
+  // with no way to switch. The old styles remain in the stylesheet, unreferenced, so reverting is
+  // a one-line change.
 
   return (
     <html
       lang="en"
-      {...(r10nOn ? { "data-theme": "r10n" } : {})}
+      data-theme="r10n"
       className={`${inter.variable} ${plusJakartaSans.variable} ${spaceGrotesk.variable} ${jetBrainsMono.variable} h-full`}
     >
       <body className="h-full antialiased">

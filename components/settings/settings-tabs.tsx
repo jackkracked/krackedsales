@@ -2,17 +2,20 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { Users, DollarSign, Zap, BarChart2, CalendarDays, BellRing } from "lucide-react";
+import { Users, DollarSign, Zap, BarChart2, CalendarDays, BellRing, FileText, MessageSquareText } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { TeamSettings } from "@/components/settings/team-settings";
 import { NotificationsClient } from "@/components/settings/notifications-client";
 import { SoftwareCosts } from "@/components/settings/software-costs";
+import { TeamSalaries } from "@/components/settings/team-salaries";
 import { CostSettings } from "@/components/settings/cost-settings";
 import { DemoTargets } from "@/components/settings/demo-targets";
 import { IntegrationsGrid } from "@/components/settings/integrations-grid";
 import { UserCalendarsSettings } from "@/components/settings/user-calendars-settings";
 import { CallCalendarsSettings } from "@/components/settings/call-calendars-settings";
 import { GhlSyncPanel } from "@/components/settings/GhlSyncPanel";
+import { ProposalTemplatesSettings } from "@/components/settings/proposal-templates";
+import { QuickMessagesSettings } from "@/components/settings/quick-messages-settings";
 
 const TABS = [
   { id: "team",         label: "Team",         icon: Users,         description: "Manage users and access" },
@@ -20,6 +23,8 @@ const TABS = [
   { id: "demo",         label: "Demo Tracker", icon: BarChart2,     description: "Target turnaround times per stage" },
   { id: "calendars",    label: "Calendars",    icon: CalendarDays,  description: "Team calendars and booking automation rules" },
   { id: "notifications", label: "Notifications", icon: BellRing,    description: "The Slack alerts your team gets" },
+  { id: "proposal-templates", label: "Proposal Templates", icon: FileText, description: "Edit the Management & Project proposal wording" },
+  { id: "quick-messages", label: "Quick Messages", icon: MessageSquareText, description: "Canned replies for the inbox composer" },
   { id: "integrations", label: "Integrations", icon: Zap,           description: "Manage your connected services and automations" },
 ] as const;
 
@@ -96,6 +101,7 @@ function SettingsTabsInner() {
           <div className="p-6">
             <div className="max-w-3xl space-y-6">
               <SoftwareCosts />
+              <TeamSalaries />
               <CostSettings />
             </div>
           </div>
@@ -121,6 +127,23 @@ function SettingsTabsInner() {
         {activeTab === "notifications" && (
           <div className="p-6">
             <NotificationsClient />
+          </div>
+        )}
+
+        {activeTab === "proposal-templates" && (
+          <div className="p-6">
+            {/* Wider than sibling tabs: this one runs editor + live preview side by side. */}
+            <div className="max-w-[1500px]">
+              <ProposalTemplatesSettings />
+            </div>
+          </div>
+        )}
+
+        {activeTab === "quick-messages" && (
+          <div className="p-6">
+            <div className="max-w-3xl">
+              <QuickMessagesSettings />
+            </div>
           </div>
         )}
 

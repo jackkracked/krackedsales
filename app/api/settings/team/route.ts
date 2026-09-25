@@ -3,27 +3,45 @@ import { db } from "@/lib/db";
 import { users, repTargets, rolePermissions, userPermissionOverrides } from "@/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
 import bcrypt from "bcryptjs";
+import { getSessionUser } from "@/lib/auth/session";
 
 /**
  * GET /api/settings/team
- * Returns all users with their role, targets, and permission overrides.
+ * Admins get the full team management payload (roles, targets, commission, permission overrides,
+ * role presets). Non-admins get only a minimal, non-sensitive roster (id/name/email/role/ghlUserId)
+ * — enough for the Pipeline/Contacts assignee pickers, without leaking commission, targets, or
+ * permission internals. PATCH/PUT are admin-only (see below), closing a self-escalation hole.
  */
 export async function GET() {
-  const [allUsers, allTargets, allOverrides, allPresets] = await Promise.all([
-    db()
-      .select({
-        id: users.id,
-        name: users.name,
-        email: users.email,
-        role: users.role,
-        isActive: users.isActive,
-        ghlUserId: users.ghlUserId,
-        commissionPct: users.commissionPct,
-        timezone: users.timezone,
-        createdAt: users.createdAt,
-      })
-      .from(users)
-      .orderBy(asc(users.createdAt)),
+  const actor = await getSessionUser().catch(() => null);
+  if (!actor) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const allUsers = await db()
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      role: users.role,
+      isActive: users.isActive,
+      ghlUserId: users.ghlUserId,
+      commissionPct: users.commissionPct,
+      basePayCents: users.basePayCents,
+      timezone: users.timezone,
+      createdAt: users.createdAt,
+    })
+    .from(users)
+    .orderBy(asc(users.createdAt));
+
+  if (actor.role !== "admin") {
+    // Minimal roster only — no commission, BASE PAY, targets, timezone, overrides, or presets.
+    return NextResponse.json({
+      users: allUsers.map((u) => ({
+        id: u.id, name: u.name, email: u.email, role: u.role, isActive: u.isActive, ghlUserId: u.ghlUserId,
+      })),
+    });
+  }
+
+  const [allTargets, allOverrides, allPresets] = await Promise.all([
     db().select().from(repTargets),
     db().select().from(userPermissionOverrides),
     db().select().from(rolePermissions),
@@ -60,15 +78,20 @@ export async function GET() {
  * Update a user's role, isActive, ghlUserId, targets, or permission overrides.
  */
 export async function PATCH(req: NextRequest) {
+  const actor = await getSessionUser().catch(() => null);
+  if (actor?.role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const body = await req.json();
-  const { userId, role, isActive, ghlUserId, targets, permissionOverrides, name, email, newPassword, commissionPct, timezone } = body;
+  const { userId, role, isActive, ghlUserId, targets, permissionOverrides, name, email, newPassword, commissionPct, basePayCents, timezone } = body;
 
   if (!userId) {
     return NextResponse.json({ error: "userId required" }, { status: 400 });
   }
 
   // Update user fields if provided
-  const userUpdates: Partial<{ role: string; isActive: boolean; ghlUserId: string | null; name: string; email: string; passwordHash: string; commissionPct: number; timezone: string | null }> = {};
+  const userUpdates: Partial<{ role: string; isActive: boolean; ghlUserId: string | null; name: string; email: string; passwordHash: string; commissionPct: number; basePayCents: number; timezone: string | null }> = {};
   if (role !== undefined) userUpdates.role = role;
   if (isActive !== undefined) userUpdates.isActive = isActive;
   if (ghlUserId !== undefined) userUpdates.ghlUserId = ghlUserId || null;
@@ -82,6 +105,10 @@ export async function PATCH(req: NextRequest) {
   }
   if (timezone !== undefined) {
     userUpdates.timezone = timezone || null;
+  }
+  // Whole cents only, and never negative: this is the floor of somebody's pay.
+  if (basePayCents !== undefined && typeof basePayCents === "number" && Number.isFinite(basePayCents) && basePayCents >= 0) {
+    userUpdates.basePayCents = Math.round(basePayCents);
   }
 
   if (Object.keys(userUpdates).length > 0) {
@@ -139,6 +166,11 @@ export async function PATCH(req: NextRequest) {
  * Body: { role: "admin" | "rep", permissions: Record<featureKey, boolean> }
  */
 export async function PUT(req: NextRequest) {
+  const actor = await getSessionUser().catch(() => null);
+  if (actor?.role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const { role, permissions } = await req.json();
 
   if (!role || !permissions) {

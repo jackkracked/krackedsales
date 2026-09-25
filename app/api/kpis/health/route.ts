@@ -5,10 +5,15 @@ import { eq } from "drizzle-orm";
 import { format, startOfMonth, endOfMonth, addDays } from "date-fns";
 import { KPI_DEFINITIONS } from "@/lib/kpi-health/definitions";
 import { getHealthSummary } from "@/lib/kpi-health/check";
+import { getSessionUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  // Money/KPI data — admins only.
+  const actor = await getSessionUser().catch(() => null);
+  if (actor?.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
   const currentPeriod = format(new Date(), "yyyy-MM");
   const cookie = req.headers.get("cookie") ?? "";
   const origin = new URL(req.url).origin;

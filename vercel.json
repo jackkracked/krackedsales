@@ -1,60 +1,40 @@
 {
   "crons": [
+    { "path": "/api/cron/sync-ghl", "schedule": "0 6 * * *" },
+    { "path": "/api/cron/sync-ghl", "schedule": "0 0 * * *" },
+    { "path": "/api/cron/sync-ghl", "schedule": "0 12 * * *" },
+    { "path": "/api/cron/sync-ghl", "schedule": "0 18 * * *" },
+    { "path": "/api/cron/sync-stripe", "schedule": "0 2 * * *" },
+    { "path": "/api/cron/sync-stripe", "schedule": "0 14 * * *" },
+    { "path": "/api/cron/kpi-watchdog", "schedule": "0 3 * * *" },
+    { "path": "/api/cron/kpi-watchdog", "schedule": "0 9 * * *" },
+    { "path": "/api/cron/kpi-watchdog", "schedule": "0 15 * * *" },
+    { "path": "/api/cron/kpi-watchdog", "schedule": "0 21 * * *" },
     { "path": "/api/cron/workflows", "schedule": "0 8 * * *" },
     { "path": "/api/cron/snapshots", "schedule": "0 3 * * *" },
     { "path": "/api/cron/roll-up-orphans", "schedule": "0 9 * * *" },
     { "path": "/api/cron/reconcile-prepaid-terms", "schedule": "0 4 * * *" },
-    {
-      "path": "/api/cron/sync-no-shows",
-      "schedule": "0 0 * * *"
-    },
-    {
-      "path": "/api/cron/daily-summary",
-      "schedule": "0 13 * * *"
-    },
-    {
-      "path": "/api/cron/followup-analyse",
-      "schedule": "0 8 * * *"
-    },
-    {
-      "path": "/api/cron/sync-calls",
-      "schedule": "0 7 * * *"
-    },
-    {
-      "path": "/api/cron/task-reminders",
-      "schedule": "0 9 * * *"
-    },
-    {
-      "path": "/api/cron/task-reminders",
-      "schedule": "0 17 * * *"
-    },
-    {
-      "path": "/api/cron/sync-fathom",
-      "schedule": "0 7 * * *"
-    },
-    {
-      "path": "/api/cron/weekly-summary",
-      "schedule": "0 11 * * *"
-    },
-    {
-      "path": "/api/cron/call-prep",
-      "schedule": "0 6 * * *"
-    },
-    {
-      "path": "/api/cron/sync-audits",
-      "schedule": "0 10 * * *"
-    },
-    {
-      "path": "/api/cron/reminders",
-      "schedule": "0 15 * * *"
-    },
-    {
-      "path": "/api/cron/rep-reminders",
-      "schedule": "0 16 * * *"
-    },
-    {
-      "path": "/api/cron/rep-reminders",
-      "schedule": "0 0 * * *"
-    }
+    { "path": "/api/cron/ninety-day-charges", "schedule": "0 4 * * *" },
+    { "path": "/api/cron/sync-no-shows", "schedule": "0 0 * * *" },
+    { "path": "/api/cron/daily-summary", "schedule": "0 13 * * *" },
+    { "path": "/api/cron/followup-analyse", "schedule": "0 8 * * *" },
+    { "path": "/api/cron/sync-calls", "schedule": "0 7 * * *" },
+    { "path": "/api/cron/task-reminders", "schedule": "0 9 * * *" },
+    { "path": "/api/cron/task-reminders", "schedule": "0 17 * * *" },
+    { "path": "/api/cron/sync-fathom", "schedule": "0 7 * * *" },
+    { "path": "/api/cron/call-prep", "schedule": "0 6 * * *" },
+    { "path": "/api/cron/sync-audits", "schedule": "0 10 * * *" },
+    { "path": "/api/cron/reminders", "schedule": "0 15 * * *" },
+    { "path": "/api/cron/rep-reminders", "schedule": "0 16 * * *" },
+    { "path": "/api/cron/rep-reminders", "schedule": "0 0 * * *" },
+    { "path": "/api/cron/sync-customers", "schedule": "0 5 * * *" },
+    { "path": "/api/cron/reconcile-opportunities/sweep", "schedule": "0 20 * * *" },
+    { "path": "/api/cron/reconcile-opportunities/sweep?ifStale=1", "schedule": "30 20 * * *" },
+    { "path": "/api/cron/reconcile-opportunities/sweep", "schedule": "0 23 * * *" },
+    { "path": "/api/cron/attribute-bookings", "schedule": "20 1 * * *" },
+    { "path": "/api/cron/attribute-bookings", "schedule": "20 7 * * *" },
+    { "path": "/api/cron/attribute-bookings", "schedule": "20 13 * * *" },
+    { "path": "/api/cron/attribute-bookings", "schedule": "20 19 * * *" },
+    { "path": "/api/cron/instalment-sweep", "schedule": "40 8 * * *" }
   ]
 }

@@ -12,12 +12,23 @@ import {
   uniqueIndex,
   index,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import type { Deliverables, ProposalContent } from "@/lib/proposals/content";
 
 /** Monthly software subscriptions — summed into the Software Cost KPI */
 export const softwareCosts = pgTable("software_costs", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   monthlyCost: doublePrecision("monthly_cost").notNull(),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/** Monthly team salaries by role — pro-rated by % of month elapsed into the Total Expenses KPI. */
+export const teamSalaries = pgTable("team_salaries", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  role: text("role").notNull(),
+  monthlyAmount: doublePrecision("monthly_amount").notNull(),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -36,12 +47,20 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
-  role: text("role").notNull().default("admin"), // "admin" | "rep"
+  role: text("role").notNull().default("setter"), // "admin" | "closer" | "setter" (legacy: "rep")
   isActive: boolean("is_active").notNull().default(true),
   ghlUserId: text("ghl_user_id"), // links to GHL user for pipeline/calendar filtering
   commissionPct: doublePrecision("commission_pct").notNull().default(0), // % of proposal value earned as commission
+  /** Monthly base pay in CENTS. Integer, because a payslip must never read 1499.9999999.
+   *  Admin-editable in team settings; 0 means nothing has been set for this person yet. */
+  basePayCents: integer("base_pay_cents").notNull().default(0),
   fathomApiKey: text("fathom_api_key"),  // user's Fathom API key for meeting sync
   timezone: text("timezone"), // IANA timezone e.g. "America/Los_Angeles"
+  /** Slack member id for DMs. Stored rather than resolved from `email` at send time,
+   *  because Slack emails do not always match app logins: Gage signs in here as
+   *  gage@krackedretention.com but is gageflesher10@gmail.com in Slack, so an email lookup
+   *  would work for everyone except the person who uses assignment most. NULL = no DM. */
+  slackUserId: text("slack_user_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -156,6 +175,11 @@ export const tasks = pgTable("tasks", {
   userId: uuid("user_id").references(() => users.id), // nullable for backward compat
   userName: text("user_name"),             // denormalized for display
   priority: text("priority").notNull().default("medium"), // "low" | "medium" | "high"
+  /** Who handed this task over. NULL means self-created, which is the normal case.
+   *  Kept so the Slack DM can say who assigned it, and so a delegated task stays in the
+   *  assigner's own list (the "my tasks" filter is user_id = me OR assigned_by = me). */
+  assignedByUserId: uuid("assigned_by_user_id").references(() => users.id),
+  assignedByName: text("assigned_by_name"),
   completed: boolean("completed").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -500,6 +524,11 @@ export const socialLeads = pgTable("social_leads", {
 export const calls = pgTable("calls", {
   id: uuid("id").primaryKey().defaultRandom(),
   callType: text("call_type").notNull(), // "meet" | "dialer"
+  /** GHL user id of whoever BOOKED the appointment (from the event's `createdBy.userId`).
+   *  Distinct from repEmail, which is who ATTENDS. A setter books for closers, so this is the
+   *  only field that credits them. Null for dialer calls and for Google-Calendar-synced
+   *  bookings, which carry `{source:"google_calendar"}` with no userId. */
+  bookedByGhlUserId: text("booked_by_ghl_user_id"),
   direction: text("direction"),          // "inbound" | "outbound" | null (Meet has no direction)
   status: text("status"),                // "booked"|"confirmed"|"showed"|"noshow"|"completed" (scheduled); null for dialer
   meetingUrl: text("meeting_url"),       // Google Meet/Zoom link (GHL event address) — Fathom match key
@@ -642,6 +671,17 @@ export const proposals = pgTable("proposals", {
   listAmount: doublePrecision("list_amount"), // null when no discount; > totalAmount when discounted
   discountType: text("discount_type"), // "percent" | "fixed"
   discountValue: doublePrecision("discount_value"),
+  /** Does the discount repeat, or come off once?
+   *  "recurring" (or NULL, the legacy default) — every month; totalAmount is already discounted.
+   *  "first_payment" — once; totalAmount is the FULL price and the discount is applied to the
+   *    first payment only (the first PORTION when a first month is split).
+   *  "total" — a single-payment project.
+   *  A discount used to be baked into totalAmount unconditionally, and since that column is the
+   *  MONTHLY price for management, "$250 off" silently became $750 across a 90-day term. */
+  discountScope: text("discount_scope"),
+  /** Stripe coupon backing a first_payment discount. Stored so a resumed or re-signed checkout
+   *  reuses it rather than stacking a second discount on the same proposal. */
+  stripeDiscountCouponId: text("stripe_discount_coupon_id"),
   serviceDescription: text("service_description"),
   notes: text("notes"),
   paymentStructure: text("payment_structure").notNull(),
@@ -680,8 +720,76 @@ export const proposals = pgTable("proposals", {
   lostAt: timestamp("lost_at"),
   lostReason: text("lost_reason"),
   lostBy: text("lost_by"), // user name who marked it lost
+  // ─── 90-Day Management (migration 0040) — all nullable/defaulted; null => legacy behaviour ───
+  managementOption: text("management_option"),          // 'upfront' | 'spread'
+  autoRebillMode: text("auto_rebill_mode"),             // 'none' | 'monthly' | 'full90' (null => none)
+  stripePaymentMethodId: text("stripe_payment_method_id"),
+  firstMonthComplete: boolean("first_month_complete").default(false),
+  billingIssue: boolean("billing_issue").default(false),
+  ccEmails: jsonb("cc_emails"),                         // string[] of extra recipients
+  billingEmail: text("billing_email"),                 // separate invoice email (null => contactEmail)
+  isLegacyManual: boolean("is_legacy_manual").default(false), // migrated legacy deals: no auto-charge
+  contractStartAt: timestamp("contract_start_at", { withTimezone: true }), // set when the first month is fully collected; months 2/3 anchor to it
+  // The payment schedule EXACTLY as the client was shown it, frozen at send. The schedule is
+  // otherwise computed at render time, so a fix to the date logic would retroactively change
+  // what an already-sent proposal displays. NULL = compute it (drafts and anything sent before
+  // freezing existed). Shape: Array<{ label: string; when: string; amount: number }>.
+  /** Who CLOSED the deal, when that differs from who built the proposal.
+   *  NULL means "same as createdBy", so no backfill was needed and existing rows are unchanged.
+   *  Rep metrics read COALESCE(closedBy, createdBy); createdBy stays as the audit trail of who
+   *  actually created it. Exists because Tofu Go was Alice's deal but Gage sent the proposal
+   *  while she was tied up, and the leaderboard credited Gage. */
+  closedBy: uuid("closed_by").references(() => users.id),
+  scheduleSnapshot: jsonb("schedule_snapshot").$type<Array<{ label: string; when: string; amount: number }>>(),
+  scheduleSnapshotAt: timestamp("schedule_snapshot_at", { withTimezone: true }),
+  firstPaymentSplit: jsonb("first_payment_split"), // [{ amount: dollars, offsetDays: int }] — first-month split, portion 1 = offsetDays 0
+  // ─── Editable-proposal system (migration 0043) — all nullable; null => legacy render fallback ───
+  // Structured, line-by-line deliverables (from the package/builder), editable inline before send.
+  deliverables: jsonb("deliverables").$type<Deliverables>(),
+  // Per-proposal SNAPSHOT of the editable copy sections, captured from the active proposal_templates
+  // row at draft creation. The client doc + PDF render from this (immutable once sent). null => fall
+  // back to the template, then to the hardcoded defaults in lib/proposals/content.ts.
+  content: jsonb("content").$type<ProposalContent>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/** Manual Management MRR adjustments — real management clients billed outside tracked Stripe (e.g. the
+ *  migrated legacy deals). Each line adds to Management MRR with a human-readable reason. Migration 0040. */
+export const manualMrrAdjustments = pgTable("manual_mrr_adjustments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  amountCents: integer("amount_cents").notNull(),
+  reason: text("reason").notNull(),
+  clientName: text("client_name"),
+  ghlContactId: text("ghl_contact_id"),
+  proposalId: uuid("proposal_id"),
+  effectiveFrom: timestamp("effective_from", { withTimezone: true }),
+  effectiveTo: timestamp("effective_to", { withTimezone: true }),
+  active: boolean("active").default(true).notNull(),
+  createdBy: uuid("created_by"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// 90-day off-session charge ledger — source of truth for spread charges (first-month splits +
+// months 2/3). One row per scheduled charge; idempotencyKey makes each charge exactly-once.
+export const ninetyDaySplits = pgTable("ninety_day_splits", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  proposalId: uuid("proposal_id").notNull(),
+  chargeNumber: integer("charge_number").notNull(),
+  label: text("label"),
+  amountCents: integer("amount_cents").notNull(),
+  currency: text("currency").notNull().default("usd"),
+  dueDate: timestamp("due_date", { withTimezone: true }).notNull(),
+  status: text("status").notNull().default("pending"), // pending|paid|failed|action_required|canceled
+  kind: text("kind").notNull().default("month"), // 'first_portion' (split of month 1) | 'month'
+  idempotencyKey: text("idempotency_key").notNull().unique(),
+  stripePaymentIntentId: text("stripe_payment_intent_id"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  chargedAt: timestamp("charged_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 /**
@@ -704,6 +812,24 @@ export const proposalEvents = pgTable("proposal_events", {
   byProposal: index("proposal_events_proposal_id_idx").on(t.proposalId),
 }));
 
+/**
+ * Today list state (migration 0053).
+ *
+ * The LIST is never stored: it is recomputed on every load so it can never go stale, and so a
+ * newly-urgent item can displace a lower one between visits. Only the rep's own decisions live
+ * here, keyed by `sourceKey` (e.g. "proposal:<id>:chase") so they survive the rebuild.
+ */
+export const todayItems = pgTable("today_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  /** Stable identity of a derived item, unique per user. */
+  sourceKey: text("source_key").notNull(),
+  completedAt: timestamp("completed_at"),
+  snoozedUntil: timestamp("snoozed_until"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const proposalInstalments = pgTable("proposal_instalments", {
   id: uuid("id").primaryKey().defaultRandom(),
   proposalId: uuid("proposal_id").notNull().references(() => proposals.id, { onDelete: "cascade" }),
@@ -725,6 +851,76 @@ export const stripeCustomers = pgTable("stripe_customers", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+/**
+ * Customers — one row per real paying customer, derived from Stripe payment history and
+ * refreshed by lib/customers/sync.ts. Grouped by email (fallback: stripe customer id) so a
+ * person who paid through several payment-link customers collapses into a single row.
+ * Money is stored in integer cents. `source` is a manual acquisition tag (next phase).
+ */
+export const customers = pgTable(
+  "customers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    dedupeKey: text("dedupe_key").notNull().unique(), // lower(email) || stripe customer id
+    email: text("email"),
+    name: text("name"),
+    contactId: text("contact_id"), // -> local_contacts.id (matched or backfilled)
+    stripeCustomerIds: jsonb("stripe_customer_ids").default([]),
+    // Money (integer cents)
+    ltvNet: integer("ltv_net").notNull().default(0), // gross - refunds = lifetime value
+    grossPaid: integer("gross_paid").notNull().default(0),
+    refunded: integer("refunded").notNull().default(0),
+    paymentsCount: integer("payments_count").notNull().default(0),
+    currency: text("currency").default("usd"),
+    // Timing
+    firstPaidAt: timestamp("first_paid_at"),
+    lastPaidAt: timestamp("last_paid_at"),
+    // Status (auto-derived): active = live subscription; inactive = paid before, nothing recurring
+    status: text("status").notNull().default("inactive"), // 'active' | 'inactive'
+    type: text("type").notNull().default("one_off"), // 'subscription' | 'one_off'
+    currentMrr: integer("current_mrr").notNull().default(0), // cents, active subs only
+    subscriptionStatus: text("subscription_status"), // active|trialing|past_due|canceled|none
+    subscriptionDetail: text("subscription_detail"), // human string, e.g. "$1,500/mo (active)"
+    isTest: boolean("is_test").notNull().default(false),
+    source: text("source"), // MANUAL acquisition tag (meta/instagram/organic/…), next phase
+    syncedAt: timestamp("synced_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    index("customers_status_idx").on(t.status),
+    index("customers_ltv_idx").on(t.ltvNet),
+    index("customers_contact_idx").on(t.contactId),
+  ],
+);
+
+/**
+ * One row per individual incoming payment (paid invoice, or a non-invoice one-off charge), keyed to a
+ * customer by dedupe_key. This is what lets the Customers tab re-aggregate LTV / counts for ANY date
+ * range (today, this month, this year, last year, all time…). amount_net is cents, net of credit notes
+ * / refunds. Deduped by stripe_id.
+ */
+export const customerPayments = pgTable(
+  "customer_payments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    dedupeKey: text("dedupe_key").notNull(), // -> customers.dedupe_key
+    stripeId: text("stripe_id").notNull().unique(), // invoice id, "ch_<id>" charge, or "manual_<uuid>"
+    source: text("source").notNull(), // 'invoice' | 'charge' | 'manual'
+    amountNet: integer("amount_net").notNull().default(0), // cents
+    currency: text("currency").default("usd"),
+    paidAt: timestamp("paid_at").notNull(),
+    method: text("method"), // manual payments only: 'wire' | 'bill_com' | 'check' | 'ach' | 'cash' | 'other'
+    note: text("note"), // manual payments only: optional reference / memo
+    createdBy: uuid("created_by"), // manual payments only: admin who logged it
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [
+    index("customer_payments_key_idx").on(t.dedupeKey),
+    index("customer_payments_paid_idx").on(t.paidAt),
+  ],
+);
+
 export const stripeEvents = pgTable("stripe_events", {
   id: uuid("id").primaryKey().defaultRandom(),
   stripeEventId: text("stripe_event_id").notNull().unique(),
@@ -737,6 +933,21 @@ export const agreementTemplates = pgTable("agreement_templates", {
   id: uuid("id").primaryKey().defaultRandom(),
   type: text("type").notNull().unique(), // "management" | "project"
   body: text("body").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
+ * Editable proposal-copy templates (migration 0043). One row per type. `sections` holds the full
+ * editable wording (intro, scope framing, acceptance, terms markdown, signature, additional-rates,
+ * etc. — the ProposalContent shape). New proposals SNAPSHOT this into proposals.content at draft
+ * creation, so editing a template never alters an already-sent/signed proposal. Supersedes the
+ * legacy agreement_templates.body (terms-only); resolveProposalContent reads this first.
+ */
+export const proposalTemplates = pgTable("proposal_templates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  type: text("type").notNull().unique(), // "management" | "project"
+  sections: jsonb("sections").$type<ProposalContent>().notNull(),
+  updatedBy: uuid("updated_by").references(() => users.id),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
@@ -864,6 +1075,12 @@ export const dialerCampaigns = pgTable("dialer_campaigns", {
   ownerScope: text("owner_scope").notNull().default("admin"), // "admin" | "rep"
   maxAttempts: integer("max_attempts").notNull().default(3),
   status: text("status").notNull().default("active"), // "active" | "paused" | "archived"
+  /** Where this queue came from. Both NULL = hand-built, stays exactly as it is.
+   *  Set = a DYNAMIC campaign: opening it tops the queue up with anyone who has since
+   *  entered that stage, so a list worked on Monday still holds Friday's new leads. */
+  sourcePipelineId: text("source_pipeline_id"),
+  sourceStageId: text("source_stage_id"),
+  sourceSyncedAt: timestamp("source_synced_at", { withTimezone: true }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -909,6 +1126,9 @@ export const dialerSettings = pgTable("dialer_settings", {
   twimlAppSid: text("twiml_app_sid"),
   callerId: text("caller_id"),                       // the shared business number (E.164)
   voicemailGreetingUrl: text("voicemail_greeting_url"),
+  /** Per-region calling windows for the dialer's out-of-hours warning. NULL means "use the
+   *  statutory defaults in lib/dialer/calling-hours.ts", which is the correct setting. */
+  callingHours: jsonb("calling_hours"),
   updatedBy: uuid("updated_by").references(() => users.id),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -1094,12 +1314,74 @@ export const localContacts = pgTable("local_contacts", {
   companyName: text("company_name"),
   website: text("website"),
   dnd: boolean("dnd").default(false),
+  /** IANA zone for where this person is, so the dialer knows what time it is for them.
+   *  Assigned by lib/dialer/calling-hours.ts, mostly from the phone number's area code.
+   *  Stored for visibility; the dial-time warning recomputes live so it can never go stale. */
+  timezone: text("timezone"),
+  /** How we knew: "exact" | "area-code" | "country" | "approximate". */
+  timezoneSource: text("timezone_source"),
   rawData: jsonb("raw_data"),
   createdAtGhl: timestamp("created_at_ghl"),
   updatedAtGhl: timestamp("updated_at_ghl"),
+  // Customer markers (denormalized from `customers` for the Contacts-tab badge + backfilled rows).
+  isCustomer: boolean("is_customer").default(false),
+  customerStatus: text("customer_status"), // 'active' | 'inactive' | null
+  // ─── Demo Link attribution (migration 0052) ───────────────────────────────────────────
+  // The link VALUE is never stored here: it lives in GHL's "Insert Miro Link" custom field,
+  // which is the source of truth because writing it triggers a GHL workflow. These two only
+  // record WHO fired that trigger and WHEN, which GHL does not expose. Both NULL means the
+  // link was set inside GHL directly, and the UI says so rather than inventing an author.
+  demoLinkSetBy: uuid("demo_link_set_by").references(() => users.id),
+  demoLinkSetAt: timestamp("demo_link_set_at"),
+  // ─── Leads Centre (migration 0044) ────────────────────────────────────────────────────
+  // Meta's own stage vocabulary, mirrored exactly. DELIBERATELY separate from the GHL
+  // pipeline stage: the pipeline stage says where the deal is, this says what we tell
+  // Facebook's optimiser. Both exist, neither overwrites the other, and only this one
+  // fires the Conversions API. Lives on the CONTACT (one person, one qualification state);
+  // opportunities read it through their contact so the two can never disagree.
+  metaLeadStage: text("meta_lead_stage"),
+    // 'intake' | 'need_more_info' | 'qualified' | 'disqualified' | 'converted' | 'lost' | 'not_qualified'
+  metaLeadStageAt: timestamp("meta_lead_stage_at", { withTimezone: true }),
+  metaLeadStageBy: uuid("meta_lead_stage_by"),
+  // The Conversions API receipt. An unobservable signal is how you silently lose
+  // optimisation on ~$180-per-qualified-lead traffic, so every attempt is recorded.
+  capiStatus: text("capi_status"), // 'sent' | 'failed' | 'skipped'
+  capiSentAt: timestamp("capi_sent_at", { withTimezone: true }),
+  capiEventId: text("capi_event_id"),
+  capiError: text("capi_error"),
+
+  /**
+   * Ghost delete. Set when a contact no longer exists in GoHighLevel.
+   *
+   * The sync only ever upserts, so contacts deleted or merged in GHL lingered here forever —
+   * 180 of them, which is why we held 5,274 against GHL's 5,094. NOT a hard delete:
+   * opportunities, proposals, tasks, calls and activity reference contact ids, and removing
+   * the rows would orphan real history. Reversible via scripts/reconcile-ghl-contacts.mjs.
+   *
+   * EVERY count or list of contacts must filter `deletedInGhlAt IS NULL`. Lookups BY ID may
+   * still resolve a ghost, so historical records keep rendering a name instead of a blank.
+   */
+  deletedInGhlAt: timestamp("deleted_in_ghl_at", { withTimezone: true }),
   syncedAt: timestamp("synced_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+/** Meta's lead stages, in the order they appear in Leads Centre. Single source of truth
+ *  for the UI rail, the API validator and the CAPI mapping. */
+export const META_LEAD_STAGES = [
+  "intake",
+  "need_more_info",
+  "qualified",
+  "disqualified",
+  "converted",
+  "lost",
+  "not_qualified",
+] as const;
+export type MetaLeadStage = (typeof META_LEAD_STAGES)[number];
+
+/** The one stage that fires a Conversions API event. The ad campaigns optimise for
+ *  "Maximise number of qualified leads", so this is the event they consume. */
+export const CAPI_SIGNAL_STAGE: MetaLeadStage = "qualified";
 
 /** Local copy of GHL opportunities — synced via /api/ghl/sync */
 export const localOpportunities = pgTable("local_opportunities", {
@@ -1126,6 +1408,11 @@ export const localOpportunities = pgTable("local_opportunities", {
   updatedAtGhl: timestamp("updated_at_ghl"),
   syncedAt: timestamp("synced_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+
+  /** Ghost delete — set when the opportunity no longer exists in GoHighLevel.
+   *  Every count, list or stage filter must exclude these: the sync only upserts, so
+   *  deleted deals were counted forever and made every stage number wrong. */
+  deletedInGhlAt: timestamp("deleted_in_ghl_at", { withTimezone: true }),
 });
 
 /** Local copy of GHL conversations — synced via /api/ghl/sync */
@@ -1152,6 +1439,81 @@ export const localConversations = pgTable("local_conversations", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+/** Local mirror of Stripe charges — synced via /api/cron/sync-stripe + the Stripe webhook.
+ *  Money stored as INTEGER CENTS; dates as timestamptz so .getTime() == the engine's created*1000. */
+export const localStripeCharges = pgTable("local_stripe_charges", {
+  id: text("id").primaryKey(),
+  customerId: text("customer_id"),
+  customerName: text("customer_name"),
+  status: text("status"),
+  amount: integer("amount"),
+  currency: text("currency"),
+  fee: integer("fee"),
+  description: text("description"),
+  refunded: integer("refunded"),
+  paid: boolean("paid"),
+  isTest: boolean("is_test").default(false),
+  created: timestamp("created", { withTimezone: true }),
+  rawData: jsonb("raw"),
+  syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const localStripeInvoices = pgTable("local_stripe_invoices", {
+  id: text("id").primaryKey(),
+  number: text("number"),
+  customerId: text("customer_id"),
+  customerName: text("customer_name"),
+  status: text("status"),
+  amountPaid: integer("amount_paid"),
+  amountRemaining: integer("amount_remaining"),
+  amountDue: integer("amount_due"),
+  currency: text("currency"),
+  parentType: text("parent_type"),
+  billingReason: text("billing_reason"),
+  isSubscription: boolean("is_subscription"),
+  creditNotesAmount: integer("credit_notes_amount"),
+  subscriptionId: text("subscription_id"),
+  created: timestamp("created", { withTimezone: true }),
+  dueDate: timestamp("due_date", { withTimezone: true }),
+  paidAt: timestamp("paid_at", { withTimezone: true }),
+  rawData: jsonb("raw"),
+  syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const localStripeSubscriptions = pgTable("local_stripe_subscriptions", {
+  id: text("id").primaryKey(),
+  customerId: text("customer_id"),
+  customerName: text("customer_name"),
+  status: text("status"),
+  created: timestamp("created", { withTimezone: true }),
+  canceledAt: timestamp("canceled_at", { withTimezone: true }),
+  cancelAtPeriodEnd: boolean("cancel_at_period_end"),
+  item0UnitAmount: integer("item0_unit_amount"),
+  item0Interval: text("item0_interval"),
+  item0IntervalCount: integer("item0_interval_count"),
+  item0Quantity: integer("item0_quantity"),
+  currentMrrCents: integer("current_mrr_cents"),
+  priceNickname: text("price_nickname"),
+  proposalId: text("proposal_id"),
+  items: jsonb("items"),
+  rawData: jsonb("raw"),
+  syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const localStripeRefunds = pgTable("local_stripe_refunds", {
+  id: text("id").primaryKey(),
+  chargeId: text("charge_id"),
+  amount: integer("amount"),
+  currency: text("currency"),
+  created: timestamp("created", { withTimezone: true }),
+  rawData: jsonb("raw"),
+  syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 /**
  * Per-conversation "read/handled" marker for the dashboard awaiting-reply strip (all
  * channels). A conversation is hidden from the strip while readAt is newer than its last
@@ -1171,6 +1533,41 @@ export const conversationReads = pgTable(
     channelConvKey: uniqueIndex("conversation_reads_channel_conv_key").on(t.channel, t.conversationId),
   }),
 );
+
+/**
+ * Per-conversation user intent for the inbox — starred, read/unread override, and soft-delete.
+ * DELIBERATELY separate from `local_conversations` (the GHL mirror), because the mirror sync
+ * (upsertConversation) overwrites its columns from GHL on every sync and would clobber these
+ * flags. This table is written ONLY by explicit user actions and is never touched by sync, so
+ * a star / read-state / delete can never be silently reset. Keyed by the GHL conversation id.
+ */
+export const conversationFlags = pgTable("conversation_flags", {
+  conversationId: text("conversation_id").primaryKey(),
+  starred: boolean("starred").notNull().default(false),
+  // null => follow GHL's unreadCount; "read" => force read; "unread" => force unread (re-bold).
+  readState: text("read_state"),
+  // null => visible; set => hidden from the inbox (reversible). A conversation reappears when a
+  // NEW message arrives after this timestamp (GHL-consistent), handled in the conversations route.
+  deletedAt: timestamp("deleted_at"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  updatedBy: text("updated_by"),
+});
+
+/**
+ * Quick messages (canned replies / snippets) for the inbox composer. Team-shared: one set the
+ * whole team uses, managed in Settings. The composer popup shows the top few ACTIVE ones ordered
+ * by `sortOrder`; Settings manages the full list (add / edit / delete / activate / reorder).
+ */
+export const quickMessages = pgTable("quick_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: text("title"), // short label shown in the popup; falls back to a body preview when empty
+  body: text("body").notNull(), // the text inserted into the composer
+  active: boolean("active").notNull().default(true), // inactive = hidden from the composer popup
+  sortOrder: integer("sort_order").notNull().default(0), // lower = higher; first N active show in chat
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
 
 /**
  * Unit-economics dashboard assumptions — the whole editable "dials" object (packages, hours
@@ -1489,4 +1886,94 @@ export const conversationEvents = pgTable("conversation_events", {
 }, (t) => [
   index("conversation_events_occurred_idx").on(t.occurredAt),
   index("conversation_events_contact_idx").on(t.ghlContactId),
+]);
+
+
+/**
+ * Mirror of Meta's Leads Centre — one row per lead AS META HOLDS IT (migration 0046).
+ *
+ * The Leads page used to derive its population from local_contacts, which can never match
+ * Meta: 162 of Meta's 711 people are organic Instagram/Messenger leads with no email and no
+ * phone, so they are not GHL contacts and no stage could ever be written for them. Intake
+ * read 9 against Meta's 16. This table holds Meta's own rows so the counts are exact, and
+ * links to a contact where the person is identifiable.
+ */
+export const metaLeads = pgTable("meta_leads", {
+  id: text("id").primaryKey(),
+  createdMeta: timestamp("created_meta", { withTimezone: true }),
+  fullName: text("full_name"),
+  email: text("email"),
+  phone: text("phone"),
+  source: text("source"),
+  formName: text("form_name"),
+  channel: text("channel"),
+  stage: text("stage").notNull(),
+  owner: text("owner"),
+  labels: text("labels"),
+  /** local_contacts.id when we could identify the person; NULL means Meta knows them and we do not. */
+  contactId: text("contact_id"),
+  exportFile: text("export_file"),
+  importedAt: timestamp("imported_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
+ * Mutual exclusion + last-outcome record for background sweeps (see migration 0054).
+ *
+ * One row per job key, e.g. "reconcile-opportunities". `lockedUntil` is a lease, not a
+ * mutex: a function that dies mid-sweep cannot release anything, so the lease simply
+ * expires and the next caller takes it. The lock is acquired in ONE statement because the
+ * Neon HTTP driver has no interactive transactions to hold open.
+ */
+export const jobLocks = pgTable("job_locks", {
+  key: text("key").primaryKey(),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  lastStartedAt: timestamp("last_started_at", { withTimezone: true }),
+  lastFinishedAt: timestamp("last_finished_at", { withTimezone: true }),
+  lastOk: boolean("last_ok"),
+  /** "ok" | "refused" | "failed" — why the last run ended the way it did. */
+  lastStatus: text("last_status"),
+  /** Human-readable detail for the last run. Shown to Jack, so keep it plain English. */
+  lastDetail: text("last_detail"),
+  lastResult: jsonb("last_result"),
+});
+
+/**
+ * A booking link minted for one contact by one person (see migration 0057).
+ *
+ * Exists because GoHighLevel cannot answer "who earned this booked call": 68% of appointments
+ * are created by the prospect through a booking widget and carry no user. A link minted here
+ * per send turns that inference into a record, which is what makes a setter's $25-per-booking
+ * commission defensible.
+ */
+export const bookingLinks = pgTable("booking_links", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  token: text("token").notNull().unique(),
+  ghlContactId: text("ghl_contact_id").notNull(),
+  contactName: text("contact_name"),
+  calendarId: text("calendar_id").notNull(),
+  calendarName: text("calendar_name"),
+  /** Frozen at mint time, so renaming a calendar cannot repoint a link already sent. */
+  targetUrl: text("target_url").notNull(),
+  sentByUserId: uuid("sent_by_user_id").references(() => users.id),
+  sentByName: text("sent_by_name"),
+  /** "sent" = we delivered it. "copied" = the rep took it to paste elsewhere. Both attribute
+   *  a booking; only "sent" proves the outreach happened, so a funnel must not conflate them. */
+  delivery: text("delivery").notNull().default("sent"),
+  channel: text("channel"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  firstClickedAt: timestamp("first_clicked_at", { withTimezone: true }),
+  clickCount: integer("click_count").notNull().default(0),
+  bookedAt: timestamp("booked_at", { withTimezone: true }),
+  ghlAppointmentId: text("ghl_appointment_id"),
+}, (t) => [
+  // Declared here as well as in 0058 so drizzle-kit can SEE them. An index the schema does not
+  // describe is one a future `generate` will happily emit a DROP for, and this particular index
+  // is the only thing stopping one booked call from paying two people.
+  uniqueIndex("booking_links_appointment_uniq")
+    .on(t.ghlAppointmentId)
+    .where(sql`${t.ghlAppointmentId} IS NOT NULL`),
+  index("booking_links_pending_idx")
+    .on(t.createdAt.desc())
+    .where(sql`${t.bookedAt} IS NULL`),
 ]);

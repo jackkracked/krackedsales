@@ -159,6 +159,11 @@ export interface PaceInput {
   window: { start: string; end: string };
   /** Defaults to now; injected in tests/preview for determinism. */
   now?: Date;
+  /**
+   * A point-in-time LEVEL metric (MRR, active subscriptions) — judged against the FULL monthly
+   * target directly ("are we at/above the number"), never pro-rated by elapsed days.
+   */
+  snapshot?: boolean;
 }
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -215,7 +220,16 @@ export function paceForWindow(input: PaceInput): PaceResult | null {
   let expected: number;
   let prorated: boolean;
 
-  if (spanDays === 1) {
+  if (input.snapshot) {
+    // Level metric (MRR): compare the current value straight to the full monthly target,
+    // regardless of how much of the window has elapsed. "Keeping to / reaching the number."
+    cadence = "monthly";
+    periodDays = getDaysInMonth(start);
+    periodKind = "month";
+    full = resolveCadence(targets, "monthly");
+    expected = full ?? 0;
+    prorated = false;
+  } else if (spanDays === 1) {
     cadence = "daily";
     periodDays = 1;
     periodKind = "day";

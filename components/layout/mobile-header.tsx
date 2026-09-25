@@ -13,14 +13,15 @@ import {
   Send,
   TrendingUp,
 } from "lucide-react";
+import type { FeatureKey } from "@/lib/auth/permission-constants";
 
-const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/pipeline", label: "Pipeline", icon: GitMerge },
-  { href: "/inbox", label: "Inbox", icon: MessageSquare },
-  { href: "/demo-tracker", label: "Demo Tracker", icon: BarChart3 },
-  { href: "/analytics", label: "Analytics", icon: TrendingUp },
-  { href: "/follow-ups", label: "Follow-ups", icon: Send },
+const NAV_ITEMS: { href: string; label: string; icon: React.ElementType; featureKey: FeatureKey }[] = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, featureKey: "view_dashboard" },
+  { href: "/pipeline", label: "Pipeline", icon: GitMerge, featureKey: "view_pipeline" },
+  { href: "/inbox", label: "Inbox", icon: MessageSquare, featureKey: "view_inbox" },
+  { href: "/demo-tracker", label: "Demo Tracker", icon: BarChart3, featureKey: "view_demo_tracker" },
+  { href: "/analytics", label: "Analytics", icon: TrendingUp, featureKey: "view_analytics" },
+  { href: "/follow-ups", label: "Follow-ups", icon: Send, featureKey: "view_follow_ups" },
 ];
 
 const PAGE_TITLES: Record<string, string> = {
@@ -32,10 +33,11 @@ const PAGE_TITLES: Record<string, string> = {
   "/follow-ups": "Follow-ups",
 };
 
-export function MobileHeader() {
+export function MobileHeader({ permissions }: { permissions?: Record<string, boolean> }) {
   const pathname = usePathname();
   const router = useRouter();
   const { sidebarOpen, setSidebarOpen } = useUIStore();
+  const navItems = NAV_ITEMS.filter((i) => (permissions ? permissions[i.featureKey] === true : true));
 
   const title = Object.entries(PAGE_TITLES).find(([key]) =>
     pathname.startsWith(key)
@@ -104,7 +106,7 @@ export function MobileHeader() {
             </div>
 
             <div className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
-              {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+              {navItems.map(({ href, label, icon: Icon }) => {
                 const isActive = pathname === href || pathname.startsWith(href + "/");
                 return (
                   <Link

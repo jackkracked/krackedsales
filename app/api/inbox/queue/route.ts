@@ -16,6 +16,7 @@ import { db } from "@/lib/db";
 import { platformReplies, users, localConversations, conversationReads } from "@/lib/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
+import { getGhlQueueConvsFromMirror } from "@/lib/inbox/mirror-source";
 import { meta } from "@/lib/meta/client";
 import { openGet, getTiktokSettings } from "@/lib/tiktok/client";
 
@@ -106,11 +107,17 @@ export async function GET(req: NextRequest) {
   } catch {}
 
   // ── 1. GHL conversations ─────────────────────────────────────────────────────
+  // Default stays LIVE: the GHL leg is not the inbox bottleneck (Meta is), and the mirror is
+  // a superset that surfaces older awaiting threads — a product decision, not a silent flip.
+  // `?convFeed=mirror` opts into the mirror (message direction sourced from local_messages).
+  const convFeed = req.nextUrl.searchParams.get("convFeed") === "mirror" ? "mirror" : "live";
   try {
     const loc = locationId();
-    const data = await ghl.get<GHLConversationsResponse>(
-      `/conversations/search?locationId=${loc}&limit=100&sortBy=last_message_date&sortOrder=desc`
-    );
+    const data: GHLConversationsResponse = convFeed === "live"
+      ? await ghl.get<GHLConversationsResponse>(
+          `/conversations/search?locationId=${loc}&limit=100&sortBy=last_message_date&sortOrder=desc`
+        )
+      : { conversations: await getGhlQueueConvsFromMirror() };
 
     // Enrich with locally-owned "last responder" data (our source of truth for
     // who personally handled each thread — GHL doesn't expose this on search).

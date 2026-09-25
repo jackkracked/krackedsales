@@ -5,12 +5,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
 import { useUIStore } from "@/store/ui-store";
 import {
+  Receipt,
+  Filter,
   LayoutDashboard,
   GitMerge,
   MessageSquare,
   BarChart3,
   Send,
-  TrendingUp,
   PanelLeftClose,
   PanelLeftOpen,
   LogOut,
@@ -31,60 +32,70 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { NotificationBell } from "@/components/layout/notification-bell";
+import type { FeatureKey } from "@/lib/auth/permission-constants";
 
 interface NavItem {
   href: string;
   label: string;
   icon: React.ElementType;
-  adminOnly?: boolean;
+  featureKey: FeatureKey;
 }
 
 const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   {
     label: "Work",
     items: [
-      { href: "/dashboard",  label: "Dashboard", icon: LayoutDashboard },
-      { href: "/pipeline",   label: "Pipeline",  icon: GitMerge },
-      { href: "/contacts",   label: "Contacts",  icon: Users },
-      { href: "/proposals",  label: "Proposals", icon: FileText },
-      { href: "/boards",     label: "Boards",    icon: LayoutGrid },
-      { href: "/calls",      label: "Calls",     icon: Phone },
-      { href: "/dialer",     label: "Dialer",    icon: PhoneCall, adminOnly: true },
-      { href: "/calendar",   label: "Calendar",  icon: CalendarDays },
-      { href: "/tasks",      label: "Tasks",     icon: ListTodo },
-      { href: "/inbox",      label: "Inbox",     icon: MessageSquare },
+      { href: "/dashboard",  label: "Dashboard", icon: LayoutDashboard, featureKey: "view_dashboard" },
+      { href: "/leads",      label: "Leads",     icon: Filter, featureKey: "view_leads" },
+      { href: "/pipeline",   label: "Pipeline",  icon: GitMerge, featureKey: "view_pipeline" },
+      { href: "/contacts",   label: "Contacts",  icon: Users, featureKey: "view_contacts" },
+      { href: "/proposals",  label: "Proposals", icon: FileText, featureKey: "view_proposals" },
+      { href: "/boards",     label: "Boards",    icon: LayoutGrid, featureKey: "view_boards" },
+      { href: "/calls",      label: "Calls",     icon: Phone, featureKey: "view_calls" },
+      { href: "/dialer",     label: "Dialer",    icon: PhoneCall, featureKey: "view_dialer" },
+      { href: "/calendar",   label: "Calendar",  icon: CalendarDays, featureKey: "view_calendar" },
+      { href: "/tasks",      label: "Tasks",     icon: ListTodo, featureKey: "view_tasks" },
+      { href: "/inbox",      label: "Inbox",     icon: MessageSquare, featureKey: "view_inbox" },
     ],
   },
   {
     label: "Measure",
     items: [
-      { href: "/kpis",         label: "KPIs",          icon: Target, adminOnly: true },
-      { href: "/money",        label: "Money",         icon: Wallet, adminOnly: true },
-      { href: "/demo-tracker", label: "Demo Tracker",   icon: BarChart3 },
-      { href: "/analytics",    label: "Analytics",      icon: TrendingUp },
-      { href: "/activity",     label: "Activity",       icon: Activity, adminOnly: true },
+      { href: "/kpis",         label: "KPIs",          icon: Target, featureKey: "view_kpis" },
+      { href: "/money",        label: "Money",         icon: Wallet, featureKey: "view_money" },
+      { href: "/tracker",      label: "Pay Tracker",   icon: Receipt, featureKey: "view_tracker" },
+      { href: "/demo-tracker", label: "Demo Tracker",   icon: BarChart3, featureKey: "view_demo_tracker" },
+      // Analytics hidden 2026-08-25: KPIs covers it. The /analytics route still works if
+      // linked directly; only the nav entry is gone.
+      { href: "/activity",     label: "Activity",       icon: Activity, featureKey: "view_activity" },
     ],
   },
   {
     label: "Automate",
     items: [
-      { href: "/workflows",  label: "Workflows",  icon: Workflow },
-      { href: "/reminders",  label: "Reminders",  icon: BellRing, adminOnly: true },
-      { href: "/follow-ups", label: "Follow-ups", icon: Send },
-      { href: "/templates",  label: "Templates",  icon: Layers },
+      { href: "/workflows",  label: "Workflows",  icon: Workflow, featureKey: "view_workflows" },
+      { href: "/reminders",  label: "Reminders",  icon: BellRing, featureKey: "view_reminders" },
+      { href: "/follow-ups", label: "Follow-ups", icon: Send, featureKey: "view_follow_ups" },
+      { href: "/templates",  label: "Templates",  icon: Layers, featureKey: "view_templates" },
     ],
   },
 ];
 
 interface SidebarProps {
   userRole?: string;
+  /** Resolved feature → enabled map for the current user (role preset + overrides). */
+  permissions?: Record<string, boolean>;
 }
 
-export function Sidebar({ userRole }: SidebarProps) {
+export function Sidebar({ userRole, permissions }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { sidebarCollapsed, toggleSidebarCollapsed } = useUIStore();
   const isAdmin = userRole === "admin";
+  // A nav item shows when its feature is enabled for this user. If permissions failed to
+  // resolve (rare, DB error), fail open so the user isn't stranded — page-level gates still
+  // protect sensitive routes.
+  const canSee = (key: FeatureKey) => (permissions ? permissions[key] === true : true);
 
   const { data: fathomStatus } = useQuery<{ connected: boolean }>({
     queryKey: ["fathom-status"],
@@ -172,7 +183,10 @@ export function Sidebar({ userRole }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="flex-1 px-1.5 py-2 overflow-y-auto">
-        {NAV_SECTIONS.map((section, si) => (
+        {NAV_SECTIONS.map((section, si) => {
+          const visibleItems = section.items.filter((item) => canSee(item.featureKey));
+          if (visibleItems.length === 0) return null; // whole section hidden for this role
+          return (
           <div key={si} className={si > 0 ? "mt-4" : ""}>
             {/* Section label — hidden when collapsed */}
             {section.label && (
@@ -187,7 +201,7 @@ export function Sidebar({ userRole }: SidebarProps) {
               </span>
             )}
             <div className="space-y-px">
-              {section.items.filter((item) => !item.adminOnly || isAdmin).map(({ href, label, icon: Icon }) => {
+              {visibleItems.map(({ href, label, icon: Icon }) => {
                 const isActive = pathname === href || pathname.startsWith(href + "/");
                 return (
                   <Link
@@ -235,11 +249,13 @@ export function Sidebar({ userRole }: SidebarProps) {
               })}
             </div>
           </div>
-        ))}
+          );
+        })}
       </nav>
 
       {/* Settings + Log out */}
       <div className="px-1.5 py-2 border-t border-border shrink-0">
+        {canSee("manage_settings") && (
         <Link
           href="/settings"
           title={sidebarCollapsed ? "Settings" : undefined}
@@ -265,6 +281,7 @@ export function Sidebar({ userRole }: SidebarProps) {
             )}
           </span>
         </Link>
+        )}
         <button
           onClick={handleLogout}
           title={sidebarCollapsed ? "Log out" : undefined}

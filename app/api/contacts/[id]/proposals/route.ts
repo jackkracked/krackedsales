@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { proposals, proposalInstalments } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/auth/session";
+import { WON_STATUSES } from "@/lib/proposals/status";
 
 export const dynamic = "force-dynamic";
 
@@ -42,12 +43,14 @@ export async function GET(
       }
     }
 
-    // LTV = sum of all paid proposal amounts
+    // LTV = sum of every proposal where the deal converted to cash. WON_STATUSES, not
+    // status === "paid": a 90-day spread client sits in "active" for most of its life, and
+    // testing only for "paid" reported their LTV as $0 in the contact drawer.
     const ltv = contactProposals
-      .filter((p) => p.status === "paid")
+      .filter((p) => WON_STATUSES.includes(p.status))
       .reduce((sum, p) => sum + p.totalAmount, 0);
 
-    const paidCount = contactProposals.filter((p) => p.status === "paid").length;
+    const paidCount = contactProposals.filter((p) => WON_STATUSES.includes(p.status)).length;
 
     return NextResponse.json({ proposals: contactProposals, instalments: instalmentsMap, ltv, paidCount });
   } catch (err) {

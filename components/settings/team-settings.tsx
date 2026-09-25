@@ -6,7 +6,7 @@ import {
   UserPlus, Users, X, ChevronRight, Eye, EyeOff, RefreshCw, CheckCircle2, KeyRound, DollarSign,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
-import { FEATURES, FEATURE_LABELS, type FeatureKey } from "@/lib/auth/permission-constants";
+import { FEATURES, FEATURE_LABELS, ROLE_PRESETS, ROLES, ROLE_LABELS, type FeatureKey } from "@/lib/auth/permission-constants";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -18,6 +18,7 @@ interface TeamUser {
   isActive: boolean;
   ghlUserId: string | null;
   commissionPct: number;
+  basePayCents?: number;
   timezone: string | null;
   createdAt: string;
   targets: {
@@ -164,6 +165,8 @@ function SlideOver({ user, onClose }: SlideOverProps) {
   const [isActive, setIsActive] = useState(user.isActive);
   const [ghlUserId, setGhlUserId] = useState(user.ghlUserId ?? "");
   const [commissionPct, setCommissionPct] = useState(user.commissionPct ?? 0);
+  // Held in DOLLARS here and converted on save: an admin types 1500, the column stores cents.
+  const [basePay, setBasePay] = useState((user.basePayCents ?? 0) / 100);
   const [timezone, setTimezone] = useState(user.timezone ?? "");
   const [dealsPerMonth, setDealsPerMonth] = useState(user.targets?.dealsPerMonth ?? 5);
   const [callsPerDay, setCallsPerDay] = useState(user.targets?.callsPerDay ?? 15);
@@ -176,6 +179,20 @@ function SlideOver({ user, onClose }: SlideOverProps) {
     initialPerms[f] = override !== undefined ? override : (user.rolePreset[f] ?? role === "admin");
   }
   const [perms, setPerms] = useState<Record<FeatureKey, boolean>>(initialPerms);
+
+  // The default toggle state for a role (admin = everything on; others from the seeded presets).
+  const presetFor = (r: string): Record<FeatureKey, boolean> => {
+    const map = {} as Record<FeatureKey, boolean>;
+    for (const f of FEATURES) map[f] = r === "admin" ? true : (ROLE_PRESETS[r]?.[f] ?? false);
+    return map;
+  };
+  // Switching a user's role resets the toggles to that role's preset, so what you see is what
+  // saves (and overrides are computed against the right base). Switching back restores their
+  // stored state.
+  const changeRole = (r: string) => {
+    setRole(r);
+    setPerms(r === user.role ? initialPerms : presetFor(r));
+  };
 
   const mutation = useMutation({
     mutationFn: (payload: object) =>
@@ -196,10 +213,12 @@ function SlideOver({ user, onClose }: SlideOverProps) {
   function handleSave() {
     if (passwordMismatch || passwordTooShort) return;
 
-    // Only store overrides that differ from the current role preset
+    // Only store overrides that differ from the selected role's preset. If the role was changed,
+    // the base is that new role's preset (constant); otherwise the user's stored role preset.
+    const base = role !== user.role ? presetFor(role) : null;
     const overrides: Record<string, boolean> = {};
     for (const f of FEATURES) {
-      const roleDefault = user.rolePreset[f] ?? role === "admin";
+      const roleDefault = base ? base[f] : (user.rolePreset[f] ?? role === "admin");
       if (perms[f] !== roleDefault) {
         overrides[f] = perms[f];
       }
@@ -213,6 +232,7 @@ function SlideOver({ user, onClose }: SlideOverProps) {
       isActive,
       ghlUserId,
       commissionPct,
+      basePayCents: Math.round(basePay * 100),
       timezone: timezone || null,
       targets: { dealsPerMonth, callsPerDay, revenueTarget },
       permissionOverrides: overrides,
@@ -316,20 +336,20 @@ function SlideOver({ user, onClose }: SlideOverProps) {
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
               Role
             </p>
-            <div className="flex gap-2 mb-4">
-              {(["admin", "rep"] as const).map((r) => (
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {ROLES.map((r) => (
                 <button
                   key={r}
                   type="button"
-                  onClick={() => setRole(r)}
+                  onClick={() => changeRole(r)}
                   className={cn(
-                    "flex-1 py-2 rounded-[6px] text-sm font-medium transition-colors border",
+                    "py-2 rounded-[6px] text-sm font-medium transition-colors border",
                     role === r
                       ? "bg-primary text-primary-foreground border-primary"
                       : "bg-background text-foreground/70 border-border hover:border-primary/40"
                   )}
                 >
-                  {r.charAt(0).toUpperCase() + r.slice(1)}
+                  {ROLE_LABELS[r]}
                 </button>
               ))}
             </div>
@@ -384,11 +404,38 @@ function SlideOver({ user, onClose }: SlideOverProps) {
             </section>
           )}
 
-          {/* Commission */}
+          {/* Pay */}
           <section>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
-              Commission
+              Pay
             </p>
+            <div className="space-y-1.5 mb-4">
+              <label className="text-xs font-medium text-foreground">Monthly base pay</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={50}
+                  value={basePay === 0 ? "" : basePay}
+                  placeholder="0"
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    if (raw === "") { setBasePay(0); return; }
+                    const num = parseFloat(raw);
+                    if (!isNaN(num) && num >= 0) setBasePay(num);
+                  }}
+                  className={cn(
+                    "w-full rounded-[6px] border border-border bg-background py-2 pl-7 pr-3",
+                    "text-sm text-foreground tabular-nums",
+                    "focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors"
+                  )}
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Shown on their Pay Tracker as the floor under any commission. Leave at 0 if they are commission-only.
+              </p>
+            </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-foreground">Commission percentage (%)</label>
               <div className="relative">
@@ -514,7 +561,7 @@ function AddUserForm({ onSuccess }: { onSuccess: () => void }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"admin" | "rep">("rep");
+  const [role, setRole] = useState<string>("setter");
   const [showPassword, setShowPassword] = useState(false);
   const [success, setSuccess] = useState(false);
 
@@ -586,20 +633,20 @@ function AddUserForm({ onSuccess }: { onSuccess: () => void }) {
 
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-foreground">Role</label>
-            <div className="flex gap-2 h-[38px]">
-              {(["admin", "rep"] as const).map((r) => (
+            <div className="grid grid-cols-2 gap-2">
+              {ROLES.map((r) => (
                 <button
                   key={r}
                   type="button"
                   onClick={() => setRole(r)}
                   className={cn(
-                    "flex-1 rounded-[6px] text-sm font-medium transition-colors border",
+                    "py-2 rounded-[6px] text-sm font-medium transition-colors border",
                     role === r
                       ? "bg-primary text-primary-foreground border-primary"
                       : "bg-background text-foreground/70 border-border hover:border-primary/40"
                   )}
                 >
-                  {r.charAt(0).toUpperCase() + r.slice(1)}
+                  {ROLE_LABELS[r]}
                 </button>
               ))}
             </div>

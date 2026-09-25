@@ -18,6 +18,9 @@ const PUBLIC_PATHS = [
   "/terms",
   "/privacy",
   "/p/",                        // Public proposal signing pages — no auth required
+  "/b/",                        // Tracked booking links — clicked by PROSPECTS with no session,
+                                // from an email client or a phone. Behind auth it would bounce
+                                // every prospect to /login instead of the booking page.
   "/api/proposals/public/",    // API called by the public signing page — no auth required
   "/api/proposals/track/",     // Email-open pixel + tracked click link — hit by email clients/prospects
   "/board/",                    // Public demo boards (tokenized) — no auth required

@@ -23,6 +23,7 @@ export interface GHLConversation {
   phone?: string;
   avatarUrl?: string;
   assignedTo?: string;
+  starred?: boolean; // merged from our local mirror (drives the Starred filter)
   contact?: {
     id: string;
     name: string;

@@ -11,7 +11,7 @@
  * structural part of every email (URL wired automatically, label editable), so a
  * client can never receive a reminder with a missing or broken action.
  */
-import { fmtMoney, amountBlockLabel, priceSuffix, fmtDay } from "@/lib/proposals/billing";
+import { fmtMoney, amountBlockLabel, priceSuffix, fullTermTotal, fmtDay } from "@/lib/proposals/billing";
 import type { proposals, proposalInstalments } from "@/lib/db/schema";
 
 type ProposalRow = typeof proposals.$inferSelect;
@@ -51,7 +51,9 @@ function firstName(fullName: string): string {
 }
 
 function proposalValue(p: ProposalRow): string {
-  return `${fmtMoney(p.totalAmount, p.currency)}${priceSuffix(p)}`;
+  // fullTermTotal shows the 90-day total for a 90-Day Management proposal (monthly × 3), and is
+  // a no-op (= totalAmount) for everything else. priceSuffix drops the "/mo" for 90-day.
+  return `${fmtMoney(fullTermTotal(p), p.currency)}${priceSuffix(p)}`;
 }
 
 export interface ResolveContext {

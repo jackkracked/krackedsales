@@ -40,9 +40,11 @@ interface AvatarProps {
   size?: number;           // pixel size, default 28
   variant?: "contact" | "rep";  // contact = colorful, rep = brand primary
   className?: string;
+  /** Real profile photo (e.g. an Instagram/Facebook avatar). Falls back to initials if absent or broken. */
+  src?: string | null;
 }
 
-export function Avatar({ name, size = 28, variant = "contact", className }: AvatarProps) {
+export function Avatar({ name, size = 28, variant = "contact", className, src }: AvatarProps) {
   const colorClass = variant === "rep"
     ? REP_CLASS
     : CONTACT_COLORS[hashName(name) % CONTACT_COLORS.length];
@@ -52,7 +54,7 @@ export function Avatar({ name, size = 28, variant = "contact", className }: Avat
   return (
     <span
       className={cn(
-        "inline-flex items-center justify-center rounded-full font-bold shrink-0 select-none",
+        "relative inline-flex items-center justify-center overflow-hidden rounded-full font-bold shrink-0 select-none",
         fontSize,
         colorClass,
         className
@@ -61,6 +63,16 @@ export function Avatar({ name, size = 28, variant = "contact", className }: Avat
       title={name}
     >
       {getInitials(name)}
+      {src && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt=""
+          loading="lazy"
+          className="absolute inset-0 h-full w-full object-cover"
+          onError={(e) => { e.currentTarget.style.display = "none"; }}
+        />
+      )}
     </span>
   );
 }

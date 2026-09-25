@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
@@ -54,6 +54,33 @@ function detectChannel(messages: MessageLike[]): Channel {
     return "SMS";
   }
   return "SMS";
+}
+
+/**
+ * Which channels this contact can ACTUALLY be reached on.
+ *
+ * Facebook and Instagram are the constrained ones, and the constraint is the platform's, not
+ * ours: you cannot INITIATE a Messenger or Instagram DM. You may only reply inside a thread the
+ * person started. GHL enforces this by refusing to send unless the contact carries a Facebook /
+ * Instagram id, which it only has once they have messaged the page.
+ *
+ * Before this, all four pills were always live. A contact who arrived through a Facebook AD LEAD
+ * FORM has no Messenger thread and therefore no Facebook id, so pressing Facebook produced a raw
+ * GHL failure after the fact:
+ *   400 {"message":"Contact has no Facebook id, skipping", ...}
+ * Gage hit this repeatedly sending demos, because ad-form leads are exactly the common case.
+ *
+ * Presence of a message of that type in the thread is the reliable signal: if a Facebook message
+ * exists, the contact has a Facebook id. SMS and Email are deliberately left ALWAYS available —
+ * both can be initiated cold, and gating them on prior history would break normal outreach.
+ */
+function availableChannels(messages: MessageLike[]): Set<Channel> {
+  const available = new Set<Channel>(["SMS", "EMAIL"]);
+  for (const m of messages) {
+    if (m.messageType === "TYPE_FB") available.add("FB");
+    if (m.messageType === "TYPE_INSTAGRAM") available.add("IG");
+  }
+  return available;
 }
 
 function getLastEmailSubject(messages: MessageLike[]): string {
@@ -137,7 +164,14 @@ function MessageComposer({
   onSent,
   initialDraft,
 }: MessageComposerProps) {
-  const [channel, setChannel] = useState<Channel>(() => detectChannel(messages));
+  const available = useMemo(() => availableChannels(messages), [messages]);
+  const [channel, setChannel] = useState<Channel>(() => {
+    // detectChannel reads the last real message, which may be on a channel we cannot reply to
+    // (e.g. an inbound Instagram DM with replies not configured). Fall back to SMS rather than
+    // opening on a pill that is about to fail.
+    const detected = detectChannel(messages);
+    return availableChannels(messages).has(detected) ? detected : "SMS";
+  });
   const [smsDraft, setSmsDraft] = useState(initialDraft ?? "");
   const [fbDraft, setFbDraft] = useState("");
   const [subject, setSubject] = useState(() => {
@@ -247,29 +281,40 @@ function MessageComposer({
     <div className="shrink-0 border-t border-border bg-card">
       {/* ── Channel pills ───────────────────────────────────────────── */}
       <div className="px-4 pt-3 pb-2 flex items-center gap-2">
-        {channelDefs.map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setChannel(key)}
-            className={cn(
-              channel === key
-                ? "bg-primary text-primary-foreground rounded-full px-3 py-1 text-xs font-medium"
-                : "border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 rounded-full px-3 py-1 text-xs font-medium transition-colors",
-              key === "IG" && channel !== "IG" && "opacity-40"
-            )}
-          >
-            {label}
-          </button>
-        ))}
+        {channelDefs.map(({ key, label }) => {
+          // `opacity-40` used to only DIM Instagram while leaving it clickable, and Facebook had
+          // nothing at all. Now an unreachable channel is genuinely disabled, so the failure is
+          // impossible rather than reported after the send.
+          const canSend = available.has(key);
+          return (
+            <button
+              key={key}
+              onClick={() => canSend && setChannel(key)}
+              disabled={!canSend}
+              title={canSend ? undefined : `No ${label} conversation with this contact — ${label} can only be used to reply to a message they sent first.`}
+              className={cn(
+                channel === key
+                  ? "bg-primary text-primary-foreground rounded-full px-3 py-1 text-xs font-medium"
+                  : "border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                !canSend && "opacity-40 cursor-not-allowed hover:text-muted-foreground hover:border-border"
+              )}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
 
-      {/* ── Instagram warning ───────────────────────────────────────── */}
-      {channel === "IG" && (
+      {/* ── Unreachable-channel notice ──────────────────────────────── */}
+      {/* Only reachable if a channel became unavailable while it was selected (the pills are
+          disabled otherwise). Explains the platform rule instead of leaving a dead composer. */}
+      {!available.has(channel) && (
         <div className="mx-4 mb-3 px-3 py-2.5 rounded-[8px] bg-amber-50 border border-amber-200 flex items-start gap-2">
           <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
           <p className="text-xs text-amber-800 leading-snug">
-            Instagram replies aren&apos;t set up yet. Use SMS or Email to reach
-            this contact.
+            {channel === "FB" ? "Facebook" : "Instagram"} can only be used to reply to a message
+            this contact sent first, and there isn&apos;t one. Leads from an ad form have no
+            Messenger thread. Use SMS or Email instead.
           </p>
         </div>
       )}

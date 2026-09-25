@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pusherTrigger } from "@/lib/pusher/server";
 import { db } from "@/lib/db";
-import { pipelineStageEvents, followupSends, bookingAutomationRules, messageIndex } from "@/lib/db/schema";
+import { pipelineStageEvents, followupSends, bookingAutomationRules, messageIndex, localOpportunities } from "@/lib/db/schema";
 import { and, eq, gte, desc } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { notifyAdmins } from "@/lib/notifications";
@@ -149,14 +149,21 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Sync opportunity to local DB ─────────────────────────────────────────
+    // The mirror is now the read source for Contacts/Pipeline/Follow-ups/Rep, so it MUST stay
+    // complete + current. The webhook payload is thin (no createdAt/updatedAt, sparse contact),
+    // so we fetch the authoritative full opportunity from GHL and upsert THAT. We await it so a
+    // stage-move / new lead is guaranteed persisted before we ack the webhook. Falls back to the
+    // thin payload if the fetch fails, so a change is never dropped. The daily reconcile heals
+    // the one field GHL's single-GET omits (contact.companyName → brand category).
     if (
       eventType === "OpportunityCreate" ||
       eventType === "OpportunityUpdate" ||
       eventType === "OpportunityStageUpdate" ||
       eventType === "OpportunityStatusUpdate"
     ) {
-      upsertOpportunity({
-        id: body?.id ?? body?.opportunityId,
+      const oppId = body?.id ?? body?.opportunityId;
+      const thin = {
+        id: oppId,
         contact: {
           id: body?.contactId,
           name: body?.contactName ?? body?.fullName,
@@ -174,7 +181,41 @@ export async function POST(req: NextRequest) {
         lastStageChangeAt: body?.dateUpdated,
         dateAdded: body?.dateAdded,
         dateUpdated: body?.dateUpdated,
-      }).catch(() => {});
+      };
+      if (oppId) {
+        type FullOpp = Record<string, unknown> & { id?: string; createdAt?: string; updatedAt?: string; lastStageChangeAt?: string };
+        let full: FullOpp | null = null;
+        try {
+          const res = await ghl.get<{ opportunity?: Record<string, unknown> }>(`/opportunities/${oppId}`);
+          full = (res?.opportunity ?? res) as unknown as FullOpp;
+        } catch {
+          full = null;
+        }
+        if (full?.id) {
+          // Normalize v2 date names so createdAtGhl/updatedAtGhl populate; rawData keeps createdAt/updatedAt.
+          await upsertOpportunity({
+            ...(full as object),
+            dateAdded: (full.createdAt as string | undefined) ?? undefined,
+            dateUpdated: (full.updatedAt as string | undefined) ?? undefined,
+            lastStageChangeAt: (full.lastStageChangeAt as string | undefined) ?? undefined,
+          } as Parameters<typeof upsertOpportunity>[0]);
+        } else if (eventType === "OpportunityCreate") {
+          // Brand-new opp we couldn't fetch — insert the thin body so the lead still appears;
+          // the reconcile enriches it. Safe: nothing existed to degrade.
+          await upsertOpportunity(thin).catch(() => {});
+        }
+        // else (update whose fetch failed, e.g. opp deleted in GHL): leave the existing row
+        // untouched — never degrade good mirror data on a transient/404 fetch. Reconcile heals.
+      }
+    }
+
+    // ── Opportunity deletion — remove from the mirror so it can't linger as a phantom ────
+    if (eventType === "OpportunityDelete" || eventType === "OpportunityDeleted") {
+      const oppId = body?.id ?? body?.opportunityId;
+      if (oppId) {
+        await db().delete(localOpportunities).where(eq(localOpportunities.id, oppId)).catch(() => {});
+        await pusherTrigger("ghl-pipeline", "opportunity.updated", { opportunityId: oppId }).catch(() => {});
+      }
     }
 
     // ── 1b. Opportunity won dispatch ──────────────────────────────────────────

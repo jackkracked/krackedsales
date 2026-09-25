@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { followupSends, followupRecommendations } from "@/lib/db/schema";
 import { and, inArray, sql } from "drizzle-orm";
 import type { GHLOpportunity, GHLPipeline } from "@/lib/ghl/types";
+import { getOpenOppsForPipelinesFromMirror } from "@/lib/follow-ups/mirror-source";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -82,72 +83,82 @@ interface EnrichedOpp extends GHLOpportunity {
   pipelineName: string;
 }
 
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
     const loc = locationId();
     const client = db();
     const nowMs = Date.now();
 
-    // ── 1. Fetch all pipelines + build stage maps ──────────────────────────────
-    const pipelinesData = await ghl.get<{ pipelines: GHLPipeline[] }>(
-      `/opportunities/pipelines?locationId=${loc}`
-    );
+    // Default reads open follow-up opps from the local mirror (one query vs 10-30 live GHL
+    // calls). `?feed=live` restores the per-stage GHL scrape as a rollback lever.
+    const feed = req.nextUrl.searchParams.get("feed") === "live" ? "live" : "mirror";
 
-    // Map pipelineId → { stageName by stageId, pipelineName }
-    const pipelineMeta = new Map<
-      string,
-      { name: string; stageMap: Record<string, string>; followUpStageIds: string[] }
-    >();
+    let allOpps: EnrichedOpp[];
+    if (feed === "live") {
+      // ── 1. Fetch all pipelines + build stage maps ──────────────────────────────
+      const pipelinesData = await ghl.get<{ pipelines: GHLPipeline[] }>(
+        `/opportunities/pipelines?locationId=${loc}`
+      );
 
-    for (const p of pipelinesData.pipelines ?? []) {
-      if (!FOLLOW_UP_PIPELINE_IDS.includes(p.id)) continue;
+      // Map pipelineId → { stageName by stageId, pipelineName }
+      const pipelineMeta = new Map<
+        string,
+        { name: string; stageMap: Record<string, string>; followUpStageIds: string[] }
+      >();
 
-      const stageMap: Record<string, string> = {};
-      const followUpStageIds: string[] = [];
+      for (const p of pipelinesData.pipelines ?? []) {
+        if (!FOLLOW_UP_PIPELINE_IDS.includes(p.id)) continue;
 
-      for (const s of p.stages ?? []) {
-        stageMap[s.id] = s.name;
+        const stageMap: Record<string, string> = {};
+        const followUpStageIds: string[] = [];
 
-        // Pre-identify follow-up stages so we can query them directly
-        // (pass daysSince=99 to catch all unresponsive variants)
-        if (determineZone(s.name, 99) !== null) {
-          followUpStageIds.push(s.id);
-        }
-      }
+        for (const s of p.stages ?? []) {
+          stageMap[s.id] = s.name;
 
-      pipelineMeta.set(p.id, { name: p.name, stageMap, followUpStageIds });
-    }
-
-    // ── 2. Fetch opportunities — only from follow-up stages per pipeline ───────
-    // Query by stage ID directly (far more efficient than fetching all opps)
-    const allOpps: EnrichedOpp[] = [];
-
-    for (const [pipelineId, meta] of pipelineMeta.entries()) {
-      if (meta.followUpStageIds.length === 0) continue;
-
-      for (const stageId of meta.followUpStageIds) {
-        let page = 1;
-        while (true) {
-          const res = await ghl.get<{
-            opportunities: GHLOpportunity[];
-            meta?: { nextPage: number | null };
-          }>(
-            `/opportunities/search?location_id=${loc}&pipeline_id=${pipelineId}&pipeline_stage_id=${stageId}&status=open&limit=100&page=${page}`
-          );
-          const batch = res.opportunities ?? [];
-
-          for (const opp of batch) {
-            allOpps.push({
-              ...opp,
-              stageName: meta.stageMap[opp.pipelineStageId] ?? "Unknown",
-              pipelineName: meta.name,
-            });
+          // Pre-identify follow-up stages so we can query them directly
+          // (pass daysSince=99 to catch all unresponsive variants)
+          if (determineZone(s.name, 99) !== null) {
+            followUpStageIds.push(s.id);
           }
+        }
 
-          if (!res.meta?.nextPage || batch.length < 100) break;
-          page++;
+        pipelineMeta.set(p.id, { name: p.name, stageMap, followUpStageIds });
+      }
+
+      // ── 2. Fetch opportunities — only from follow-up stages per pipeline ───────
+      // Query by stage ID directly (far more efficient than fetching all opps)
+      allOpps = [];
+
+      for (const [pipelineId, meta] of pipelineMeta.entries()) {
+        if (meta.followUpStageIds.length === 0) continue;
+
+        for (const stageId of meta.followUpStageIds) {
+          let page = 1;
+          while (true) {
+            const res = await ghl.get<{
+              opportunities: GHLOpportunity[];
+              meta?: { nextPage: number | null };
+            }>(
+              `/opportunities/search?location_id=${loc}&pipeline_id=${pipelineId}&pipeline_stage_id=${stageId}&status=open&limit=100&page=${page}`
+            );
+            const batch = res.opportunities ?? [];
+
+            for (const opp of batch) {
+              allOpps.push({
+                ...opp,
+                stageName: meta.stageMap[opp.pipelineStageId] ?? "Unknown",
+                pipelineName: meta.name,
+              });
+            }
+
+            if (!res.meta?.nextPage || batch.length < 100) break;
+            page++;
+          }
         }
       }
+    } else {
+      // Mirror: every open opp in the follow-up pipelines; determineZone filters below.
+      allOpps = await getOpenOppsForPipelinesFromMirror(FOLLOW_UP_PIPELINE_IDS);
     }
 
     if (allOpps.length === 0) {

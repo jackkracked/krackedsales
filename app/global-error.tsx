@@ -74,6 +74,34 @@ export default function GlobalError({
               ? "A new version just shipped — reloading you onto it."
               : "An unexpected error occurred. Try again, or reload."}
           </p>
+          {/* THE ACTUAL ERROR. This screen used to swallow it entirely, which meant a crash
+              could only be diagnosed by guessing: nobody, including the developer, could see
+              what broke. This is a 4-person internal tool, so showing it is strictly better
+              than hiding it. Selectable so it can be copied straight into a bug report. */}
+          {!isSkew && (error?.message || error?.digest) && (
+            <pre
+              style={{
+                textAlign: "left",
+                fontSize: 11,
+                lineHeight: 1.5,
+                color: "#f87171",
+                background: "#161616",
+                border: "1px solid #2a2a2a",
+                borderRadius: 8,
+                padding: "10px 12px",
+                margin: "0 0 18px",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                userSelect: "text",
+                maxHeight: 180,
+                overflow: "auto",
+              }}
+            >
+              {error.name ? `${error.name}: ` : ""}{error.message}
+              {error.digest ? `\n\ndigest ${error.digest}` : ""}
+            </pre>
+          )}
+
           <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
             <button
               onClick={() => reset()}

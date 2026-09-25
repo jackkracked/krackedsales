@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { fetchAllOpportunities } from "@/lib/ghl/paginate";
 import type { GHLOpportunity, GHLPipeline } from "@/lib/ghl/types";
+import { getPipelineOpportunitiesFromMirror, type EnrichedOpp } from "@/lib/pipeline/mirror-source";
 import { logActivity } from "@/lib/activity/logger";
 
 
@@ -22,31 +23,38 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ opportunities: [], meta: { total: 0 } });
   }
 
+  // Default reads the local mirror (indexed by pipeline_id; more accurate than the live
+  // /opportunities/search scrape which omits open opps). `?feed=live` restores the GHL scrape.
+  const feed = searchParams.get("feed") === "live" ? "live" : "mirror";
+
   try {
-    // Fetch the pipeline (for stage names) and EVERY opportunity in it (all
-    // pages, in parallel) — the board must never silently drop a live deal.
-    const [pipelinesData, allOpps] = await Promise.all([
-      ghl.get<{ pipelines: GHLPipeline[] }>(
-        `/opportunities/pipelines?locationId=${locationId()}`
-      ),
-      fetchAllOpportunities(
-        `/opportunities/search?location_id=${locationId()}&pipeline_id=${pipelineId}`
-      ),
-    ]);
-    const total = allOpps.length;
-
-    const pipeline = pipelinesData.pipelines?.find((p) => p.id === pipelineId);
-    const stageMap: Record<string, string> = {};
-    if (pipeline?.stages) {
-      for (const s of pipeline.stages) {
-        stageMap[s.id] = s.name;
+    let opps: EnrichedOpp[];
+    if (feed === "live") {
+      // Fetch the pipeline (for stage names) and EVERY opportunity in it (all
+      // pages, in parallel) — the board must never silently drop a live deal.
+      const [pipelinesData, allOpps] = await Promise.all([
+        ghl.get<{ pipelines: GHLPipeline[] }>(
+          `/opportunities/pipelines?locationId=${locationId()}`
+        ),
+        fetchAllOpportunities(
+          `/opportunities/search?location_id=${locationId()}&pipeline_id=${pipelineId}`
+        ),
+      ]);
+      const pipeline = pipelinesData.pipelines?.find((p) => p.id === pipelineId);
+      const stageMap: Record<string, string> = {};
+      if (pipeline?.stages) {
+        for (const s of pipeline.stages) {
+          stageMap[s.id] = s.name;
+        }
       }
+      opps = allOpps.map((opp) => ({
+        ...opp,
+        pipelineStageId_name: stageMap[opp.pipelineStageId] ?? "Unknown Stage",
+      }));
+    } else {
+      opps = await getPipelineOpportunitiesFromMirror(pipelineId);
     }
-
-    let opps = allOpps.map((opp) => ({
-      ...opp,
-      pipelineStageId_name: stageMap[opp.pipelineStageId] ?? "Unknown Stage",
-    }));
+    const total = opps.length;
 
     // Filter by createdAt date range if requested.
     // Dates are treated as CST (UTC-6) day boundaries so a "today" query

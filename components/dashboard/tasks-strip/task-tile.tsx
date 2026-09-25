@@ -18,6 +18,9 @@ export interface Task {
   completed: boolean;
   userId: string | null;
   userName: string | null;
+  /** Set only when someone handed this task over. NULL for the normal self-created case. */
+  assignedByUserId: string | null;
+  assignedByName: string | null;
   priority: string;
   createdAt: string;
 }

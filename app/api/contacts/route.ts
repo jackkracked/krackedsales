@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { desc, isNotNull, and, gt, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { urlKey } from "@/lib/utils/url";
 import { socialLeads, brandCategories, demoGhlLinks, proposals, localContacts, audits, followupSends } from "@/lib/db/schema";
 import { ghl, locationId } from "@/lib/ghl/client";
 import { fetchAllOpportunities } from "@/lib/ghl/paginate";
+import { getOpportunitiesFromMirror, getConversationMapFromMirror } from "@/lib/contacts/mirror-source";
 import { daysAgo } from "@/lib/utils/date";
 import type { UnifiedContact } from "@/lib/contacts/types";
 import type { GHLOpportunity, GHLPipeline } from "@/lib/ghl/types";
@@ -38,14 +40,18 @@ function applyRule(c: UnifiedContact, rule: FilterRule): boolean {
       if (operator === "is_any_of")  return values.includes(c.source);
       if (operator === "is_none_of") return !values.includes(c.source);
       return true;
-    case "pipelineId":
-      if (operator === "is_any_of")  return c.pipelineId != null && values.includes(c.pipelineId);
-      if (operator === "is_none_of") return c.pipelineId == null || !values.includes(c.pipelineId);
+    case "pipelineId": {
+      const ids = (c.oppRefs?.map((r) => r.pipelineId) ?? [c.pipelineId]).filter((x): x is string => !!x);
+      if (operator === "is_any_of")  return ids.some((id) => values.includes(id));
+      if (operator === "is_none_of") return !ids.some((id) => values.includes(id));
       return true;
-    case "stageId":
-      if (operator === "is_any_of")  return c.stageId != null && values.includes(c.stageId);
-      if (operator === "is_none_of") return c.stageId == null || !values.includes(c.stageId);
+    }
+    case "stageId": {
+      const ids = (c.oppRefs?.map((r) => r.stageId) ?? [c.stageId]).filter((x): x is string => !!x);
+      if (operator === "is_any_of")  return ids.some((id) => values.includes(id));
+      if (operator === "is_none_of") return !ids.some((id) => values.includes(id));
       return true;
+    }
     case "brandCategory":
       if (operator === "is_any_of")  return c.brandCategory != null && values.includes(c.brandCategory);
       if (operator === "is_none_of") return c.brandCategory == null || !values.includes(c.brandCategory);
@@ -291,6 +297,8 @@ export async function GET(req: NextRequest) {
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
   const pageSize = Math.min(100, parseInt(searchParams.get("pageSize") ?? "50", 10));
   const search = (searchParams.get("search") ?? "").toLowerCase().trim();
+  /** Exact contact lookup, e.g. "ghl_abc123". Bypasses fuzzy search entirely — see the filter below. */
+  const uidFilter = (searchParams.get("uid") ?? "").trim();
   const sourceFilter = searchParams.get("source");
   const stageFilter = searchParams.get("stage");
   const categoryFilter = searchParams.get("category");
@@ -302,17 +310,62 @@ export async function GET(req: NextRequest) {
   const rulesParam = searchParams.get("rules");
   const rules: FilterRule[] = rulesParam ? (() => { try { return JSON.parse(rulesParam); } catch { return []; } })() : [];
 
+  // Opportunities: default to the local mirror. Verified against GHL's authoritative
+  // per-record reads to be as accurate or MORE accurate than the live /opportunities/search
+  // scrape (which intermittently omits open opps + serves stale stages), and ~6x faster.
+  // `?feed=live` re-scrapes GHL as a rollback lever. Conversations also default to the mirror:
+  // GHL's /conversations/search is hard-capped at 100 (cursor ignored, meta null), so the mirror
+  // (~291 rows accumulated via webhooks) is a strict superset with identical autoSequence parity.
+  // `?convFeed=live` forces the old 100-cap scrape. NOTE: `feed`/`convFeed` are distinct from the
+  // `source` filter (c.source).
+  const oppsFeed = searchParams.get("feed") === "live" ? "live" : "mirror";
+  const convFeed = searchParams.get("convFeed") === "live" ? "live" : "mirror";
+
   try {
     const database = db();
 
     const [allOpps, clRows, catRows, demoRows, convMap, proposalRows, dndRows, auditRows, followupRows] = await Promise.all([
-      getAllOpportunities(),
+      oppsFeed === "live" ? getAllOpportunities() : getOpportunitiesFromMirror(),
       database.select().from(socialLeads).orderBy(desc(socialLeads.createdAt)),
       database.select().from(brandCategories),
       database.select({ ghlContactId: demoGhlLinks.ghlContactId }).from(demoGhlLinks),
-      getConversationChannelMap(),
+      convFeed === "mirror" ? getConversationMapFromMirror() : getConversationChannelMap(),
       database.select({ ghlContactId: proposals.ghlContactId, status: proposals.status }).from(proposals).where(isNotNull(proposals.ghlContactId)),
-      database.select({ id: localContacts.id, dnd: localContacts.dnd }).from(localContacts),
+      /**
+       * THE CONTACT LIST ITSELF — every live contact, not just the ones with a deal.
+       *
+       * This used to select four columns purely to decorate opportunity-derived rows. The
+       * page was built by iterating opportunities, so a person with no opportunity did not
+       * exist on it: 1,895 of 5,094 contacts — 37% of the CRM — were unsearchable, and
+       * because a brand-new lead never has an opportunity yet, that 37% was exactly the
+       * cohort Gage searches for. He would look up a lead he had just seen in Meta, find
+       * nothing, and fall back to GoHighLevel. That is the workflow this app replaces.
+       *
+       * `deletedInGhlAt IS NULL` excludes the ghost-deleted rows so the count agrees with
+       * GHL exactly (5,094 = 5,094).
+       */
+      database
+        .select({
+          id: localContacts.id,
+          fullName: localContacts.fullName,
+          email: localContacts.email,
+          phone: localContacts.phone,
+          website: localContacts.website,
+          companyName: localContacts.companyName,
+          tags: localContacts.tags,
+          // Searched, never returned to the client: every URL variant a lead ever submitted
+          // lives here. Gage searches by domain, and the domain we store on `website` is only
+          // ONE of the forms they may have given us.
+          customFields: localContacts.customFields,
+          createdAtGhl: localContacts.createdAtGhl,
+          updatedAtGhl: localContacts.updatedAtGhl,
+          assignedUserId: localContacts.assignedUserId,
+          dnd: localContacts.dnd,
+          isCustomer: localContacts.isCustomer,
+          customerStatus: localContacts.customerStatus,
+        })
+        .from(localContacts)
+        .where(isNull(localContacts.deletedInGhlAt)),
       database.select({ ghlContactId: audits.ghlContactId, status: audits.status }).from(audits).where(isNotNull(audits.ghlContactId)),
       // Our own follow-ups queued for the future (scheduled, not yet delivered)
       database.select({ ghlContactId: followupSends.ghlContactId, scheduledFor: followupSends.scheduledFor })
@@ -342,7 +395,13 @@ export async function GET(req: NextRequest) {
 
     // Proposal status per contact (best status wins: paid > signed > sent > draft)
     const proposalMap = new Map<string, string>();
-    const statusPriority: Record<string, number> = { paid: 5, signed: 4, partial: 3, sent: 2, draft: 1 };
+    // Best-status-wins per contact. "active" and "completed" rank at the top alongside "paid":
+    // they all mean the client gave us money. Missing from this map they scored 0 via the `?? 0`
+    // fallback below, so a paying retainer client would lose to a stale draft and their contact
+    // row would display "draft".
+    const statusPriority: Record<string, number> = {
+      completed: 6, active: 5, paid: 5, past_due: 4, signed: 4, partial: 3, sent: 2, draft: 1,
+    };
     for (const p of proposalRows) {
       if (!p.ghlContactId) continue;
       const existing = proposalMap.get(p.ghlContactId);
@@ -354,6 +413,15 @@ export async function GET(req: NextRequest) {
     // DND map
     const dndMap = new Map(dndRows.filter((r) => r.dnd).map((r) => [r.id, true]));
 
+    // Customer status per contact (denormalized from the customers table) → Contacts-tab badge.
+    const customerMap = new Map<string, string | null>();
+    for (const r of dndRows) if (r.isCustomer) customerMap.set(r.id, r.customerStatus);
+
+    // Meta's own contact payload, keyed by id — richer than what the opportunity embeds
+    // (the embedded contact carries only id, name, companyName, email, phone, tags, score,
+    // never website or customFields — see tasks/lessons.md 2026-06-29).
+    const contactById = new Map(dndRows.map((r) => [r.id, r]));
+
     // A comment lead becomes a real pipeline lead only when a demo is submitted (which
     // creates a GHL contact + opportunity and sets ghl_contact_id). Carry its real platform
     // (instagram/facebook/tiktok) onto that GHL entry so source attribution survives, and
@@ -364,22 +432,71 @@ export async function GET(req: NextRequest) {
     }
 
     // ─── GHL contacts: one UnifiedContact per unique contact from opportunities ─
-    const seenContactIds = new Set<string>();
+    // A contact can sit in several pipelines/stages at once. We show ONE row (their first
+    // opportunity), but keep EVERY opportunity's pipeline/stage so a stage filter matches a
+    // contact via any of their opportunities — not just the one shown (the 314→1 bug).
+    const oppsByContact = new Map<string, typeof allOpps>();
+    for (const o of allOpps) {
+      const cid = o.contact?.id;
+      if (!cid) continue;
+      if (!oppsByContact.has(cid)) oppsByContact.set(cid, []);
+      oppsByContact.get(cid)!.push(o);
+    }
+
     const ghlUnified: UnifiedContact[] = [];
 
-    for (const opp of allOpps) {
-      const c = opp.contact;
-      if (!c?.id || seenContactIds.has(c.id)) continue;
-      seenContactIds.add(c.id);
+    /**
+     * ONE ROW PER CONTACT — driven by the contact list, not by opportunities.
+     *
+     * The opportunity is now an ATTRIBUTE of a contact rather than the reason a contact
+     * exists. A person with no deal still appears, with a null stage, which is the honest
+     * representation: they are a real contact who simply has no opportunity yet.
+     */
+    for (const row of dndRows) {
+      const opps = oppsByContact.get(row.id) ?? [];
+      // A contact can sit in several pipelines at once; show the first, keep them all in
+      // oppRefs so a stage filter matches via ANY of them (the 314→1 bug).
+      const opp = opps[0] ?? null;
 
-      const createdAt = c.dateAdded ?? opp.createdAt;
-      const lastActivityAt = opp.updatedAt ?? createdAt;
+      // Everything else worth matching on, flattened once. Includes company name and every
+      // custom-field value (websites, handles, alternate URLs) so a lead is findable by any
+      // detail they actually gave us, not just the four fields the list happens to render.
+      const extraSearch = [
+        row.companyName ?? "",
+        ...(Array.isArray(row.customFields)
+          ? (row.customFields as { value?: unknown; field_value?: unknown }[]).map((f) => {
+              const v = f?.value ?? f?.field_value;
+              return typeof v === "string" ? v : Array.isArray(v) ? v.join(" ") : v == null ? "" : String(v);
+            })
+          : []),
+        ...(Array.isArray(row.tags) ? (row.tags as string[]) : []),
+      ].join(" ").toLowerCase();
+
+      const c = {
+        id: row.id,
+        // Our mirror is the better name source; fall back to the opportunity's embedded copy.
+        name: row.fullName ?? opp?.contact?.name ?? "Unknown",
+        email: row.email ?? null,
+        phone: row.phone ?? null,
+        // The embedded opportunity contact never carries website (see lessons 2026-06-29),
+        // so this is the only place it can come from.
+        website: row.website ?? null,
+        companyName: row.companyName ?? null,
+        tags: Array.isArray(row.tags) ? (row.tags as string[]) : [],
+      };
+
+      const createdAt =
+        row.createdAtGhl?.toISOString() ?? opp?.createdAt ?? new Date(0).toISOString();
+      const lastActivityAt =
+        opp?.updatedAt ?? row.updatedAtGhl?.toISOString() ?? createdAt;
       const domain = (c.companyName ?? "").replace(/^https?:\/\/(www\.)?/, "").split("/")[0];
       const category = domain ? (catMap.get(domain) as UnifiedContact["brandCategory"] ?? null) : null;
 
       const daysSince = daysAgo(lastActivityAt);
-      const stageChangeAt = opp.lastStatusChangeAt ?? opp.createdAt;
-      const daysInStage = daysAgo(stageChangeAt);
+      // Null, not zero, when there is no opportunity: "0 days in stage" would read as a
+      // brand-new deal rather than "there is no deal".
+      const stageChangeAt = opp ? opp.lastStatusChangeAt ?? opp.createdAt : null;
+      const daysInStage = stageChangeAt ? daysAgo(stageChangeAt) : null;
       const channels: string[] = [];
       if (c.email) channels.push("email");
       if (c.phone) channels.push("sms");
@@ -409,12 +526,13 @@ export async function GET(req: NextRequest) {
         website: c.website ?? null,
         platform: (metaPlatformByGhlId.get(c.id) as UnifiedContact["platform"]) ?? "lead_form",
         ghlContactId: c.id,
-        opportunityId: opp.id,
-        stage: opp.pipelineStageId_name,
-        stageId: opp.pipelineStageId,
-        pipelineId: opp.pipelineId,
-        opportunityStatus: opp.status,
-        monetaryValue: opp.monetaryValue ?? null,
+        opportunityId: opp?.id ?? null,
+        stage: opp?.pipelineStageId_name ?? null,
+        stageId: opp?.pipelineStageId ?? null,
+        pipelineId: opp?.pipelineId ?? null,
+        oppRefs: opps.map((o) => ({ pipelineId: o.pipelineId, stageId: o.pipelineStageId, stage: o.pipelineStageId_name })),
+        opportunityStatus: opp?.status ?? null,
+        monetaryValue: opp?.monetaryValue ?? null,
         tags: c.tags ?? [],
         commentLeadId: null,
         commentText: null,
@@ -430,13 +548,17 @@ export async function GET(req: NextRequest) {
         daysInCurrentStage: daysInStage,
         lastActivityAt,
         createdAt,
-        assignedTo: opp.assignedTo ?? null,
+        // The contact's own owner still applies when they have no opportunity.
+        assignedTo: opp?.assignedTo ?? row.assignedUserId ?? null,
         dnd: dndMap.has(c.id),
         responseStatus,
         reachableChannels: channels,
         autoSequence: inAutoSequence,
         autoSequenceAt: autoAt != null ? new Date(autoAt).toISOString() : null,
         followupScheduledAt: followupAt ? followupAt.toISOString() : null,
+        isCustomer: customerMap.has(c.id),
+        customerStatus: customerMap.get(c.id) ?? null,
+        extraSearch,
       });
     }
 
@@ -513,23 +635,72 @@ export async function GET(req: NextRequest) {
     }
 
     // ─── Filters ──────────────────────────────────────────────────────────────
+    // EXACT LOOKUP BY ID. `?uid=ghl_<contactId>` returns that one contact and nothing else.
+    //
+    // Callers that already know WHICH contact they want must never go through `search`, which is
+    // a fuzzy substring match over name, email, phone, website, tags and custom fields. On
+    // 2026-08-13 a caller searched by name, got a page of other people, and fell back to the
+    // first result — opening a different client's record and, from there, a live message
+    // composer. Exact-or-nothing removes the possibility: an unknown uid returns zero contacts,
+    // never somebody else's.
+    //
+    // Applied before every other filter so it short-circuits the whole chain.
+    if (uidFilter) {
+      all = all.filter((c) => c.uid === uidFilter);
+    }
+
     if (search) {
-      all = all.filter((c) =>
-        c.name.toLowerCase().includes(search) ||
-        (c.email ?? "").toLowerCase().includes(search) ||
-        (c.phone ?? "").toLowerCase().includes(search) ||
-        (c.website ?? "").toLowerCase().includes(search) ||
-        (c.stage ?? "").toLowerCase().includes(search)
-      );
+      // Websites are compared on their NORMALISED form (no scheme, no www., no trailing
+      // slash). Gage pastes the URL straight from the browser — "https://harborheightscoffee.com/"
+      // — while we store "www.harborheightscoffee.com". Neither string contains the other, so
+      // a plain substring match returns nothing on a contact that is sitting right there.
+      const searchUrlKey = urlKey(search);
+      all = all.filter((c) => {
+        const site = urlKey(c.website ?? "");
+        return (
+          c.name.toLowerCase().includes(search) ||
+          (c.email ?? "").toLowerCase().includes(search) ||
+          (c.phone ?? "").toLowerCase().includes(search) ||
+          (!!site && !!searchUrlKey && site.includes(searchUrlKey)) ||
+          // Company name, tags, and every custom-field value (alternate URLs included).
+          ((c as { extraSearch?: string }).extraSearch ?? "").includes(search) ||
+          (!!searchUrlKey && ((c as { extraSearch?: string }).extraSearch ?? "").includes(searchUrlKey)) ||
+          (c.stage ?? "").toLowerCase().includes(search)
+        );
+      });
     }
     if (sourceFilter)   all = all.filter((c) => c.source === sourceFilter);
-    if (stageFilter)    all = all.filter((c) => c.stage === stageFilter);
+    // Pipeline/stage filters match against ANY of a contact's opportunities (see oppRefs).
+    if (stageFilter)    all = all.filter((c) => c.oppRefs?.some((r) => r.stage === stageFilter) ?? (c.stage === stageFilter));
     if (categoryFilter) all = all.filter((c) => c.brandCategory === categoryFilter);
     if (hasDemoFilter === "true")  all = all.filter((c) => c.hasDemo);
     if (hasDemoFilter === "false") all = all.filter((c) => !c.hasDemo);
-    if (pipelineFilter) all = all.filter((c) => c.pipelineId === pipelineFilter);
-    if (stageFilter2)   all = all.filter((c) => c.stageId === stageFilter2);
+    if (pipelineFilter) all = all.filter((c) => c.oppRefs?.some((r) => r.pipelineId === pipelineFilter) ?? (c.pipelineId === pipelineFilter));
+    if (stageFilter2)   all = all.filter((c) => c.oppRefs?.some((r) => r.stageId === stageFilter2) ?? (c.stageId === stageFilter2));
     all = applyRules(all, rules);
+
+    // When a pipeline/stage filter is active, show the opportunity that MATCHED it — a contact
+    // can sit in several pipelines, so the row should reflect the stage the user filtered for,
+    // not their (arbitrary) primary opportunity.
+    const activeStageIds = new Set<string>([
+      ...(stageFilter2 ? [stageFilter2] : []),
+      ...rules.filter((r) => r.field === "stageId" && r.operator === "is_any_of").flatMap((r) => r.values as string[]),
+    ]);
+    const activePipelineIds = new Set<string>([
+      ...(pipelineFilter ? [pipelineFilter] : []),
+      ...rules.filter((r) => r.field === "pipelineId" && r.operator === "is_any_of").flatMap((r) => r.values as string[]),
+    ]);
+    const activeStageNames = new Set<string>(stageFilter ? [stageFilter] : []);
+    if (activeStageIds.size || activePipelineIds.size || activeStageNames.size) {
+      all = all.map((c) => {
+        if (!c.oppRefs?.length) return c;
+        // Prefer a matching stage, then pipeline, so a combined pipeline+stage filter lands on the right opp.
+        const match =
+          c.oppRefs.find((r) => (r.stageId && activeStageIds.has(r.stageId)) || (r.stage && activeStageNames.has(r.stage))) ??
+          c.oppRefs.find((r) => r.pipelineId && activePipelineIds.has(r.pipelineId));
+        return match ? { ...c, stage: match.stage, stageId: match.stageId, pipelineId: match.pipelineId } : c;
+      });
+    }
 
     // ─── Sort ─────────────────────────────────────────────────────────────────
     all.sort((a, b) => {

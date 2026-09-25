@@ -13,7 +13,9 @@ export const metadata = { title: "Dashboard — Kracked Sales" };
 export default async function DashboardPage() {
   const user = await getSessionUser().catch(() => null);
 
-  if (user?.role === "rep") {
+  // Every non-admin role (rep, setter, closer) gets the scoped rep dashboard; only admins
+  // see the company-wide admin dashboard. (Was `=== "rep"`, which leaked admin view to new roles.)
+  if (user && user.role !== "admin") {
     return (
       <RepDashboard
         userId={user.id}

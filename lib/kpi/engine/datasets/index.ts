@@ -14,7 +14,7 @@ import { metaSpend, metaLeads } from "./meta";
 import { facebookLeadsDataset } from "./facebook-leads";
 import { proposalsDataset } from "./proposals";
 import { callsDataset } from "./calls";
-import { softwareCostsDataset, manualExpensesDataset, demoBoardsDataset } from "./internal";
+import { softwareCostsDataset, manualExpensesDataset, demoBoardsDataset, teamSalariesDataset, manualManagementMrrDataset, manualManagementMrrFlowDataset } from "./internal";
 import { ghlOpportunities, ghlAppointments } from "./ghl";
 import { clickupTasks } from "./clickup";
 
@@ -30,6 +30,9 @@ export const REGISTRY: Record<string, DatasetDef> = {
   [callsDataset.key]: callsDataset,
   [softwareCostsDataset.key]: softwareCostsDataset,
   [manualExpensesDataset.key]: manualExpensesDataset,
+  [teamSalariesDataset.key]: teamSalariesDataset,
+  [manualManagementMrrDataset.key]: manualManagementMrrDataset,
+  [manualManagementMrrFlowDataset.key]: manualManagementMrrFlowDataset,
   [demoBoardsDataset.key]: demoBoardsDataset,
   [ghlOpportunities.key]: ghlOpportunities,
   [ghlAppointments.key]: ghlAppointments,

@@ -8,7 +8,10 @@ export type NotificationType =
   | "call_soon"
   | "deal_cold"
   | "followup_overdue"
-  | "ab_winner";
+  | "ab_winner"
+  /** An admin handed this task to you. The in-app copy of the Slack DM, and the fallback
+   *  for anyone whose Slack account is not linked. */
+  | "task_assigned";
 
 /**
  * Create a notification for a user and push it via Pusher.

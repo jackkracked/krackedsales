@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth/session";
 import { dialerCampaigns, dialerCampaignReps, dialerCampaignContacts, users } from "@/lib/db/schema";
+import { getDialableStageContacts } from "@/lib/dialer/stage-source";
 import { and, or, eq, ne, desc, inArray, sql } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -122,15 +123,61 @@ export async function POST(req: NextRequest) {
     repIds = [user.id];
   }
 
+  // Optionally build the queue from a pipeline stage in the SAME request.
+  //
+  // Resolved here rather than accepting contacts from the browser. Two reasons: the client
+  // would otherwise hand back phone numbers the server had just computed and the server would
+  // dial whatever it was given; and two separate calls cannot fail as one, which is how you
+  // get a named, empty, orphaned campaign when the second call dies.
+  const src = body.source as { pipelineId?: unknown; stageId?: unknown } | undefined;
+  const wantsStage = !!src && typeof src.pipelineId === "string" && typeof src.stageId === "string";
+
   try {
+    let stage: Awaited<ReturnType<typeof getDialableStageContacts>> | null = null;
+    if (wantsStage) {
+      stage = await getDialableStageContacts(src!.pipelineId as string, src!.stageId as string);
+      // Do not create an empty campaign the user did not ask for.
+      if (!stage.contacts.length) {
+        return NextResponse.json({ error: "Nobody in that stage can be called", counts: stage.counts }, { status: 400 });
+      }
+    }
+
     const [camp] = await db().insert(dialerCampaigns)
-      .values({ name: name.slice(0, 160), createdBy: user.id, ownerScope, maxAttempts })
+      .values({
+        name: name.slice(0, 160), createdBy: user.id, ownerScope, maxAttempts,
+        // Recorded so the queue can keep itself current. NULL for a hand-built campaign.
+        sourcePipelineId: stage ? (src!.pipelineId as string) : null,
+        sourceStageId: stage ? (src!.stageId as string) : null,
+        sourceSyncedAt: stage ? new Date() : null,
+      })
       .returning();
     await db().insert(dialerCampaignReps)
       .values(repIds.map((uid) => ({ campaignId: camp.id, userId: uid })))
       .onConflictDoNothing();
+
+    let queued = 0;
+    if (stage) {
+      const rows = stage.contacts.map((c, i) => ({
+        campaignId: camp.id,
+        contactId: c.contactId,
+        contactName: c.contactName,
+        phone: c.phone,
+        position: i + 1,
+      }));
+      // Chunked: 5 bound parameters per row would breach Postgres' 65,535 limit at ~13,000.
+      for (let i = 0; i < rows.length; i += 500) {
+        const inserted = await db().insert(dialerCampaignContacts)
+          .values(rows.slice(i, i + 500))
+          .onConflictDoNothing()
+          .returning({ id: dialerCampaignContacts.id });
+        queued += inserted.length;
+      }
+    }
+
     return NextResponse.json({
       campaign: { id: camp.id, name: camp.name, maxAttempts: camp.maxAttempts, ownerScope: camp.ownerScope, status: camp.status },
+      queued,
+      counts: stage?.counts ?? null,
     });
   } catch (err) {
     console.error("[POST /api/dialer/campaigns]", err);

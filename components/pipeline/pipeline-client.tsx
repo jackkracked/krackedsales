@@ -6,12 +6,12 @@ import { usePipelines, useOpportunities } from "@/lib/hooks/use-pipeline";
 import { useQuery } from "@tanstack/react-query";
 import { useBrandCategoryStore } from "@/store/brand-category-store";
 import { KanbanBoard } from "./kanban-board";
-import type { CommentLead } from "./comment-lead-card";
 import { PipelineListView } from "./pipeline-list-view";
 import { PipelineSelector } from "./pipeline-selector";
 import { AddLeadModal } from "./add-lead-modal";
-import { LayoutGrid, List, Plus, RefreshCw, ChevronDown, Search, X } from "lucide-react";
+import { LayoutGrid, List, Plus, RefreshCw, ChevronDown, Search, X, Check, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { usePipelineParity } from "@/lib/hooks/use-pipeline-parity";
 
 type ViewMode = "kanban" | "list";
 
@@ -55,16 +55,6 @@ export function PipelineClient() {
 
   const websiteByContactId = useBrandCategoryStore((s) => s.websiteByContactId);
 
-  const { data: socialLeadsData } = useQuery<{ leads: CommentLead[] }>({
-    queryKey: ["comment-leads-inbox"],
-    queryFn: async () => {
-      const res = await fetch("/api/comment-leads/inbox");
-      if (!res.ok) throw new Error("Failed to fetch comment leads");
-      return res.json();
-    },
-    staleTime: 30 * 1000,
-    refetchInterval: 60 * 1000,
-  });
 
   // Fetch which contacts are awaiting a reply. Uses a smart server-side endpoint that
   // looks through actual messages for conversations where a GHL activity event (like a
@@ -98,7 +88,6 @@ export function PipelineClient() {
 
   const isLoading = pipelinesLoading || oppsLoading;
   const allOpportunities = opportunitiesData?.opportunities ?? [];
-  const socialLeads = socialLeadsData?.leads ?? [];
 
   // Cmd+K / Ctrl+K to focus search
   useEffect(() => {
@@ -116,6 +105,16 @@ export function PipelineClient() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Board-vs-GoHighLevel parity check. MUST STAY ABOVE THE EARLY RETURNS BELOW.
+  //
+  // It used to sit just before the JSX, after the `pipelinesLoading` and `pipelinesError`
+  // guards, which made it a CONDITIONAL hook: the first render returned the loading state
+  // having run N hooks, then the pipelines query resolved, the guards fell through, and this
+  // became hook N+1. React threw "Rendered more hooks than during the previous render" and the
+  // whole page went to the error screen. It takes no arguments and reads nothing from the render
+  // body, so running it unconditionally is safe, and it starts the check a little sooner.
+  const parity = usePipelineParity();
+
   // Filter opportunities and comment leads by search query
   const q = searchQuery.trim().toLowerCase();
   const opportunities = q
@@ -128,14 +127,6 @@ export function PipelineClient() {
         return name.includes(q) || email.includes(q) || phone.includes(q) || source.includes(q) || website.includes(q);
       })
     : allOpportunities;
-  const filteredCommentLeads = q
-    ? socialLeads.filter((cl) => {
-        const name = (cl.name ?? "").toLowerCase();
-        const website = (cl.website ?? "").toLowerCase();
-        const comment = (cl.commentText ?? "").toLowerCase();
-        return name.includes(q) || website.includes(q) || comment.includes(q);
-      })
-    : socialLeads;
 
   if (pipelinesLoading) {
     return (
@@ -157,6 +148,51 @@ export function PipelineClient() {
 
   return (
     <div data-r10n-pipeline className="flex flex-col gap-4 h-full">
+      {/* Parity banner — only ever visible when the board was wrong or could not be verified.
+          Silent when the counts already agree, which is the normal case. */}
+      {parity.status === "repairing" && (
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <RefreshCw className="w-3 h-3 animate-spin" />
+          Syncing with GoHighLevel, {Math.abs(parity.drift)} {Math.abs(parity.drift) === 1 ? "deal" : "deals"} out of step…
+        </div>
+      )}
+      {parity.status === "repaired" && parity.removed > 0 && (
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <Check className="w-3 h-3 text-success" />
+          Matched to GoHighLevel. Removed {parity.removed} {parity.removed === 1 ? "deal" : "deals"} deleted there.
+        </div>
+      )}
+      {/* Busy is not an error. Something is already checking, or we are waiting out a rate
+          limit, and the hook comes back on its own. Say so quietly. */}
+      {parity.status === "busy" && (
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <RefreshCw className="w-3 h-3" />
+          Waiting to check against GoHighLevel: {parity.reason}. Retrying shortly.
+        </div>
+      )}
+      {/* A guard deliberately stopped the repair. The board may be wrong and a human should
+          look. Distinct from "failed" — conflating the two is what produced the misleading
+          "Repair was refused" banner on 2026-09-12, when nothing had refused anything. */}
+      {parity.status === "refused" && (
+        <div className="flex items-center gap-2 text-[11px] text-destructive">
+          <AlertTriangle className="w-3 h-3" />
+          Repair stopped on purpose: {parity.reason}. The board is unchanged.
+        </div>
+      )}
+      {parity.status === "failed" && (
+        <div
+          className={cn(
+            "flex items-center gap-2 text-[11px]",
+            parity.rateLimited ? "text-muted-foreground" : "text-destructive",
+          )}
+        >
+          <AlertTriangle className="w-3 h-3" />
+          {parity.rateLimited
+            ? "GoHighLevel is rate-limiting us, so the board could not be verified just now. The scheduled check will catch it up."
+            : `Could not verify against GoHighLevel: ${parity.reason}`}
+        </div>
+      )}
+
       {/* Toolbar */}
       <div data-r10n-toolbar className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2">
@@ -264,7 +300,13 @@ export function PipelineClient() {
             Loading opportunities…
           </div>
         ) : viewMode === "kanban" ? (
-          <KanbanBoard pipeline={pipeline} opportunities={opportunities} socialLeads={filteredCommentLeads} unreadContactIds={unreadContactIds} repMap={repMap} autoOpenContactId={autoOpenContactId ?? undefined} />
+          /* NO socialLeads. This board mirrors GoHighLevel exactly, and comment leads do not
+             exist in GHL — they were being injected into stage index 0 ("New Lead") and added to
+             its count badge, so the column read 26 where GHL showed 16. Every other stage matched
+             once the mirror was reconciled; this was the last discrepancy.
+             Comment leads remain available in the Leads page and the Inbox, which is where a lead
+             with no GHL opportunity belongs. The List view never showed them and already matched. */
+          <KanbanBoard pipeline={pipeline} opportunities={opportunities} unreadContactIds={unreadContactIds} repMap={repMap} autoOpenContactId={autoOpenContactId ?? undefined} />
         ) : (
           <PipelineListView pipeline={pipeline} opportunities={opportunities} />
         )}

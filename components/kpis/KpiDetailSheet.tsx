@@ -31,6 +31,11 @@ interface DetailPage {
   editable?: "projectStatus";
   rows: DetailRow[];
   breakdown?: { label: string; value: string }[];
+  /** Period roll-forward for balance metrics (Proposal Value Outstanding): opening + sent − paid − lost = closing. */
+  rollForward?: {
+    title: string;
+    rows: Array<{ label: string; amount: number; tone: "open" | "add" | "subtract" | "total" }>;
+  };
   nextOffset: number | null;
 }
 
@@ -153,14 +158,33 @@ export function KpiDetailSheet({ metric, start, end, userId, ghlUserId, email, p
               <Info className="w-3.5 h-3.5 text-muted-foreground/60 mt-0.5 shrink-0" />
               <p className="text-xs text-muted-foreground leading-relaxed">{meta.explanation}</p>
             </div>
-            {meta.kind === "list" && (
+            {meta.rollForward ? (
+              <div data-r10n-kpi-rollforward className="rounded-lg border border-border bg-muted/30 overflow-hidden">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 px-3 pt-2.5 pb-1.5">{meta.rollForward.title}</p>
+                <div className="divide-y divide-border/60">
+                  {meta.rollForward.rows.map((r, i) => {
+                    const isTotal = r.tone === "total";
+                    const sign = r.tone === "add" ? "+ " : r.tone === "subtract" ? "− " : "";
+                    const valColor = r.tone === "add" ? "text-success" : r.tone === "subtract" ? "text-red-500" : "text-foreground";
+                    return (
+                      <div key={i} className={cn("flex items-center justify-between px-3 py-2", isTotal && "bg-primary/5")}>
+                        <span className={cn("text-xs", isTotal ? "font-bold text-foreground" : "text-muted-foreground")}>{r.label}</span>
+                        <span className={cn("tabular-nums text-xs", isTotal ? "font-bold text-foreground" : cn("font-medium", valColor))}>
+                          {sign}{fmtUSD(r.amount)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : meta.kind === "list" ? (
               <div data-r10n-kpi-summary className="flex items-baseline justify-between gap-2 rounded-lg bg-primary/5 border border-primary/20 px-3 py-2">
                 <span className="text-[11px] font-medium text-muted-foreground">
                   {meta.isSnapshot ? "Current total" : `In ${periodLabel ?? "selected period"}`}
                 </span>
                 <span className="text-sm font-bold text-foreground tabular-nums">{periodValueText}</span>
               </div>
-            )}
+            ) : null}
           </div>
         )}
 

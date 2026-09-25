@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { CreateTaskModal } from "@/components/shared/create-task-modal";
 import { CreateDemoModal } from "@/components/shared/create-demo-modal";
 import { CreateAuditModal } from "@/components/shared/create-audit-modal";
-import { MessageComposer } from "@/components/shared/message-composer";
+import { MessageThread } from "@/components/inbox/message-thread";
+import { ReplyComposer } from "@/components/inbox/reply-composer";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   X, Mail, Phone, Tag, Calendar, User, TrendingUp,
@@ -15,14 +16,14 @@ import {
 import { EntityTypeChip, ENTITY_IDENTITY } from "@/components/shared/entity-identity";
 import { TIER_COLORS } from "@/lib/deal-health";
 import type { DealHealthResult } from "@/lib/deal-health";
-import { formatDateTime, relativeTime } from "@/lib/utils/date";
+import { relativeTime } from "@/lib/utils/date";
 import { cn } from "@/lib/utils/cn";
 import { cleanUrl, looksLikeUrl, isQualificationNote, parseQualificationNote } from "@/lib/utils/url";
-import { useStageHistoryStore, findStageChange } from "@/store/stage-history-store";
+import { useInboxStore } from "@/store/inbox-store";
 import { DemoLinksRow } from "@/components/shared/demo-links-row";
+import { DemoLinkField } from "@/components/shared/demo-link-field";
 import type { GHLOpportunity, GHLMessage } from "@/lib/ghl/types";
 import { MessageBody } from "@/components/shared/message-body";
-import { ChatBubble, SmartBanner, groupMessages } from "@/components/shared/chat-bubble";
 import { ActivityTab } from "@/components/activity/activity-tab";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -408,11 +409,9 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft, onFiel
   initialDraft?: string;
   onFieldSaved?: (field: string, value: string) => void;
 }) {
-  const stageChanges = useStageHistoryStore((s) => s.changes);
-  const [chipSavedKeys, setChipSavedKeys] = useState<Set<string>>(new Set());
+  const setReplyDraft = useInboxStore((s) => s.setReplyDraft);
 
   function handleChipOrBannerSaved(field: string, value: string) {
-    setChipSavedKeys((prev) => new Set([...prev, `${field}:${value}`]));
     onFieldSaved?.(field, value);
   }
 
@@ -434,7 +433,7 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft, onFiel
   const conversationId = convData?.id ?? null;
 
   // Step 2: fetch messages for that conversation
-  const { data: msgData, isLoading: msgsLoading, refetch } = useQuery({
+  const { data: msgData, isLoading: msgsLoading } = useQuery({
     queryKey: ["messages", conversationId],
     queryFn: async () => {
       const res = await fetch(`/api/ghl/conversations/${conversationId}/messages`);
@@ -457,6 +456,22 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft, onFiel
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages.length, isLoading]);
+
+  // ReplyComposer keeps its draft in the inbox store (keyed by conversation) rather than taking
+  // a prop, so seed it here, otherwise opening this modal with a prepared reply would silently
+  // lose it, which the old MessageComposer's `initialDraft` prop used to handle.
+  //
+  // THIS MUST STAY ABOVE THE EARLY RETURNS BELOW. It used to sit after them, which made it a
+  // CONDITIONAL hook: while `convLoading` was true the component returned the skeleton having
+  // run 5 hooks, then the conversation query resolved, the guards fell through, and this 6th
+  // hook appeared. React threw "Rendered more hooks than during the previous render" and the
+  // whole modal crashed. It only ever failed on the FIRST open, because `staleTime` then served
+  // the conversation synchronously and all 6 hooks ran from mount, which is exactly why it
+  // looked like a fluke that fixed itself on a second click. The body self-guards on
+  // `conversationId`, so running it unconditionally is safe.
+  useEffect(() => {
+    if (initialDraft && conversationId) setReplyDraft(conversationId, initialDraft);
+  }, [initialDraft, conversationId, setReplyDraft]);
 
   // Skeleton loading state — shown while finding conversation or loading messages
   if (convLoading) {
@@ -486,126 +501,47 @@ function MessagesTab({ contactId, stageName, opportunityId, initialDraft, onFiel
     );
   }
 
-  // Precompute grouping for regular (non-activity, non-email) messages
-  const regularMessages = messages.filter(
-    (m) => m.messageType !== "TYPE_ACTIVITY_OPPORTUNITY" && m.messageType !== "TYPE_EMAIL"
-  );
-  const groupedRegular = groupMessages(regularMessages);
-  const groupedMap = new Map(
-    groupedRegular.map((g) => [g.msg.id, g])
-  );
+  /** Raw, newest-first — exactly what the Inbox hands MessageThread, which reverses internally.
+   *  `messages` above is already reversed for the old inline renderer; passing that would show
+   *  the conversation backwards. */
+  const rawMessages = msgData?.messages ?? [];
+  /** The thread's own channel, so ReplyComposer offers Messenger/Instagram only when this IS a
+   *  Messenger/Instagram thread — they cannot be initiated cold. */
+  const threadChannelType = rawMessages[0]?.messageType ?? "TYPE_SMS";
 
   return (
     <div className="flex flex-col gap-3 h-full">
-      {/* Smart contact enrichment banner */}
-      {!msgsLoading && messages.length > 0 && (
-        <SmartBanner messages={messages} contactId={contactId} onFieldSaved={handleChipOrBannerSaved} externalSavedKeys={chipSavedKeys} />
+      {/* THE SAME COMPONENTS THE INBOX USES — see the matching note in contact-modal.tsx.
+          This modal previously drew its own thread (inline messages.map with local activity
+          pills, chat bubbles and email cards) and used the older MessageComposer. MessageThread
+          now carries the opportunity context it needs: `opportunityId` scopes stage-change
+          lookups to THIS deal (a contact with several deals would otherwise pick up another
+          one's), and `currentStageName` supplies the "Moved to X" fallback. */}
+      {msgsLoading ? (
+        <div className="flex flex-col gap-2.5 flex-1 min-h-0 overflow-y-auto">
+          {[55, 75, 40, 68].map((w, i) => (
+            <div key={i} className={cn("flex", i % 2 === 0 ? "justify-end" : "justify-start")}>
+              <div
+                className="h-9 rounded-[10px] bg-muted/60 animate-pulse"
+                style={{ width: `${w}%`, animationDelay: `${i * 80}ms` }}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <MessageThread
+          messages={rawMessages}
+          contactId={contactId}
+          opportunityId={opportunityId}
+          currentStageName={stageName}
+          onFieldSaved={handleChipOrBannerSaved}
+        />
       )}
 
-      {/* Message thread */}
-      <div ref={scrollRef} className="flex flex-col gap-1.5 flex-1 overflow-y-auto min-h-0">
-        {msgsLoading && (
-          <div className="flex flex-col gap-2.5">
-            {[55, 75, 40, 68].map((w, i) => (
-              <div key={i} className={cn("flex", i % 2 === 0 ? "justify-end" : "justify-start")}>
-                <div
-                  className="h-9 rounded-[10px] bg-muted/60 animate-pulse"
-                  style={{ width: `${w}%`, animationDelay: `${i * 80}ms` }}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-        {messages.map((msg) => {
-          const isOut = msg.direction === "outbound";
-          const isActivity = msg.messageType === "TYPE_ACTIVITY_OPPORTUNITY";
-          const isEmail = msg.messageType === "TYPE_EMAIL";
-
-          // ── Activity messages: centered system event ──────────────────
-          if (isActivity) {
-            const isCreated = msg.body === "Opportunity created";
-            const stored = !isCreated && msg.dateAdded
-              ? findStageChange(stageChanges, msg.dateAdded, opportunityId)
-              : null;
-            const isLatestUpdate = !isCreated && msg.id === messages
-              .filter(m => m.messageType === "TYPE_ACTIVITY_OPPORTUNITY" && m.body !== "Opportunity created")
-              .slice(-1)[0]?.id;
-
-            const label = isCreated
-              ? "New Lead"
-              : stored
-              ? `${stored.fromStage} → ${stored.toStage}`
-              : isLatestUpdate
-              ? `Moved to ${stageName}`
-              : "Stage changed";
-            return (
-              <div key={msg.id} className="flex justify-center my-0.5">
-                <span className="text-[11px] text-muted-foreground/70 bg-muted/50 px-2.5 py-0.5 rounded-full leading-5">
-                  {label}{msg.dateAdded ? ` · ${relativeTime(msg.dateAdded)}` : ""}
-                </span>
-              </div>
-            );
-          }
-
-          // ── Email messages: compact subject-line card ─────────────────
-          if (isEmail) {
-            const subject = msg.meta?.email?.subject ?? "Email";
-            const emailDir = msg.meta?.email?.direction ?? (isOut ? "outbound" : "inbound");
-            const sentByUs = emailDir === "outbound";
-            return (
-              <div key={msg.id} className={cn("flex my-2", sentByUs ? "justify-end" : "justify-start")}>
-                <div className={cn(
-                  "max-w-[78%] flex items-start gap-2 px-3 py-2 rounded-[10px] border",
-                  sentByUs
-                    ? "bg-primary/8 border-primary/15 text-primary"
-                    : "bg-muted/50 border-border/60 text-foreground"
-                )}>
-                  <Mail className="w-3.5 h-3.5 mt-0.5 shrink-0 opacity-60" />
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-0.5">
-                      {sentByUs ? "Email sent" : "Email received"}
-                    </p>
-                    <p className="text-sm leading-snug">{subject}</p>
-                    {msg.dateAdded && (
-                      <p className="text-[10px] text-muted-foreground/60 mt-1">
-                        {relativeTime(msg.dateAdded)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          }
-
-          // ── Regular SMS / custom message ──────────────────────────────
-          const grouped = groupedMap.get(msg.id);
-          return (
-            <ChatBubble
-              key={msg.id}
-              body={msg.body ?? ""}
-              direction={isOut ? "outbound" : "inbound"}
-              dateAdded={msg.dateAdded}
-              isGroupedWithPrev={grouped?.isGroupedWithPrev}
-              isGroupedWithNext={grouped?.isGroupedWithNext}
-              contactId={contactId}
-              onFieldSaved={handleChipOrBannerSaved}
-            />
-          );
-        })}
-        {messages.length === 0 && !msgsLoading && (
-          <div className="flex flex-col items-center justify-center py-10 gap-1.5 text-muted-foreground">
-            <MessageCircle className="w-6 h-6 opacity-20" />
-            <p className="text-xs">No messages yet</p>
-          </div>
-        )}
-      </div>
-
-      <MessageComposer
+      <ReplyComposer
         conversationId={conversationId}
         contactId={contactId}
-        messages={messages}
-        onSent={() => refetch()}
-        initialDraft={initialDraft}
+        defaultChannelType={threadChannelType}
       />
     </div>
   );
@@ -875,6 +811,7 @@ export function OpportunityModal({
               </p>
               <div className="mt-2">
                 <DemoLinksRow contactId={opportunity.contact?.id} />
+                <DemoLinkField contactId={opportunity.contact?.id} className="mt-3" />
               </div>
             </div>
           </div>

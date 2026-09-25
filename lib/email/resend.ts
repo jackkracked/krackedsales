@@ -21,6 +21,7 @@ export interface ProposalEmailData {
   totalAmount: number;
   currency: string;
   serviceDescription?: string | null;
+  ccEmails?: string[] | null;
 }
 
 function fmtAmt(amount: number, currency: string) {
@@ -112,6 +113,7 @@ export async function sendRenderedEmail(
   to: string | string[],
   subject: string,
   html: string,
+  cc?: string[],
   attachments?: { filename: string; content: Buffer }[],
 ): Promise<boolean> {
   const resend = client();
@@ -122,6 +124,7 @@ export async function sendRenderedEmail(
   const { error } = await resend.emails.send({
     from: FROM,
     to: Array.isArray(to) ? to : [to],
+    ...(cc?.length ? { cc } : {}),
     replyTo: GAGE,
     subject,
     html,
@@ -239,9 +242,11 @@ export async function sendProposalLinkEmail(proposal: ProposalEmailData & {
     <p style="margin:0;font-size:14px;color:#555;">— The Kracked Retention Team</p>
   `;
 
+  const cc = (proposal.ccEmails ?? []).filter((e) => e && e !== proposal.contactEmail);
   const { error } = await resend.emails.send({
     from: FROM,
     to,
+    ...(cc.length ? { cc } : {}),
     replyTo: GAGE,
     subject: `Your ${serviceType} Proposal from Kracked Retention`,
     html: emailShell(body),

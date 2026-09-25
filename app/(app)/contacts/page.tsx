@@ -1,8 +1,14 @@
 import { ContactsClient } from "@/components/contacts/contacts-client";
+import { getSessionUser } from "@/lib/auth/session";
 
 export const metadata = { title: "Contacts — Kracked Sales" };
+export const dynamic = "force-dynamic";
 
-export default function ContactsPage() {
+export default async function ContactsPage() {
+  // The Customers view is admin-only (mirrors /kpis + /money). Reps only ever see Contacts.
+  const user = await getSessionUser().catch(() => null);
+  const isAdmin = user?.role === "admin";
+
   return (
     <div className="flex flex-col h-full p-6 gap-4 overflow-hidden">
       <div>
@@ -16,7 +22,7 @@ export default function ContactsPage() {
           Every lead across GHL and comment sources
         </p>
       </div>
-      <ContactsClient />
+      <ContactsClient isAdmin={isAdmin} />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { ghl } from "@/lib/ghl/client";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 import { getSessionUser } from "@/lib/auth/session";
 import { logActivity } from "@/lib/activity/logger";
+import { applyLocalOpportunityMove } from "@/lib/pipeline/local-move";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,16 @@ export async function PATCH(
     if (monetaryValue !== undefined) payload.monetaryValue = monetaryValue;
 
     const data = await ghl.put(`/opportunities/${opportunityId}`, payload);
+
+    // Write the move into the mirror BEFORE responding. The client invalidates its
+    // ["opportunities"] query the moment this resolves, and that refetch reads the mirror —
+    // so without this the board pulls the OLD stage back and the card visibly snaps to where
+    // it came from, on every successful drag. Failing the request is not the right response
+    // to a mirror write error: GHL has already accepted the move, and a 500 here would make
+    // the client roll back an optimistic update that actually succeeded.
+    await applyLocalOpportunityMove({ opportunityId, pipelineStageId, monetaryValue }).catch(
+      (e) => console.error("[PATCH /api/ghl/opportunities/[id]] mirror write failed", e),
+    );
 
     logActivity({
       userId: sessionUser?.id ?? "unknown",

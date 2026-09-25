@@ -1,73 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { proposals, proposalInstalments, slackSettings, agreementTemplates } from "@/lib/db/schema";
+import { proposals, proposalInstalments, slackSettings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { hasStripe, stripe } from "@/lib/stripe/client";
 import { clampedTrialEnd, issueNextDepositInvoice } from "@/lib/proposals/deposit-billing";
+import { createUpfrontCheckout, createSpreadCheckout, createSpreadSubscriptionCheckout, type AutoRebillMode } from "@/lib/proposals/ninety-day-billing";
+import { firstPaymentDiscount, type BillingTerms } from "@/lib/proposals/billing";
 import { postToSalesChannel } from "@/lib/proposals/slack-notify";
 import { generateAgreementPdf } from "@/lib/pdf/render";
+import { resolveProposalContent } from "@/lib/proposals/templates";
 import { sendSignedAgreementEmail } from "@/lib/email/resend";
 import { dispatchWorkflowEvent } from "@/lib/workflows/triggers";
+import sharp from "sharp";
 
-const DEFAULT_MANAGEMENT_TERMS = `**Service Collaboration & Cooperation**
-
-To maintain a fair and healthy long-term relationship, Kracked Retention reserves the right to temporarily **pause services** if cooperation or communication from the Client prevents effective service delivery.
-
----
-
-**Term & Renewal**
-
-This Agreement operates on a **month-to-month basis** and will automatically renew unless terminated in accordance with the Pause & Termination Policy.
-
----
-
-**Pause & Termination Policy**
-
-- **Notice Requirement:** A minimum of 30 days' written notice must be provided to admin@krackedretention.com.
-- **Work Completed in Advance:** Any work already completed or in progress at the time of notice will remain billable.
-- **No Immediate Termination:** Pausing without the required notice may result in outstanding invoices.
-
----
-
-**Privacy & Confidentiality**
-
-Both parties agree to maintain the confidentiality of all business information, data, and assets shared.
-
----
-
-**Terms of Sale**
-
-- All sales are final and non-refundable.
-- The Client retains sole ownership of all Customer Materials upon full payment.
-
----
-
-**Governing Law**
-
-This Agreement is governed by the laws of the State of Tennessee.`;
-
-const DEFAULT_PROJECT_TERMS = `**Additional Scope Pricing**
-
-| Additional Scope | Cost |
-|---|---|
-| Flow Emails | $300 per email |
-| SMS | $100 per SMS/MMS |
-| Pop-Up | $150 per Pop-Up |
-| Flow Email Edits | $100 per email |
-
----
-
-**Privacy & Confidentiality**
-
-Both parties agree to maintain the confidentiality of all business information, data, and assets shared.
-
----
-
-**Terms of Sale**
-
-- All sales are final and non-refundable.
-- The Client retains sole ownership of all Customer Materials upon full payment.
-- This Agreement is governed by the laws of the State of Tennessee.`;
+/** A real signature needs meaningful ink AND spread — rejects a single dot/tap. Fails open
+ *  (allows) only if the image can't be analysed, so a genuine signer is never blocked. */
+async function isRealSignature(dataUri: string): Promise<boolean> {
+  try {
+    if (!dataUri.startsWith("data:image")) return false;
+    const buf = Buffer.from(dataUri.split(",")[1] ?? "", "base64");
+    const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const ch = info.channels;
+    let ink = 0, minX = info.width, maxX = -1, minY = info.height, maxY = -1;
+    for (let y = 0; y < info.height; y++) {
+      for (let x = 0; x < info.width; x++) {
+        if (data[(y * info.width + x) * ch + 3] > 20) { ink++; if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; }
+      }
+    }
+    return ink >= 100 && maxX - minX >= 40 && maxY - minY >= 12;
+  } catch (e) {
+    console.error("[sign] signature analysis failed, allowing:", e);
+    return true;
+  }
+}
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +44,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     if (!signature) {
       return NextResponse.json({ error: "Signature required" }, { status: 400 });
+    }
+    if (!(await isRealSignature(signature))) {
+      return NextResponse.json({ error: "Please draw your full signature, not just a dot." }, { status: 400 });
     }
 
     const [proposal] = await db().select().from(proposals).where(eq(proposals.id, id)).limit(1);
@@ -121,6 +89,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     //    If anything fails we alert #kracked-ai-sales and carry on — the signature is saved and
     //    the client sees success; the team follows up manually.
     let hostedUrl: string | null = null;
+
+    /** Remember the one-off discount coupon, so a resumed or re-signed checkout REUSES it instead
+     *  of minting a second one and stacking two discounts on the same deal. */
+    const persistCoupon = async (couponId: string | null) => {
+      if (!couponId || couponId === proposal.stripeDiscountCouponId) return;
+      await db().update(proposals)
+        .set({ stripeDiscountCouponId: couponId, updatedAt: new Date() })
+        .where(eq(proposals.id, proposal.id));
+    };
     if (hasStripe()) {
       try {
         // Ensure a Stripe customer exists (send usually makes it; create here if missing).
@@ -128,7 +105,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         if (!customerId && proposal.contactEmail) {
           const c = await stripe().customers.create({
             name: proposal.contactName,
-            email: proposal.contactEmail,
+            // Stripe receipts/invoices go to the separate billing email when one is set.
+            email: proposal.billingEmail ?? proposal.contactEmail,
             metadata: { ghl_contact_id: proposal.ghlContactId },
           });
           customerId = c.id;
@@ -200,6 +178,92 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               .update(proposalInstalments)
               .set({ stripeInvoiceId: inv.id, stripeHostedUrl: hostedUrl ?? undefined })
               .where(eq(proposalInstalments.id, first.id));
+          }
+
+        } else if (proposal.type === "management" && proposal.managementOption === "upfront" && customerId) {
+          // 90-Day Management, pay upfront: one Checkout that charges the full 90-day amount and
+          // creates a subscription. The webhook applies the auto-rebill stop. totalAmount is the
+          // MONTHLY figure; the engine multiplies by the 3-month term.
+          // A "first_payment" discount here comes off the single 90-day charge, once. It returns 0
+          // for a recurring discount (already inside totalAmount), so this changes nothing for
+          // every proposal written before the scope existed.
+          const upfrontOneOff = firstPaymentDiscount(proposal as unknown as BillingTerms);
+          const { url, couponId } = await createUpfrontCheckout(stripe(), {
+            customerId,
+            monthlyAmountCents: Math.round(proposal.totalAmount * 100),
+            currency: proposal.currency,
+            proposalId: proposal.id,
+            productName: proposal.title,
+            successUrl: `${origin}/p/${proposal.token}?payment=success`,
+            cancelUrl: `${origin}/p/${proposal.token}`,
+            autoRebillMode: (proposal.autoRebillMode ?? "none") as AutoRebillMode,
+            oneOffDiscountCents: Math.round(upfrontOneOff * 100),
+            existingCouponId: proposal.stripeDiscountCouponId ?? null,
+          });
+          await persistCoupon(couponId);
+          hostedUrl = url;
+
+        } else if (proposal.type === "management" && proposal.managementOption === "spread" && customerId) {
+          // 90-Day Management, spread: Checkout saves the card + charges the first payment; the webhook
+          // stores the card + schedules the rest. If the first month is SPLIT, the Checkout charges only
+          // portion 1; the remaining portions (then months 2 & 3) are auto-charged off-session.
+          const fpSplit = Array.isArray(proposal.firstPaymentSplit) && proposal.firstPaymentSplit.length > 1
+            ? (proposal.firstPaymentSplit as { amount: number }[]) : null;
+
+          if (!fpSplit) {
+            // THE NORMAL CASE: a monthly subscription billed 3 times, then stopped. Gives the
+            // client an invoice per payment, counts toward Management MRR with no manual patch,
+            // and lets Stripe do the charging, retrying and chasing.
+            // Proven 14/14 in scripts/stripe-test/prove-spread-subscription.mjs.
+            // A "first_payment" discount is passed as a ONE-OFF coupon, never by lowering the
+            // monthly amount — that would discount every month and turn $250 off into $750 off
+            // across a 90-day term. firstPaymentDiscount() returns 0 for a recurring discount,
+            // which is already inside totalAmount, so this is a no-op for existing proposals.
+            const oneOff = firstPaymentDiscount(proposal as unknown as BillingTerms);
+            const { url, couponId } = await createSpreadSubscriptionCheckout(stripe(), {
+              customerId,
+              monthlyAmountCents: Math.round(proposal.totalAmount * 100),
+              currency: proposal.currency,
+              proposalId: proposal.id,
+              productName: proposal.title,
+              successUrl: `${origin}/p/${proposal.token}?payment=success`,
+              cancelUrl: `${origin}/p/${proposal.token}`,
+              autoRebillMode: (proposal.autoRebillMode ?? "none") as AutoRebillMode,
+              oneOffDiscountCents: Math.round(oneOff * 100),
+              existingCouponId: proposal.stripeDiscountCouponId ?? null,
+            });
+            await persistCoupon(couponId);
+            hostedUrl = url;
+          } else {
+            // SPLIT FIRST PAYMENT: a subscription's first cycle is a single charge, so it cannot
+            // express "portion 1 now, portion 2 in N days". So the FIRST MONTH is collected as
+            // card charges (portion 1 here, the rest off-session on their dates), and the moment
+            // the last portion clears, onFirstMonthCollected starts a real subscription for the
+            // remaining months — invoices, MRR and Stripe-native dunning from that point.
+            // Proven 17/17 with uneven portions in prove-split-first-payment.mjs:
+            // $600 now, $900 at +14d, then $1,500 at +30 and +60, stops, exactly $4,500.
+            // A first-payment discount comes off the FIRST PORTION only, as a coupon on this
+            // charge. $600 + $400 with $250 off collects $350 then $400 — matching the schedule
+            // the client signed, where only row 0 is reduced (managementSchedule in billing.ts).
+            const splitOneOff = firstPaymentDiscount(proposal as unknown as BillingTerms);
+            const { url, couponId } = await createSpreadCheckout(stripe(), {
+              customerId,
+              firstChargeCents: Math.round((fpSplit[0]?.amount ?? 0) * 100),
+              currency: proposal.currency,
+              proposalId: proposal.id,
+              productName: proposal.title,
+              successUrl: `${origin}/p/${proposal.token}?payment=success`,
+              cancelUrl: `${origin}/p/${proposal.token}`,
+              oneOffDiscountCents: Math.round(splitOneOff * 100),
+              existingCouponId: proposal.stripeDiscountCouponId ?? null,
+            });
+            await persistCoupon(couponId);
+            hostedUrl = url;
+            postToSalesChannel(
+              `:information_source: *${proposal.contactName}* signed a 90-day retainer with a SPLIT first payment. ` +
+                `The first month collects as card charges on their agreed dates; once the last portion clears, ` +
+                `a subscription takes over for the remaining months (invoices + Management MRR from that point).`,
+            ).catch(() => {});
           }
 
         } else if (proposal.paymentStructure === "subscription" && proposal.hasDeposit && customerId) {
@@ -308,16 +372,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                 .where(eq(proposalInstalments.proposalId, id))
             : [];
 
-        // Fetch agreement terms
-        const [template] = await db()
-          .select()
-          .from(agreementTemplates)
-          .where(eq(agreementTemplates.type, proposal.type))
-          .limit(1);
-
-        const agreementTerms =
-          template?.body ??
-          (proposal.type === "management" ? DEFAULT_MANAGEMENT_TERMS : DEFAULT_PROJECT_TERMS);
+        // Terms + acceptance from the effective per-proposal content (snapshot -> template ->
+        // defaults), the single source of truth shared with the web page and the /pdf route.
+        const content = await resolveProposalContent(proposal);
 
         const pdfBuffer = await generateAgreementPdf({
           id: proposal.id,
@@ -335,11 +392,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           listAmount: proposal.listAmount,
           discountType: proposal.discountType,
           discountValue: proposal.discountValue,
+          discountScope: proposal.discountScope,
           startDate: proposal.startDate,
+          // 90-Day Management display fields — without these the emailed signed PDF would show the
+          // monthly figure / "one month" instead of the 90-day total, contradicting the web page.
+          managementOption: proposal.managementOption,
+          autoRebillMode: proposal.autoRebillMode,
+          firstPaymentSplit: proposal.firstPaymentSplit as Array<{ amount: number; offsetDays?: number }> | null,
+          contractStartAt: proposal.contractStartAt,
+          scheduleSnapshot: proposal.scheduleSnapshot,
           endDate: proposal.endDate,
           signedAt: new Date(),
           instalments: allInstalments,
-          agreementTerms,
+          agreementTerms: content.terms,
+          acceptance: content.acceptance,
+          deliverables: proposal.deliverables,
+          scopeIntro: content.scopeIntro,
+          serviceLabel: content.serviceLabel,
           signatureData: signature,
         });
 

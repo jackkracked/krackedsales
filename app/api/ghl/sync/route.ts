@@ -69,14 +69,38 @@ async function syncPipelines(): Promise<number> {
 
 // Paginate until all records are synced or the time budget (ms) is exceeded
 const PAGE_BUDGET_MS = 50_000; // 50s per entity — well within 300s maxDuration
+// Contacts get their own, much larger budget. v1 /contacts/ pages OLDEST-first and cannot be
+// sorted, so a truncated pass always drops the newest leads — the exact failure that left Tony
+// Lightwood unfindable. 5,094 contacts is 51 round trips; 200s finishes with room to spare
+// inside the route's 300s maxDuration.
+const CONTACTS_BUDGET_MS = 200_000;
 
+/**
+ * Sync contacts.
+ *
+ * MUST USE v1 `/contacts/`. It is the only contact endpoint that returns the `attributions`
+ * ARRAY — every UTM touch, including `utmAdId`, which is how the Leads Centre identifies a
+ * Meta lead (`raw_data::text ILIKE '%"utmAdId"%'` in app/api/leads/route.ts).
+ *
+ * DO NOT switch this to v2 `/contacts/search`. I did, on 2026-08-07, to get newest-first
+ * ordering — and it destroyed the Meta attribution on every contact it touched. v2 returns
+ * `attributionSource` / `lastAttributionSource` (single objects) but NOT `attributions`, so
+ * `upsertContact` wrote a raw_data blob with no `utmAdId` anywhere in it and the Leads page
+ * fell from 553 leads to 10. The only survivors were contacts the sync SKIPPED. Recoverable
+ * only because GHL still had the truth; a re-sync on v1 restored it.
+ *
+ * The original bug this was meant to fix — a 50s budget that always dropped the NEWEST
+ * contacts, because v1 pages oldest-first — is fixed by giving the pass enough time to finish
+ * instead. 5,094 contacts is 51 pages; the route allows 300s.
+ */
 async function syncContacts(): Promise<number> {
   const loc = locationId();
   let total = 0;
-  // GHL contacts pagination requires BOTH startAfterId (id) AND startAfter (dateAdded ms)
   let startAfterId: string | undefined = undefined;
   let startAfter: number | undefined = undefined;
-  const deadline = Date.now() + PAGE_BUDGET_MS;
+  // Generous on purpose: a truncated pass silently drops the newest leads, and this endpoint
+  // cannot be sorted newest-first. Finishing is what makes truncation a non-issue.
+  const deadline = Date.now() + CONTACTS_BUDGET_MS;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -86,6 +110,8 @@ async function syncContacts(): Promise<number> {
     }
     const data: ContactsResponse = await ghl.get(url);
     const batch: GhlContact[] = data.contacts ?? [];
+    if (!batch.length) break;
+
     await batchUpsert(batch, upsertContact);
     total += batch.length;
 
@@ -93,7 +119,13 @@ async function syncContacts(): Promise<number> {
     const last = batch[batch.length - 1];
     startAfterId = data.meta?.startAfterId ?? last?.id;
     startAfter = last?.dateAdded ? new Date(last.dateAdded).getTime() : undefined;
-    if (!startAfterId || Date.now() > deadline) break;
+    if (!startAfterId || Date.now() > deadline) {
+      if (Date.now() > deadline) {
+        // Loud, because a quiet truncation here is exactly how new leads went missing.
+        console.error(`[ghl/sync] contacts TRUNCATED at ${total} — budget exhausted. Newest contacts may be missing.`);
+      }
+      break;
+    }
   }
 
   return total;
@@ -139,13 +171,16 @@ async function syncOpportunities(): Promise<number> {
 async function syncConversations(): Promise<number> {
   const loc = locationId();
   let total = 0;
-  let startAfterId: string | undefined = undefined;
+  // GHL /conversations/search advances on `lastId` (the last conversation id), NOT
+  // startAfterId — using the wrong cursor pins it to page 1 and only 100 sync. This
+  // matches the working live paginator in /api/contacts.
+  let lastId: string | undefined = undefined;
   let prevFirstId: string | undefined = undefined;
   const deadline = Date.now() + PAGE_BUDGET_MS;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const cursorParam = startAfterId ? `&startAfterId=${startAfterId}` : "";
+    const cursorParam = lastId ? `&lastId=${lastId}` : "";
     const data: ConversationsResponse = await ghl.get(
       `/conversations/search?locationId=${loc}&limit=100&sortBy=last_message_date&sortOrder=desc${cursorParam}`
     );
@@ -160,8 +195,8 @@ async function syncConversations(): Promise<number> {
     total += batch.length;
 
     if (batch.length < 100) break;
-    startAfterId = data.meta?.startAfterId ?? batch[batch.length - 1]?.id;
-    if (!startAfterId || Date.now() > deadline) break;
+    lastId = batch[batch.length - 1]?.id;
+    if (!lastId || Date.now() > deadline) break;
   }
 
   return total;
@@ -169,23 +204,9 @@ async function syncConversations(): Promise<number> {
 
 // ─── Route handler ────────────────────────────────────────────────────────────
 
-export async function POST(req: NextRequest) {
-  let requestedEntities: EntityType[];
-
-  try {
-    const body = await req.json().catch(() => ({})) as { entities?: string[] };
-    const raw = body.entities;
-    if (Array.isArray(raw) && raw.length > 0) {
-      requestedEntities = raw.filter((e): e is EntityType =>
-        (ALL_ENTITIES as readonly string[]).includes(e)
-      );
-    } else {
-      requestedEntities = [...ALL_ENTITIES];
-    }
-  } catch {
-    requestedEntities = [...ALL_ENTITIES];
-  }
-
+/** Reconcile the local GHL mirror for the given entities. Shared by the admin POST and the
+ *  daily cron (app/api/cron/sync-ghl); webhooks keep the mirror real-time between runs. */
+export async function runSync(requestedEntities: EntityType[] = [...ALL_ENTITIES]): Promise<Record<string, number>> {
   const synced: Record<string, number> = {
     pipelines: 0,
     contacts: 0,
@@ -227,5 +248,17 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ synced });
+  return synced;
+}
+
+export async function POST(req: NextRequest) {
+  let requestedEntities: EntityType[] = [...ALL_ENTITIES];
+  try {
+    const body = (await req.json().catch(() => ({}))) as { entities?: string[] };
+    const raw = body.entities;
+    if (Array.isArray(raw) && raw.length > 0) {
+      requestedEntities = raw.filter((e): e is EntityType => (ALL_ENTITIES as readonly string[]).includes(e));
+    }
+  } catch { /* default = all entities */ }
+  return NextResponse.json({ synced: await runSync(requestedEntities) });
 }

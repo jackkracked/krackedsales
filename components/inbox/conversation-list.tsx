@@ -2,9 +2,9 @@
 
 import { cn } from "@/lib/utils/cn";
 import { formatMessageTime } from "@/lib/utils/date";
-import { MessageSquare, Mail, CornerUpLeft } from "lucide-react";
-import { InstagramIcon, FacebookIcon } from "@/components/shared/channel-icon";
-import { Avatar } from "@/components/ui/avatar";
+import { CornerUpLeft } from "lucide-react";
+import { ContactAvatar, CHANNEL_ICONS } from "@/components/inbox/channel-avatar";
+import { SelectCheckbox } from "@/components/inbox/select-checkbox";
 import type { GHLConversation } from "@/lib/ghl/types";
 
 function cleanPreview(body: string | undefined): string {
@@ -23,43 +23,27 @@ function cleanPreview(body: string | undefined): string {
   return stripped || "📎 Attachment";
 }
 
-const CHANNEL_ICONS: Record<string, React.ElementType> = {
-  TYPE_SMS: MessageSquare,
-  TYPE_EMAIL: Mail,
-  TYPE_INSTAGRAM: InstagramIcon,
-  TYPE_FB: FacebookIcon,
-};
-
-// Small channel glyph tint, badged onto the avatar.
-const CHANNEL_BADGE: Record<string, string> = {
-  TYPE_SMS: "bg-primary text-primary-foreground",
-  TYPE_EMAIL: "bg-foreground text-background",
-  TYPE_INSTAGRAM: "bg-pink-500 text-white",
-  TYPE_FB: "bg-blue-500 text-white",
-};
-
-function ContactAvatar({ name, channelType }: { name: string; channelType?: string }) {
-  const Icon = channelType ? CHANNEL_ICONS[channelType] : undefined;
-  const badge = channelType ? CHANNEL_BADGE[channelType] : undefined;
-  return (
-    <div className="relative shrink-0">
-      <Avatar name={name} size={40} />
-      {Icon && (
-        <span data-r10n-convo-channelbadge className={cn("absolute -bottom-0.5 -right-0.5 w-[15px] h-[15px] rounded-full flex items-center justify-center ring-2 ring-card", badge)}>
-          <Icon className="w-2 h-2" />
-        </span>
-      )}
-    </div>
-  );
-}
-
 interface ConversationListProps {
   conversations: GHLConversation[];
+  /** The currently OPEN conversation (thread shown on the right). */
   selectedId: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, e?: React.MouseEvent) => void;
+  /** Multi-select set of conversation ids. */
+  checkedIds: Set<string>;
+  /** Toggle a row's checkbox. `e` carries shiftKey for range-select. */
+  onToggleCheck: (id: string, e: React.MouseEvent) => void;
+  /** True when ≥1 conversation is selected — reveals every row's checkbox. */
+  selectionActive: boolean;
 }
 
-export function ConversationList({ conversations, selectedId, onSelect }: ConversationListProps) {
+export function ConversationList({
+  conversations,
+  selectedId,
+  onSelect,
+  checkedIds,
+  onToggleCheck,
+  selectionActive,
+}: ConversationListProps) {
   if (conversations.length === 0) {
     return (
       <div className="flex items-center justify-center h-40 text-sm text-muted-foreground px-4 text-center">
@@ -71,7 +55,9 @@ export function ConversationList({ conversations, selectedId, onSelect }: Conver
   return (
     <div data-r10n-convo-list className="flex flex-col overflow-y-auto flex-1 px-2 py-2">
       {conversations.map((conv) => {
-        const isSelected = conv.id === selectedId;
+        const isOpen = conv.id === selectedId;
+        const isChecked = checkedIds.has(conv.id);
+        const showCheckbox = selectionActive || isChecked;
         const displayType = conv.lastMessageType && CHANNEL_ICONS[conv.lastMessageType] ? conv.lastMessageType : conv.type;
         const hasUnread = conv.unreadCount > 0;
         // Client sent the last message and we've already read it → quietly flag reply-debt.
@@ -79,25 +65,58 @@ export function ConversationList({ conversations, selectedId, onSelect }: Conver
         const name = conv.fullName || conv.phone || conv.email || "Unknown";
 
         return (
-          <button
+          <div
             key={conv.id}
+            role="button"
+            tabIndex={0}
             data-r10n-convo-row
-            data-selected={isSelected}
+            data-selected={isOpen}
+            data-checked={isChecked}
             data-unread={hasUnread}
-            onClick={() => onSelect(conv.id)}
+            onClick={(e) => onSelect(conv.id, e)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect(conv.id);
+              }
+            }}
             className={cn(
-              "group relative flex items-start gap-3 px-2.5 py-2.5 rounded-[10px] text-left w-full transition-colors duration-100",
-              isSelected
+              "group relative flex items-start gap-3 px-2.5 py-2.5 rounded-[10px] text-left w-full cursor-pointer transition-colors duration-100 outline-none focus-visible:ring-2 focus-visible:ring-primary/25",
+              isOpen
                 ? "bg-primary/[0.07]"
+                : isChecked
+                ? "bg-primary/[0.05]"
                 : hasUnread
                 ? "hover:bg-primary/[0.04]"
                 : "hover:bg-muted/50",
             )}
           >
             {/* Selection indicator (not a border-stripe) */}
-            {isSelected && <span data-r10n-convo-marker className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 rounded-full bg-primary" />}
+            {isOpen && <span data-r10n-convo-marker className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 rounded-full bg-primary" />}
 
-            <ContactAvatar name={name} channelType={displayType} />
+            {/* Leading slot: avatar ↔ checkbox crossfade (checkbox on hover, or always in selection mode) */}
+            <div className="relative w-10 h-10 shrink-0">
+              <div
+                className={cn(
+                  "absolute inset-0 transition-opacity duration-150 ease-out",
+                  showCheckbox ? "opacity-0 pointer-events-none" : "opacity-100 group-hover:opacity-0",
+                )}
+              >
+                <ContactAvatar name={name} channelType={displayType} avatarUrl={conv.avatarUrl} />
+              </div>
+              <div
+                className={cn(
+                  "absolute inset-0 flex items-center justify-center transition-opacity duration-150 ease-out",
+                  showCheckbox ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                )}
+              >
+                <SelectCheckbox
+                  checked={isChecked}
+                  onChange={(_next, e) => onToggleCheck(conv.id, e)}
+                  aria-label={`Select conversation with ${name}`}
+                />
+              </div>
+            </div>
 
             <div className="flex-1 min-w-0 pt-0.5">
               <div className="flex items-center justify-between gap-2 mb-0.5">
@@ -113,6 +132,11 @@ export function ConversationList({ conversations, selectedId, onSelect }: Conver
                 <span data-r10n-convo-preview className={cn("text-xs truncate flex-1 leading-snug", hasUnread ? "text-foreground/80 font-medium" : "text-muted-foreground")}>
                   {cleanPreview(conv.lastMessageBody)}
                 </span>
+                {conv.starred && (
+                  <svg data-r10n-convo-star viewBox="0 0 24 24" className="w-3 h-3 shrink-0 fill-amber-400 text-amber-400" aria-hidden>
+                    <path d="M12 .587l3.668 7.431 8.2 1.192-5.934 5.784 1.401 8.169L12 18.896l-7.335 3.867 1.401-8.169L.132 9.21l8.2-1.192z" />
+                  </svg>
+                )}
                 {hasUnread && (
                   <span data-r10n-convo-unread className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center shrink-0 tabular-nums">
                     {conv.unreadCount > 9 ? "9+" : conv.unreadCount}
@@ -120,7 +144,7 @@ export function ConversationList({ conversations, selectedId, onSelect }: Conver
                 )}
               </div>
             </div>
-          </button>
+          </div>
         );
       })}
     </div>

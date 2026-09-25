@@ -5,6 +5,8 @@
 export type Sentiment = "positive" | "neutral" | "negative";
 
 export interface DialerContact {
+  /** GoHighLevel's timezone, used to warn before calling someone at an unsociable hour. */
+  timezone?: string | null;
   id: string;
   name: string;
   company: string;
@@ -32,6 +34,13 @@ export interface DialerCampaign {
   reached: number;
   exhausted: number;
   contacts: DialerContact[];
+  /** Set when the campaign was built "from pipeline stage". Just the two ids: the server
+   *  resolves the people and writes the queue, so phone numbers never round-trip through the
+   *  browser and the count shown cannot drift from the count queued. */
+  stageSource?: { pipelineId: string; stageId: string };
+  /** Who the campaign is for. Previously never sent, so every campaign assigned itself to
+   *  its creator and could not be handed to anyone else. */
+  repUserIds?: string[];
 }
 
 // ── Real-data shapes (from the dialer API) ──────────────────────────────────
