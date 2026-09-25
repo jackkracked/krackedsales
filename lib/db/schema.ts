@@ -1060,6 +1060,9 @@ export const callDispositions = pgTable("call_dispositions", {
   notes: text("notes"),              // saved locally + pushed to GHL notes if provided
   dispositionedAt: timestamp("dispositioned_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  /** Who wrote it, from the SESSION. Null on rows written before 0063. The pay tracker uses it
+   *  so a setter can never prove her own call happened (tasks/setter-tracker-plan.md B1). */
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
 });
 
 /* ── Power Dialer ────────────────────────────────────────────────────────────
@@ -1977,3 +1980,107 @@ export const bookingLinks = pgTable("booking_links", {
     .on(t.createdAt.desc())
     .where(sql`${t.bookedAt} IS NULL`),
 ]);
+
+
+// ── Pay tracker ledger (0063). See tasks/setter-tracker-plan.md ───────────────────────────────
+// Facts and human decisions only. Pay is recomputed from these on every read, except for a
+// CLOSED month, whose settled amounts are frozen in `trackerSettledRows`.
+
+/** Every appointment on a booked-call calendar, INCLUDING ones later cancelled, deleted or
+ *  moved, which `calls` forgets. Refreshed by the attribute-bookings job. */
+export const ghlAppointments = pgTable("ghl_appointments", {
+  id: text("id").primaryKey(),
+  contactId: text("contact_id"),
+  calendarId: text("calendar_id").notNull(),
+  calendarName: text("calendar_name"),
+  /** GHL user attending (the closer). */
+  assignedUserId: text("assigned_user_id"),
+  createdBySource: text("created_by_source"),
+  /** GHL user who booked it by hand. Null when the prospect booked themselves. */
+  createdByUserId: text("created_by_user_id"),
+  /** When the appointment was BOOKED. */
+  dateAdded: timestamp("date_added", { withTimezone: true }),
+  startTime: timestamp("start_time", { withTimezone: true }).notNull(),
+  status: text("status").notNull(),
+  cancelledSeenAt: timestamp("cancelled_seen_at", { withTimezone: true }),
+  /** Set only after a per-id lookup returned 404. Never inferred from absence alone. */
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  /** Set when a per-id lookup found it on a calendar that is not a booked-call calendar. */
+  movedToCalendarId: text("moved_to_calendar_id"),
+  firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).defaultNow().notNull(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** "This booking is mine" / "not mine". Append-only; the latest per (row, setter) wins. */
+export const trackerCreditDecisions = pgTable("tracker_credit_decisions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  appointmentId: text("appointment_id"),
+  /** Groups the decisions about one manually added booking that has no appointment. */
+  manualRowId: uuid("manual_row_id"),
+  setterUserId: uuid("setter_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  decision: text("decision").notNull(), // "claim" | "reject"
+  contactId: text("contact_id"),
+  contactName: text("contact_name"),
+  companyName: text("company_name"),
+  bookedAt: timestamp("booked_at", { withTimezone: true }),
+  callAt: timestamp("call_at", { withTimezone: true }),
+  decidedBy: uuid("decided_by").notNull().references(() => users.id),
+  decidedAt: timestamp("decided_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** Did the call happen. Counts only while `forStartTime` equals the appointment's current start. */
+export const trackerCallOutcomes = pgTable("tracker_call_outcomes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** An appointment id, or "m:<manualRowId>" for a manually added booking. */
+  rowRef: text("row_ref").notNull(),
+  outcome: text("outcome").notNull(), // "held" | "no_show"
+  forStartTime: timestamp("for_start_time", { withTimezone: true }).notNull(),
+  recordedBy: uuid("recorded_by").notNull().references(() => users.id),
+  recordedAt: timestamp("recorded_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** Base pay, booking bonus and commission rate, from `month` onward. */
+export const trackerMonthSettings = pgTable("tracker_month_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  month: text("month").notNull(), // YYYY-MM
+  /** NULL = never set. Shown as "Not set", never as $0. */
+  basePayCents: integer("base_pay_cents"),
+  bookingBonusCents: integer("booking_bonus_cents").notNull().default(0),
+  commissionPct: doublePrecision("commission_pct").notNull().default(0),
+  editedFields: text("edited_fields").array().notNull().default(sql`'{}'::text[]`),
+  editedBy: uuid("edited_by").references(() => users.id),
+  editedAt: timestamp("edited_at", { withTimezone: true }),
+}, (t) => [uniqueIndex("tracker_month_settings_user_id_month_key").on(t.userId, t.month)]);
+
+/** Cell overrides and notes. Append-only; the latest per (person, row, field) wins. */
+export const trackerOverrides = pgTable("tracker_overrides", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  subjectUserId: uuid("subject_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  rowKey: text("row_key").notNull(),
+  field: text("field").notNull(),
+  /** null clears the override and restores the automatic value. */
+  value: jsonb("value"),
+  editedBy: uuid("edited_by").notNull().references(() => users.id),
+  editedAt: timestamp("edited_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const trackerMonthCloses = pgTable("tracker_month_closes", {
+  month: text("month").primaryKey(),
+  closedBy: uuid("closed_by").notNull().references(() => users.id),
+  closedAt: timestamp("closed_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** What was actually paid for each money line, and in which month's pay. Never cascades. */
+export const trackerSettledRows = pgTable("tracker_settled_rows", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  /** The money line's key (bonus:…, restore:…, commission:…, base:…). */
+  rowKey: text("row_key").notNull(),
+  /** The booking or deal row it belongs to, for display after the line disappears. */
+  rowRef: text("row_ref").notNull(),
+  settledInMonth: text("settled_in_month").notNull(),
+  bonusCents: integer("bonus_cents").notNull().default(0),
+  commissionCents: integer("commission_cents").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [uniqueIndex("tracker_settled_rows_user_id_row_key_settled_in_month_key").on(t.userId, t.rowKey, t.settledInMonth)]);

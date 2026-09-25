@@ -36,6 +36,7 @@ const REASON_LABEL: Record<TodayReason, string> = {
   waiting: "Waiting on you",
   billing: "Payment failing",
   money: "Proposal",
+  pay: "Pay",
   task: "Task",
   followup: "Follow up",
 };

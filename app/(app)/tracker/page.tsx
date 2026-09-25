@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth/session";
 import { TrackerClient } from "@/components/tracker/tracker-client";
@@ -15,5 +16,10 @@ export const dynamic = "force-dynamic";
 export default async function TrackerPage() {
   const user = await getSessionUser().catch(() => null);
   if (!user) redirect("/login");
-  return <TrackerClient isAdmin={user.role === "admin"} selfId={user.id} />;
+  // Suspense because the client reads ?month= and ?needs= (links from Today and the Slack nudge).
+  return (
+    <Suspense fallback={null}>
+      <TrackerClient isAdmin={user.role === "admin"} selfId={user.id} />
+    </Suspense>
+  );
 }

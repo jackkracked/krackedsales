@@ -25,6 +25,8 @@ export async function POST(
 ) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // A deactivated account must not be able to write outcomes: they now decide setter pay.
+  if (!user.isActive) return NextResponse.json({ error: "Account is deactivated" }, { status: 403 });
 
   const { eventId } = await params;
   const body = await req.json();
@@ -43,6 +45,9 @@ export async function POST(
       repEmail: repEmail ?? user.email,
       outcome,
       notes: notes || null,
+      // From the SESSION, never the body. The pay tracker refuses to treat an outcome as proof
+      // when the person who wrote it is the setter paid on that call.
+      createdByUserId: user.id,
     }).onConflictDoNothing(); // idempotent — ignore if already dispositioned
 
     logActivity({

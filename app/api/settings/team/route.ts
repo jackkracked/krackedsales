@@ -4,6 +4,8 @@ import { users, repTargets, rolePermissions, userPermissionOverrides } from "@/l
 import { eq, asc } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { getSessionUser } from "@/lib/auth/session";
+import { editMonthSetting, getMonthSettings, recordDefaultChange } from "@/lib/tracker/settings";
+import { currentNyMonth } from "@/lib/tracker/months";
 
 /**
  * GET /api/settings/team
@@ -100,7 +102,7 @@ export async function PATCH(req: NextRequest) {
   if (newPassword && typeof newPassword === "string" && newPassword.length >= 8) {
     userUpdates.passwordHash = await bcrypt.hash(newPassword, 10);
   }
-  if (commissionPct !== undefined && typeof commissionPct === "number" && commissionPct >= 0) {
+  if (commissionPct !== undefined && typeof commissionPct === "number" && commissionPct >= 0 && commissionPct <= 100) {
     userUpdates.commissionPct = commissionPct;
   }
   if (timezone !== undefined) {
@@ -113,6 +115,29 @@ export async function PATCH(req: NextRequest) {
 
   if (Object.keys(userUpdates).length > 0) {
     await db().update(users).set(userUpdates).where(eq(users.id, userId));
+  }
+
+  // The pay tracker reads month settings, not these defaults, so a past month can never move
+  // when a default changes. Record a real change as "from this month on". Only a CHANGE is
+  // recorded: the team form sends every field on save, and marking unchanged values as edited
+  // would put "edited by Jack" on numbers nobody touched. Base pay 0 means "not set" here.
+  // Promoted to setter: they are owed $25 per booked call from this month, as in Kelsey's sheet,
+  // unless a bonus is already set for them.
+  if (userUpdates.role === "setter") {
+    const current = await getMonthSettings(userId, currentNyMonth());
+    if (current.bookingBonusCents === 0) {
+      await editMonthSetting({ userId, month: currentNyMonth(), field: "bookingBonusCents", value: 2500, actorId: actor.id });
+    }
+  }
+  if (userUpdates.commissionPct !== undefined || userUpdates.basePayCents !== undefined) {
+    const current = await getMonthSettings(userId, currentNyMonth());
+    const nextBase = userUpdates.basePayCents === undefined ? undefined : (userUpdates.basePayCents || null);
+    await recordDefaultChange({
+      userId,
+      actorId: actor.id,
+      basePayCents: nextBase !== undefined && nextBase !== current.basePayCents ? nextBase : undefined,
+      commissionPct: userUpdates.commissionPct !== undefined && userUpdates.commissionPct !== current.commissionPct ? userUpdates.commissionPct : undefined,
+    });
   }
 
   // Upsert targets if provided

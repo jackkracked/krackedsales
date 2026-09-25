@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ghl, locationId } from "@/lib/ghl/client";
+import { isBookedCallCalendar } from "@/lib/booking/calendars";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -34,28 +35,7 @@ interface GHLCalendarEvent {
  * startTime >= dateAdded (you can't book a call in the past), so nothing booked in-window can
  * have a start time before the window start.
  */
-/**
- * Which calendars represent a BOOKED CALL with a prospect.
- *
- * Matching on "intro call" or "demo" alone silently excluded every Strategy Session and
- * Clarity Call calendar — real booked calls, taken by the closer. Measured 1-7 Aug 2026:
- * 5 counted, 1 missed on "Taylor's Strategy Sessions Calendar.". Small in that window only
- * because volume was low; structurally it was dropping a whole category of call.
- *
- * Personal calendars are excluded explicitly: "Bloo io's Personal Calendar" is not sales.
- *
- * This is a BUSINESS definition, not a technical one. The endpoint returns `byCalendar` and
- * `excludedCalendars` in its response so the split is always auditable rather than buried in
- * a regex — if a calendar is on the wrong side, that response says so.
- */
-const BOOKED_CALL_PATTERNS = ["intro call", "demo", "strategy", "clarity call", "consult"];
-const NOT_A_BOOKED_CALL = ["personal calendar"];
-
-function isBookedCallCalendar(name: string): boolean {
-  const n = name.toLowerCase();
-  if (NOT_A_BOOKED_CALL.some((p) => n.includes(p))) return false;
-  return BOOKED_CALL_PATTERNS.some((p) => n.includes(p));
-}
+// Which calendars count lives in lib/booking/calendars.ts, shared with the pay tracker.
 
 /** UTC ms for a wall-clock day boundary (00:00:00, or 23:59:59.999) in BUSINESS_TZ, DST-safe. */
 function tzDayBoundaryMs(ymd: string, endOfDay: boolean): number {

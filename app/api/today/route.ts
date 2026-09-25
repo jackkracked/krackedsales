@@ -8,6 +8,16 @@ import {
 import {
   isChaseable, needsDecision, rankAndCap, type TodayItem, type ProposalChaseInput,
 } from "@/lib/today/rules";
+import { getSetterMonth } from "@/lib/tracker/setter";
+import { can } from "@/lib/auth/permissions";
+import { getCloserMonth } from "@/lib/tracker/closer";
+import { nextMonthToClose } from "@/lib/tracker/actions";
+import { currentNyMonth } from "@/lib/tracker/months";
+
+const monthName = (m: string) => {
+  const [y, mo] = m.split("-").map(Number);
+  return new Date(Date.UTC(y, mo - 1, 1)).toLocaleDateString("en-US", { month: "long", timeZone: "UTC" });
+};
 
 export const dynamic = "force-dynamic";
 
@@ -216,6 +226,64 @@ export async function GET(_req: NextRequest) {
     }
   } catch (e) {
     errors.push({ source: "tasks", message: e instanceof Error ? e.message : "failed" });
+  }
+
+  // ── 4. The pay tracker: what only this person can settle ──────────────────────────────────
+  // One row per KIND of gap, not one per call: a count the rep can clear in one visit to
+  // /tracker, rather than twelve near-identical rows pushing real work off the list. Source keys
+  // carry the count, so clearing some and then gaining more brings the row back.
+  try {
+    const month = currentNyMonth(now);
+    if (user.role === "admin") {
+      const due = await nextMonthToClose(now);
+      if (due) {
+        items.push({
+          sourceKey: `pay:close:${due}`,
+          reason: "pay",
+          personName: "Team pay",
+          action: `Close ${monthName(due)} pay`,
+          because: "The month is over. Closing freezes everyone's pay for it.",
+          sortAt: now,
+          href: `/tracker?month=${due}`,
+        });
+      }
+    }
+    // Never point someone at a page they cannot open (setters stay off until go-live).
+    const canSeeTracker = user.role === "admin" || (await can(user.id, user.role, "view_tracker"));
+    if (user.role === "setter" && canSeeTracker) {
+      const m = await getSetterMonth(user.id, month, now);
+      const here = m.needsYou.confirm + m.needsYou.clash + m.needsYou.awaitingOutcome;
+      const total = here + m.needsElsewhere.reduce((t, n) => t + n.count, 0);
+      if (total > 0) {
+        // Land on the earliest month with something waiting, so the filter is never empty.
+        const target = m.needsElsewhere.find((n) => n.month < month)?.month ?? (here > 0 ? month : m.needsElsewhere[0].month);
+        items.push({
+          sourceKey: `pay:setter:${total}`,
+          reason: "pay",
+          personName: "Your pay",
+          action: `Settle ${total} ${total === 1 ? "row" : "rows"} on your pay sheet`,
+          because: m.needsYou.confirm > 0 ? "Bookings that look like yours count once you confirm them" : "They count toward your pay once settled",
+          sortAt: now,
+          href: `/tracker?month=${target}&needs=1`,
+        });
+      }
+    } else if (user.role !== "setter" && canSeeTracker) {
+      const c = await getCloserMonth(user.id, month, now);
+      const n = c?.awaitingOutcome.length ?? 0;
+      if (n > 0) {
+        items.push({
+          sourceKey: `pay:outcomes:${n}`,
+          reason: "pay",
+          personName: n === 1 ? (c!.awaitingOutcome[0].contactName ?? "A call you ran") : `${n} calls you ran`,
+          action: n === 1 ? "Did they show?" : "Record who showed",
+          because: "A setter is paid on these once you say",
+          sortAt: now,
+          href: "/tracker?needs=1",
+        });
+      }
+    }
+  } catch (e) {
+    errors.push({ source: "pay", message: e instanceof Error ? e.message : "failed" });
   }
 
   const visible = items.filter((i) => !suppressed.has(i.sourceKey));

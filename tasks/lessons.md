@@ -508,3 +508,20 @@ string derived from it has to be derived again.
 UK by 30 minutes wrote a snapshot of US, Canadian and Australian law into the database. A later
 change to the statutory defaults in code would then have had no effect in production, silently.
 Store only what actually differs from the default, and the default stays live.
+
+## 2026-09-25: an apply script with no dry-run mode ran for real on `--help`
+- **What happened:** `scripts/apply-0064-tracker-setters-on.mjs` was cloned from 0062, which has no
+  flag handling. Running it with `--help` to "check" it applied the go-live switch to production
+  (setters could see the Pay Tracker for ~2 minutes). Reverted by hand; no other data touched.
+- **Rule:** every `scripts/apply-*.mjs` defaults to DRY RUN and only writes with an explicit
+  `--apply`. Never invoke a script that writes to prod to "see what it does": read it first.
+
+## 2026-09-25: the app-wide keepPreviousData default is wrong for per-person screens
+- `providers/query-provider.tsx` sets `placeholderData: keepPreviousData` globally. On the Pay
+  Tracker that showed Gage's pay under Kelsey's name while her month loaded. Any screen whose
+  query key is a PERSON (pay, permissions, private data) must opt out: `placeholderData: () => undefined`.
+
+## 2026-09-25: verify a spreadsheet's semantics against the data, not one example
+- I inferred "the sheet files by call date" from one row (Archetype), then one row (Tyler Kreuzer)
+  seemed to contradict it. Matching all 15 August rows to appointments settled it (12/15 exact call
+  dates) and exposed two rule bugs (follow-ups suggested as bookings; Gage books for Kelsey's leads).

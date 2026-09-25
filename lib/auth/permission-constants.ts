@@ -78,10 +78,9 @@ export const ROLE_PRESETS: Record<string, Partial<Record<FeatureKey, boolean>>> 
   setter: {
     view_dashboard: true, view_pipeline: true, view_contacts: true, view_calls: true,
     view_dialer: true, view_calendar: true, view_tasks: true,
-    // Off until the SETTER half of the tracker exists. Today the page computes a closer's
-    // proposals, so a setter would open it and be told they earned nothing. One toggle in
-    // team settings turns it on the day their booking bonus is real.
-    view_tracker: false,
+    // On once the setter half ships (0063 + the setter view). The DATABASE row is what `can()`
+    // reads; migration 0064 flips it at go-live, so this preset and the live switch agree.
+    view_tracker: true,
   },
   closer: {
     view_dashboard: true, view_pipeline: true, view_contacts: true, view_proposals: true,

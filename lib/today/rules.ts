@@ -96,6 +96,7 @@ export type TodayReason =
   | "money"     // proposal in its decision window
   | "task"      // something the rep set themselves
   | "billing"   // a payment is failing on a won deal
+  | "pay"       // the pay tracker needs a person: a call outcome, a booking to confirm, a month to close
   | "followup"; // pipeline nudge, oldest first
 
 /** Lower sorts first. Billing outranks follow-ups: won revenue leaking beats cold outreach. */
@@ -104,8 +105,9 @@ export const REASON_RANK: Record<TodayReason, number> = {
   waiting: 1,
   billing: 2,
   money: 3,
-  task: 4,
-  followup: 5,
+  pay: 4,
+  task: 5,
+  followup: 6,
 };
 
 /** Never let the cold-outreach backlog crowd out real work. */

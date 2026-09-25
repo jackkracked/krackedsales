@@ -1,3 +1,5 @@
+# ACTIVE: Setter tracker, see tasks/setter-tracker-plan.md (2026-09-25)
+
 # Plan: Instagram handle, contact quick actions, inbox search
 
 Written 2026-08-24. Three items from Jack and Gage, in dependency order.

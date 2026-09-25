@@ -17,7 +17,7 @@
  */
 import { db } from "@/lib/db";
 import { proposals, proposalInstalments, commissionSettings } from "@/lib/db/schema";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, sql, type SQL } from "drizzle-orm";
 
 export type PayoutTiming = "split" | "first_instalment" | "full_paid";
 
@@ -63,6 +63,31 @@ export async function getRepCommissionEvents(opts: {
 }): Promise<CommissionEvent[]> {
   const { userId, commissionPct, payoutTiming } = opts;
   if (!userId || commissionPct <= 0) return [];
+  return getCommissionEventsWhere({
+    where: sql`coalesce(${proposals.closedBy}, ${proposals.createdBy}) = ${userId}`,
+    commissionPct,
+    payoutTiming,
+  });
+}
+
+/**
+ * Commission events for ANY set of proposals, chosen by `where`.
+ *
+ * WHY THIS EXISTS: the pay tracker credits a SETTER on proposals she did not close, chosen by
+ * which booking led to them, not by `closedBy`. Recognition (split / first instalment / full)
+ * must be identical for both, so the timing logic lives here once and each caller only decides
+ * WHICH proposals. `getRepCommissionEvents` is this with the closer predicate.
+ *
+ * Pass `commissionPct: 100` to get events whose `commission` equals the base amount, for callers
+ * that apply a different rate per month.
+ */
+export async function getCommissionEventsWhere(opts: {
+  where: SQL;
+  commissionPct: number;
+  payoutTiming: PayoutTiming;
+}): Promise<CommissionEvent[]> {
+  const { where, commissionPct, payoutTiming } = opts;
+  if (commissionPct <= 0) return [];
   const rate = commissionPct / 100;
   const events: CommissionEvent[] = [];
 
@@ -80,7 +105,7 @@ export async function getRepCommissionEvents(opts: {
       })
       .from(proposalInstalments)
       .innerJoin(proposals, eq(proposalInstalments.proposalId, proposals.id))
-      .where(and(sql`coalesce(${proposals.closedBy}, ${proposals.createdBy}) = ${userId}`, isNotNull(proposalInstalments.paidAt)));
+      .where(and(where, isNotNull(proposalInstalments.paidAt)));
     for (const i of insts) {
       events.push({
         proposalId: i.proposalId,
@@ -95,7 +120,7 @@ export async function getRepCommissionEvents(opts: {
     const singles = await db()
       .select({ proposalId: proposals.id, name: proposals.contactName, title: proposals.title, totalAmount: proposals.totalAmount, paidAt: proposals.paidAt })
       .from(proposals)
-      .where(and(sql`coalesce(${proposals.closedBy}, ${proposals.createdBy}) = ${userId}`, eq(proposals.paymentStructure, "single"), isNotNull(proposals.paidAt)));
+      .where(and(where, eq(proposals.paymentStructure, "single"), isNotNull(proposals.paidAt)));
     for (const p of singles) {
       events.push({ proposalId: p.proposalId, label: p.name || p.title, sublabel: "Paid in full", date: p.paidAt!, saleAmount: p.totalAmount, commission: p.totalAmount * rate });
     }
@@ -105,14 +130,14 @@ export async function getRepCommissionEvents(opts: {
       .select({ proposalId: proposals.id, name: proposals.contactName, title: proposals.title, totalAmount: proposals.totalAmount, paidAt: proposalInstalments.paidAt })
       .from(proposalInstalments)
       .innerJoin(proposals, eq(proposalInstalments.proposalId, proposals.id))
-      .where(and(sql`coalesce(${proposals.closedBy}, ${proposals.createdBy}) = ${userId}`, eq(proposalInstalments.instalmentNumber, 1), isNotNull(proposalInstalments.paidAt)));
+      .where(and(where, eq(proposalInstalments.instalmentNumber, 1), isNotNull(proposalInstalments.paidAt)));
     for (const p of firsts) {
       events.push({ proposalId: p.proposalId, label: p.name || p.title, sublabel: "First payment", date: p.paidAt!, saleAmount: p.totalAmount, commission: p.totalAmount * rate });
     }
     const singles = await db()
       .select({ proposalId: proposals.id, name: proposals.contactName, title: proposals.title, totalAmount: proposals.totalAmount, paidAt: proposals.paidAt })
       .from(proposals)
-      .where(and(sql`coalesce(${proposals.closedBy}, ${proposals.createdBy}) = ${userId}`, eq(proposals.paymentStructure, "single"), isNotNull(proposals.paidAt)));
+      .where(and(where, eq(proposals.paymentStructure, "single"), isNotNull(proposals.paidAt)));
     for (const p of singles) {
       events.push({ proposalId: p.proposalId, label: p.name || p.title, sublabel: "Paid in full", date: p.paidAt!, saleAmount: p.totalAmount, commission: p.totalAmount * rate });
     }
@@ -121,7 +146,7 @@ export async function getRepCommissionEvents(opts: {
     const paid = await db()
       .select({ proposalId: proposals.id, name: proposals.contactName, title: proposals.title, totalAmount: proposals.totalAmount, paidAt: proposals.paidAt })
       .from(proposals)
-      .where(and(sql`coalesce(${proposals.closedBy}, ${proposals.createdBy}) = ${userId}`, isNotNull(proposals.paidAt)));
+      .where(and(where, isNotNull(proposals.paidAt)));
     for (const p of paid) {
       events.push({ proposalId: p.proposalId, label: p.name || p.title, sublabel: "Paid in full", date: p.paidAt!, saleAmount: p.totalAmount, commission: p.totalAmount * rate });
     }
