@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Phone, PhoneOff, Delete, Mic, MicOff, Grid3x3, X, Circle } from "lucide-react";
+import { Phone, PhoneOff, Delete, Mic, MicOff, Grid3x3, X, Circle, Clock } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { Avatar } from "@/components/ui/avatar";
 import { Keypad } from "./keypad";
@@ -12,6 +12,43 @@ export interface DockIdentity {
   company?: string;
   email?: string;
   stage?: string;
+}
+
+/**
+ * What time it is where the person being called is. Gage, 2026-09-29: "may be good were it
+ * actually shows the local time of contact". Computed by the same `checkCallingHours` call that
+ * guards the Call button, so this line and the warning can never disagree. Null when the zone
+ * cannot be told: showing nothing beats showing a wrong clock.
+ */
+export interface DockLocalTime {
+  /** "4:12am" */
+  time: string;
+  /** "Sydney, Australia", or null when only the zone is known. */
+  place: string | null;
+  /** Placed by country alone (an Australian mobile): say "about", never false precision. */
+  approximate: boolean;
+  /** Outside the calling window there. Same verdict the Call button acts on. */
+  outside: boolean;
+}
+
+/** "4:12am in Sydney, Australia · outside calling hours". Quiet inside hours, amber outside. */
+function LocalTimeLine({ lt }: { lt: DockLocalTime }) {
+  const text = `${lt.approximate ? "About " : ""}${lt.time}${lt.place ? ` in ${lt.place}` : " their time"}`;
+  return (
+    <p
+      className={cn(
+        "inline-flex max-w-[260px] items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium tabular-nums",
+        lt.outside ? "bg-amber-50 text-amber-800 ring-1 ring-amber-200" : "text-muted-foreground",
+      )}
+      title={lt.approximate ? "Placed by the phone number's country, so the exact zone may differ" : undefined}
+    >
+      <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <span className="truncate">
+        {text}
+        {lt.outside && <span className="font-semibold"> · outside calling hours</span>}
+      </span>
+    </p>
+  );
 }
 
 export type CallState = "idle" | "dialing" | "connected";
@@ -37,6 +74,8 @@ function mmss(total: number): string {
 }
 
 interface DialDockProps {
+  /** Local time where the number rings. Omitted or null: nothing is shown. */
+  localTime?: DockLocalTime | null;
   state: CallState;
   number: string;
   contactName?: string;
@@ -53,7 +92,7 @@ interface DialDockProps {
 }
 
 export function DialDock(props: DialDockProps) {
-  const { state, number, contactName, identity, attempt, muted, durationSec } = props;
+  const { state, number, contactName, identity, attempt, muted, durationSec, localTime } = props;
   const [showKeypadInCall, setShowKeypadInCall] = useState(false);
   const display = formatPhone(number);
   // Keep the number on ONE line — shrink the type as it gets longer instead of wrapping.
@@ -127,7 +166,13 @@ export function DialDock(props: DialDockProps) {
                   {identity.company && <p className="max-w-[240px] truncate text-[13.5px] font-semibold text-foreground">{identity.company}</p>}
                   {identity.stage && <span className="rounded-full bg-info-subtle px-2.5 py-1 text-[10.5px] font-semibold text-info">{identity.stage}</span>}
                   {identity.email && <p className="max-w-[240px] truncate text-[11px] text-muted-foreground">{identity.email}</p>}
+                  {localTime && <LocalTimeLine lt={localTime} />}
                 </div>
+              )}
+              {/* A manual dial has no identity, and that is exactly how the 4am Australia call
+                  happened: show their clock under the number instead. */}
+              {!identity && localTime && (
+                <div className="motion-safe:animate-[dialerFade_220ms_ease-out]"><LocalTimeLine lt={localTime} /></div>
               )}
             </div>
             <Keypad onPress={props.onPress} />

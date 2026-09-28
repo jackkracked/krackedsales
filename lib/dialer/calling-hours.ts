@@ -264,7 +264,15 @@ function isRealZone(zone: string): boolean {
 export function normalisePhone(phone: string | null | undefined): string | null {
   if (!phone) return null;
   const t = phone.trim().replace(/[^\d+]/g, "");
-  if (!t.startsWith("+")) return null;
+  if (!t.startsWith("+")) {
+    // TYPED WITHOUT A "+". Twilio dials such a number as a US/Canada number (our caller ID is
+    // North American), so a rep typing "212 555 0123" rings New York. Read it the same way, or a
+    // 10pm manual call to New York got no local time and no warning at all. Only when the area
+    // code is a real NANP one; anything else stays unknown, because silence beats a guess.
+    if (t.length === 10 && NANP_ZONES[t.slice(0, 3)]) return `+1${t}`;
+    if (t.length === 11 && t.startsWith("1") && NANP_ZONES[t.slice(1, 4)]) return `+${t}`;
+    return null;
+  }
 
   // A NANP NUMBER THAT LOST ITS COUNTRY CODE.
   //

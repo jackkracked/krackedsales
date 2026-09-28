@@ -215,5 +215,13 @@ let frozen = true;
 try { (STATUTORY as unknown as Record<string, unknown>).US = null; if (STATUTORY.US === null) frozen = false; } catch { /* frozen throws in strict mode */ }
 ok("the statutory windows cannot be overwritten at runtime", frozen && STATUTORY.US?.weekday?.[0] === 8);
 
+// Typed on the keypad without a "+": Twilio dials these as US/Canada numbers, so must we (2026-09-29).
+const typed10 = checkCallingHours({ phone: "212 555 0123" }, momentIn("America/New_York", "2026-10-06T22:30"));
+ok("a typed 10-digit NY number warns at 10:30pm", !typed10.allowed && typed10.place !== null, typed10.place ?? "none");
+const typed11 = checkCallingHours({ phone: "1 (310) 555-0199" }, momentIn("America/Los_Angeles", "2026-10-06T14:00"));
+ok("a typed 1+10-digit LA number reads Los Angeles time", typed11.allowed && typed11.localTime === "2:00pm", `${typed11.localTime} ${typed11.place}`);
+ok("a typed Australian number without + stays unknown (Twilio would not reach it)", checkCallingHours({ phone: "61416883874" }).confidence === "unknown");
+ok("10 digits with an unreal area code stays unknown", checkCallingHours({ phone: "0005550123" }).confidence === "unknown");
+
 console.log(`\n=== RESULT: ${pass.length} passed, ${fail.length} failed ===`);
 if (fail.length) { console.log("FAILED: " + fail.join(" | ")); process.exit(1); }

@@ -6,7 +6,7 @@ import { CheckCircle2, SlidersHorizontal, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { CampaignRail } from "./campaign-rail";
 import { ContactCockpit } from "./contact-cockpit";
-import { DialDock, type CallState } from "./dial-dock";
+import { DialDock, type CallState, type DockLocalTime } from "./dial-dock";
 import { DialerOutcomeModal, type DialerOutcome } from "./dialer-outcome-modal";
 import { CampaignBuilder } from "./campaign-builder";
 import { ChangeStageModal } from "@/components/contacts/change-stage-modal";
@@ -159,6 +159,25 @@ export function DialerClient({ role, userName, userId }: { role: "admin" | "rep"
     staleTime: 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
   });
+
+  // THE CLOCK WHERE THEY ARE, shown in the dock before anyone presses Call (Gage, 2026-09-29).
+  // Ticks on the minute so a rep who leaves the dialer open never reads a stale time. Uses the
+  // exact inputs and function the Call button's guard uses, so the two cannot disagree.
+  const [clock, setClock] = useState(() => new Date());
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | undefined;
+    const align = setTimeout(() => {
+      setClock(new Date());
+      interval = setInterval(() => setClock(new Date()), 60_000);
+    }, 60_000 - (Date.now() % 60_000));
+    return () => { clearTimeout(align); if (interval) clearInterval(interval); };
+  }, []);
+  const localTime: DockLocalTime | null = (() => {
+    if (!number) return null;
+    const w = checkCallingHours({ phone: number, ghlTimezone: cockpitContact?.timezone ?? null }, clock, callingHours?.callingHours);
+    if (!w.localTime || w.confidence === "unknown") return null;
+    return { time: w.localTime, place: w.place, approximate: w.confidence === "approximate", outside: !w.allowed };
+  })();
 
   const placeCallRef = useRef<((n: string, name: string) => void) | null>(null);
   const handleHoursCancel = useCallback(() => setHoursWarning(null), []);
@@ -346,6 +365,7 @@ export function DialerClient({ role, userName, userId }: { role: "admin" | "rep"
           contactName={dockName}
           identity={cockpitContact ? { name: cockpitContact.name, company: cockpitContact.company || undefined, email: cockpitContact.email || undefined, stage: cockpitContact.stage || undefined } : undefined}
           attempt={attempt}
+          localTime={localTime}
           muted={dialer.muted}
           durationSec={dialer.durationSec}
           onPress={(k) => { if (dialer.callState === "open") dialer.sendDigits(k); else setNumber((n) => n + k); }}
