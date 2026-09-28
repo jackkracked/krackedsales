@@ -35,7 +35,7 @@ export function DialerClient({ role, userName, userId }: { role: "admin" | "rep"
   const [claimed, setClaimed] = useState<ClaimedContact | null>(null);
   const [previewContactId, setPreviewContactId] = useState<string | null>(null);
   const [number, setNumber] = useState("");
-  const [outcomeFor, setOutcomeFor] = useState<{ campaignContactId: string | null; name: string; duration: number } | null>(null);
+  const [outcomeFor, setOutcomeFor] = useState<{ campaignContactId: string | null; name: string; duration: number; fromPreview?: boolean } | null>(null);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -96,13 +96,13 @@ export function DialerClient({ role, userName, userId }: { role: "admin" | "rep"
   // ── Detect call end → open the outcome modal ───────────────────────────────
   const prevCall = useRef(dialer.callState);
   const inCall = useRef(false);
-  const dialedContact = useRef<{ campaignContactId: string | null; name: string }>({ campaignContactId: null, name: "" });
+  const dialedContact = useRef<{ campaignContactId: string | null; name: string; fromPreview?: boolean }>({ campaignContactId: null, name: "" });
   useEffect(() => {
     const prev = prevCall.current;
     prevCall.current = dialer.callState;
     if ((prev === "open" || prev === "connecting") && dialer.callState === "idle" && inCall.current) {
       inCall.current = false;
-      setOutcomeFor({ campaignContactId: dialedContact.current.campaignContactId, name: dialedContact.current.name, duration: dialer.durationSec });
+      setOutcomeFor({ campaignContactId: dialedContact.current.campaignContactId, name: dialedContact.current.name, duration: dialer.durationSec, fromPreview: dialedContact.current.fromPreview });
     }
   }, [dialer.callState, dialer.durationSec]);
 
@@ -197,8 +197,15 @@ export function DialerClient({ role, userName, userId }: { role: "admin" | "rep"
   function placeCall(toNumber: string = number, name: string = contactLabel()) {
     if (!toNumber) return;
     inCall.current = true;
-    const campaignContactId = running && claimed ? claimed.id : null;
-    dialedContact.current = { campaignContactId, name };
+    // A contact called from PREVIEW that is still queued in the open campaign is that campaign's
+    // attempt too. Gage, 2026-09-29: called two queued contacts from preview, the tally stayed
+    // 0/3, because preview calls were never linked to their campaign row. Only while "queued":
+    // a finished contact, or one another rep is on, stays a plain call as before.
+    const previewRow = !running && isPreview && previewContactId
+      ? detail?.contacts.find((c) => c.contactId === previewContactId && c.status === "queued") ?? null
+      : null;
+    const campaignContactId = running && claimed ? claimed.id : previewRow?.id ?? null;
+    dialedContact.current = { campaignContactId, name, fromPreview: !!previewRow };
     void dialer.dial(toNumber, { contactId: cockpitContactId ?? undefined, campaignContactId: campaignContactId ?? undefined, name });
   }
   placeCallRef.current = placeCall;
@@ -244,13 +251,17 @@ export function DialerClient({ role, userName, userId }: { role: "admin" | "rep"
 
     if (oc?.campaignContactId) {
       try {
-        const data = await fetch(`/api/dialer/contacts/${oc.campaignContactId}/disposition`, {
+        const res = await fetch(`/api/dialer/contacts/${oc.campaignContactId}/disposition`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ outcome: o.key, requeue: o.requeue, notes }),
-        }).then((r) => r.json());
+          // From preview: count it, but do not hand the rep the next contact.
+          body: JSON.stringify({ outcome: o.key, requeue: o.requeue, notes, ...(oc.fromPreview ? { advance: false } : {}) }),
+        });
+        if (!res.ok) throw new Error("save failed");
+        const data = await res.json();
         qc.invalidateQueries({ queryKey: ["dialer-campaign", selectedId] });
         qc.invalidateQueries({ queryKey: ["dialer-campaigns"] });
-        if (data.next) { setClaimed(data.next); setNumber(digits(data.next.phone)); }
+        if (oc.fromPreview) { setNumber(""); setPreviewContactId(null); }
+        else if (data.next) { setClaimed(data.next); setNumber(digits(data.next.phone)); }
         else { setClaimed(null); setCompleted(true); }
         fireToast(o.requeue ? `${o.label} · requeued` : `${o.label} · saved`);
       } catch { fireToast("Could not save the outcome"); }

@@ -14,7 +14,10 @@ const SUPPRESS = new Set(["do_not_call", "bad_number"]);
  * contact, advance the queue (terminal → done/suppressed; no-contact → requeue to
  * the back until max attempts, then exhausted), release the lock, and claim the
  * next contact for a seamless auto-advance.
- * Body: { outcome: string, requeue: boolean, notes?: string, callId?: string }
+ * Body: { outcome: string, requeue: boolean, notes?: string, callId?: string, advance?: boolean }
+ *
+ * `advance: false` is for a queued contact called from PREVIEW: the attempt and outcome count
+ * exactly as in a running campaign, but nobody is handed the next contact they did not ask for.
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getSessionUser();
@@ -56,6 +59,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       callId, contactId: cc.contactId, contactName: cc.contactName, repEmail: user.email, outcome, notes,
     }).onConflictDoNothing();
 
+    if (body.advance === false) return NextResponse.json({ ok: true, next: null, done: false });
     const next = await claimNext(cc.campaignId, user.id);
     return NextResponse.json({ ok: true, next, done: !next });
   } catch (err) {
