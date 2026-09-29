@@ -11,6 +11,7 @@ import { ProposalStatusBadge } from "./proposal-status-badge";
 import { ActivityTimeline } from "./engagement";
 import { BillingActivity } from "./billing-activity";
 import { discountInfo, clientSentence, fullTermTotal, termMultiplier, managementSchedule, isNinetyDay, billingAnchor, type BillingTerms } from "@/lib/proposals/billing";
+import { CreditChip, type ProposalCredit, type TeamMember } from "@/components/proposals/credit-chip";
 
 interface Instalment {
   id: string;
@@ -26,6 +27,8 @@ interface Instalment {
 }
 
 interface Proposal {
+  /** Who is credited as closer and setter (lib/proposals/credit.ts). */
+  credit?: ProposalCredit | null;
   id: string;
   token: string;
   title: string;
@@ -76,6 +79,8 @@ interface ProposalDetailSlideOverProps {
   onDeleted?: () => void;
   isAdmin?: boolean;
   initialSendStep?: "idle" | "confirm";
+  /** The team, for the closer/setter pickers. */
+  team?: TeamMember[];
 }
 
 function fmtDate(d: string | null | undefined, tz: string) {
@@ -315,7 +320,7 @@ function InstalmentTable({ proposal, onUpdate }: { proposal: Proposal; onUpdate:
   );
 }
 
-export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDeleted, isAdmin, initialSendStep }: ProposalDetailSlideOverProps) {
+export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDeleted, isAdmin, initialSendStep, team = [] }: ProposalDetailSlideOverProps) {
   const tz = useUserTimezone();
   const [copied, setCopied] = useState(false);
   const [sendStep, setSendStep] = useState<"idle" | "confirm">(initialSendStep ?? "idle");
@@ -484,6 +489,20 @@ export function ProposalDetailSlideOver({ proposal, onClose, onUpdated, onDelete
               <ExternalLink className="w-3 h-3" />
               View opportunity
             </a>
+            {/* WHO IS CREDITED, visible the moment the deal opens and changed right here
+                (Jack, 2026-09-29). The same chips as the list row. */}
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+              <span className="flex items-center gap-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Closer</span>
+                <CreditChip proposalId={proposal.id} clientName={proposal.contactName} field="closer"
+                  credit={proposal.credit ?? null} team={team} isAdmin={!!isAdmin} paidAt={proposal.paidAt ?? null} />
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Setter</span>
+                <CreditChip proposalId={proposal.id} clientName={proposal.contactName} field="setter"
+                  credit={proposal.credit ?? null} team={team} isAdmin={!!isAdmin} paidAt={proposal.paidAt ?? null} />
+              </span>
+            </div>
           </div>
           <button
             onClick={onClose}

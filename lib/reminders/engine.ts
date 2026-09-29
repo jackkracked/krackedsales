@@ -26,6 +26,7 @@ import { postToSalesChannel, sendSlackDM, slackMentionForEmail } from "@/lib/pro
 import { dispatchNotification } from "@/lib/notifications/dispatch";
 import { claimNotification } from "@/lib/notifications/claim";
 import type { ScheduleStep } from "@/lib/reminders/defaults";
+import { closerIdOf } from "@/lib/proposals/credit";
 
 type TemplateRow = typeof emailTemplates.$inferSelect;
 type ProposalRow = typeof proposals.$inferSelect;
@@ -232,11 +233,19 @@ export async function runReminders(now: Date = new Date()): Promise<RunSummary> 
   const byKey = new Map(templates.map((t) => [t.key, t]));
 
   // rep lookup for context / value resolution + Slack @mention
-  const userRows = await db().select({ id: users.id, name: users.name, email: users.email }).from(users);
+  const userRows = await db().select({ id: users.id, name: users.name, email: users.email, isActive: users.isActive }).from(users);
   const userById = new Map(userRows.map((u) => [u.id, u] as const));
-  const repNameFor = (p: ProposalRow) => (p.createdBy ? userById.get(p.createdBy)?.name ?? null : null);
+  // The deal's CLOSER (Jack, 2026-09-29: clients see the closer's name), falling back to the
+  // creator if the closer has left, so no reminder names or nudges someone who is gone.
+  const repIdFor = (p: ProposalRow) => {
+    const closer = closerIdOf(p);
+    if (closer && p.closedBy && p.closedBy !== p.createdBy && userById.get(closer)?.isActive === false) return p.createdBy;
+    return closer;
+  };
+  const repNameFor = (p: ProposalRow) => { const id = repIdFor(p); return id ? userById.get(id)?.name ?? null : null; };
   const repFor = (p: ProposalRow) => {
-    const u = p.createdBy ? userById.get(p.createdBy) : null;
+    const id = repIdFor(p);
+    const u = id ? userById.get(id) : null;
     return u ? { name: u.name, email: u.email } : null;
   };
 

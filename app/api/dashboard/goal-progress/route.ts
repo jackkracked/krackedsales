@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { users, calls, proposals, repTargets } from "@/lib/db/schema";
-import { and, eq, gte, lte, count, isNotNull, sum } from "drizzle-orm";
+import { and, eq, gte, lte, count, isNotNull, sum, sql } from "drizzle-orm";
 import {
   startOfWeek, endOfWeek,
   startOfMonth, endOfMonth,
 } from "date-fns";
 import { getSessionUser } from "@/lib/auth/session";
+import { closerSql } from "@/lib/proposals/credit";
 
 export const dynamic = "force-dynamic";
 
@@ -82,7 +83,7 @@ export async function GET(req: NextRequest) {
     const [row] = await db()
       .select({ c: count() })
       .from(proposals)
-      .where(and(eq(proposals.createdBy, uid), isNotNull(proposals.paidAt), gte(proposals.paidAt, monthStart), lte(proposals.paidAt, monthEnd)));
+      .where(and(sql`${closerSql} = ${uid}`, isNotNull(proposals.paidAt), gte(proposals.paidAt, monthStart), lte(proposals.paidAt, monthEnd)));
     totalDeals += Number(row?.c ?? 0);
   }
 
@@ -92,7 +93,7 @@ export async function GET(req: NextRequest) {
     const [row] = await db()
       .select({ s: sum(proposals.totalAmount) })
       .from(proposals)
-      .where(and(eq(proposals.createdBy, uid), isNotNull(proposals.paidAt), gte(proposals.paidAt, monthStart), lte(proposals.paidAt, monthEnd)));
+      .where(and(sql`${closerSql} = ${uid}`, isNotNull(proposals.paidAt), gte(proposals.paidAt, monthStart), lte(proposals.paidAt, monthEnd)));
     totalRevenue += Number(row?.s ?? 0);
   }
 

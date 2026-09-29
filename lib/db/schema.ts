@@ -740,6 +740,18 @@ export const proposals = pgTable("proposals", {
    *  actually created it. Exists because Tofu Go was Alice's deal but Gage sent the proposal
    *  while she was tied up, and the leaderboard credited Gage. */
   closedBy: uuid("closed_by").references(() => users.id),
+  /** The setter credited on this deal (0065). Read with `setterMode`:
+   *  NULL mode = suggested by the Pay Tracker's booking rule (setterUserId unused);
+   *  "assigned" = setterUserId is the setter; "none" = explicitly no setter, no setter commission. */
+  setterUserId: uuid("setter_user_id").references(() => users.id),
+  setterMode: text("setter_mode"),
+  /** Set when an admin confirms or chooses the closer. NULL with a NULL closedBy = suggested. */
+  closerConfirmedBy: uuid("closer_confirmed_by").references(() => users.id),
+  closerConfirmedAt: timestamp("closer_confirmed_at", { withTimezone: true }),
+  setterConfirmedBy: uuid("setter_confirmed_by").references(() => users.id),
+  setterConfirmedAt: timestamp("setter_confirmed_at", { withTimezone: true }),
+  /** The status a proposal had when archived, so Unarchive restores it exactly. */
+  statusBeforeArchive: text("status_before_archive"),
   scheduleSnapshot: jsonb("schedule_snapshot").$type<Array<{ label: string; when: string; amount: number }>>(),
   scheduleSnapshotAt: timestamp("schedule_snapshot_at", { withTimezone: true }),
   firstPaymentSplit: jsonb("first_payment_split"), // [{ amount: dollars, offsetDays: int }] — first-month split, portion 1 = offsetDays 0
@@ -2084,3 +2096,17 @@ export const trackerSettledRows = pgTable("tracker_settled_rows", {
   commissionCents: integer("commission_cents").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [uniqueIndex("tracker_settled_rows_user_id_row_key_settled_in_month_key").on(t.userId, t.rowKey, t.settledInMonth)]);
+
+/** Every change to who is credited on a proposal. No FK to proposals: history outlives deletes. */
+export const proposalCreditChanges = pgTable("proposal_credit_changes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  proposalId: uuid("proposal_id").notNull(),
+  field: text("field").notNull(), // "closer" | "setter"
+  fromUserId: uuid("from_user_id"),
+  toUserId: uuid("to_user_id"),
+  fromMode: text("from_mode"),
+  toMode: text("to_mode"),
+  action: text("action").notNull(), // "assign" | "confirm" | "none"
+  changedBy: uuid("changed_by").notNull().references(() => users.id),
+  changedAt: timestamp("changed_at", { withTimezone: true }).defaultNow().notNull(),
+});

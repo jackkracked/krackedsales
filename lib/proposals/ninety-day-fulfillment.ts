@@ -26,6 +26,7 @@ import {
   type AutoRebillMode,
 } from "@/lib/proposals/ninety-day-billing";
 import { SPREAD_CADENCE_DAYS, managementSchedule, type BillingTerms } from "@/lib/proposals/billing";
+import { routeToCloser } from "@/lib/proposals/credit";
 
 /** Add whole months, clamping to the last valid day so Jan 31 + 1mo = Feb 28/29, not Mar 3.
  *  (Plain setMonth overflows end-of-month dates, which would drift the 90-day cadence.) */
@@ -553,12 +554,14 @@ async function flagBillingIssue(proposalId: string): Promise<void> {
 /** A declined / SCA 90-day charge is DM'd straight to Gage AND the rep who owns the deal, so the
  *  right person chases the card, not a noisy channel. Best-effort — never blocks the cron. */
 async function alertDeclineToGageAndRep(
-  proposal: { createdBy: string | null; contactName: string },
+  proposal: { createdBy: string | null; closedBy?: string | null; contactName: string },
   message: string,
 ): Promise<void> {
   const targets: { email?: string | null; name?: string | null }[] = [{ email: "gage@krackedretention.com", name: "Gage" }];
-  if (proposal.createdBy) {
-    const [rep] = await db().select({ email: users.email, name: users.name }).from(users).where(eq(users.id, proposal.createdBy)).limit(1);
+  // The deal's CLOSER chases the card (creator if the closer has left).
+  const repId = await routeToCloser(proposal);
+  if (repId) {
+    const [rep] = await db().select({ email: users.email, name: users.name }).from(users).where(eq(users.id, repId)).limit(1);
     if (rep?.email && rep.email.toLowerCase() !== "gage@krackedretention.com") targets.push({ email: rep.email, name: rep.name });
   }
   await Promise.all(targets.map((t) => sendSlackDM(t, message).catch(() => {})));

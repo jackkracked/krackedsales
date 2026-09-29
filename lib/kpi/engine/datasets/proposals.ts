@@ -19,6 +19,7 @@ import { db } from "@/lib/db";
 import { proposals } from "@/lib/db/schema";
 import { and, gte, lt, or, type SQLWrapper } from "drizzle-orm";
 import type { DatasetDef, LoadCtx, RawRow } from "../types";
+import { closerSql, getProposalCredits } from "@/lib/proposals/credit";
 
 const toMs = (d: Date | string | null | undefined): number | null =>
   d ? new Date(d).getTime() : null;
@@ -70,6 +71,25 @@ export const proposalsDataset: DatasetDef = {
       // Populated from the users table by the configurator (async). Value = user id.
       enumValues: [],
     },
+    {
+      // Who is CREDITED with closing it (lib/proposals/credit.ts): the admin's choice, else the
+      // creator. The field every closer metric should filter on. "Created by" above is kept so
+      // saved configs keep working unchanged.
+      key: "closerId",
+      label: "Closer",
+      type: "enum",
+      operators: ["eq", "neq", "in"],
+      enumValues: [],
+    },
+    {
+      // Who is credited as SETTER: the admin's assignment, else the Pay Tracker's booking rule.
+      // Empty when nobody is, or when two setters claim the booking and nobody has decided.
+      key: "setterId",
+      label: "Setter",
+      type: "enum",
+      operators: ["eq", "neq", "in"],
+      enumValues: [],
+    },
     { key: "autoRenew", label: "Auto-renews?", type: "boolean", operators: ["eq"] },
   ],
   dateFields: [
@@ -109,6 +129,7 @@ export const proposalsDataset: DatasetDef = {
           status: proposals.status,
           totalAmount: proposals.totalAmount,
           createdBy: proposals.createdBy,
+          closerId: closerSql.mapWith(String),
           autoRenew: proposals.autoRenew,
           sentAt: proposals.sentAt,
           paidAt: proposals.paidAt,
@@ -119,14 +140,16 @@ export const proposalsDataset: DatasetDef = {
         .from(proposals)
         .where(where);
 
-      // Rep scoping: when a non-admin rep context is supplied, restrict to the
-      // proposals they own (the "rep who sent it" rule used elsewhere). Done in
-      // memory so the over-fetch-by-any-date-field window stays a single query.
+      // Rep scoping: a non-admin's numbers count the deals they are CREDITED with closing (the
+      // same closer every card and the leaderboard use). Done in memory so the
+      // over-fetch-by-any-date-field window stays a single query.
       const repId = ctx.isAdmin === false ? ctx.userId ?? null : null;
+      const scoped = rows.filter((r) => (repId ? r.closerId === repId : true));
 
-      return rows
-        // Apply rep scoping in memory (the createdBy column is the owner id).
-        .filter((r) => (repId ? r.createdBy === repId : true))
+      // The setter comes from the Pay Tracker's ledger, so a KPI and a payslip cannot disagree.
+      const credits = await getProposalCredits(scoped.map((r) => r.id));
+
+      return scoped
         .map((r) => ({
           id: r.id,
           title: r.title,
@@ -135,6 +158,8 @@ export const proposalsDataset: DatasetDef = {
           status: r.status,
           totalAmount: r.totalAmount, // already dollars
           createdBy: r.createdBy ?? "",
+          closerId: r.closerId ?? "",
+          setterId: (() => { const c = credits.get(r.id)?.setter; return c && c.userIds.length === 1 ? c.userIds[0] : ""; })(),
           autoRenew: r.autoRenew,
           sentAt: toMs(r.sentAt),
           paidAt: toMs(r.paidAt),

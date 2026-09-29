@@ -185,7 +185,7 @@ async function loadSources(): Promise<HydrationSources> {
 /** dataset.key → (field.key → option list). The hydration plan. */
 function plan(s: HydrationSources): Record<string, Record<string, EnumOption[]>> {
   return {
-    proposals: { createdBy: s.usersById },
+    proposals: { createdBy: s.usersById, closerId: s.usersById, setterId: s.usersById },
     demo_boards: { repId: s.usersById },
     calls: { repEmail: s.usersByEmail },
     "ghl.opportunities": {

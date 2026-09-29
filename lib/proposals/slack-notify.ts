@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { proposals, slackSettings, users } from "@/lib/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import { amountBlockLabel } from "@/lib/proposals/billing";
+import { routeToCloser } from "@/lib/proposals/credit";
 
 /**
  * Posts a celebratory message to #kracked-ai-sales (the channel configured in
@@ -278,9 +279,11 @@ export async function notifyProposalSlack(kind: "signed" | "paid", proposalId: s
       if (claimed.length === 0) return;
     }
 
+    // The deal's CLOSER (the admin's choice, else the creator), falling back if they have left.
     let rep: string | null = null;
-    if (p.createdBy) {
-      const [u] = await db().select({ name: users.name }).from(users).where(eq(users.id, p.createdBy)).limit(1);
+    const repId = await routeToCloser(p);
+    if (repId) {
+      const [u] = await db().select({ name: users.name }).from(users).where(eq(users.id, repId)).limit(1);
       rep = u?.name ?? null;
     }
 

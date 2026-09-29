@@ -25,6 +25,8 @@ interface RepRow {
 
   // Setter
   callsBooked: number;
+  dealsSet: number;
+  valueSet: number;
   callsShowed: number;
   showRate: number | null;
 
@@ -77,15 +79,17 @@ const SETTER_COLUMNS: Col[] = [
   { key: "demos", label: "Demos", drill: "demos", hint: "Demos submitted through the system" },
   { key: "showRate", label: "Show", drill: "booked", percent: true, hint: "Of the calls they booked, how many were attended" },
   { key: "openLeads", label: "Open", drill: "open", hint: "Open opportunities assigned to them" },
+  { key: "dealsSet", label: "Set", drill: "set", hint: "Signed deals they are credited as setter on" },
+  { key: "valueSet", label: "Value set", drill: "set", currency: true, hint: "Value of the signed deals they set" },
 ];
 
 const CLOSER_COLUMNS: Col[] = [
-  { key: "proposalsSent", label: "Proposals", drill: "proposals", hint: "Proposals sent" },
+  { key: "proposalsSent", label: "Proposals", drill: "proposals", hint: "Proposals sent on deals they close" },
   { key: "dealsClosedAttributed", label: "Closed", drill: "closed", hint: "Deals closed" },
   { key: "closedValueAttributed", label: "Revenue", drill: "closed", currency: true, headline: true, hint: "Revenue from deals they closed" },
   { key: "closeRate", label: "Close", drill: "proposals", percent: true, hint: "Of the proposals they sent this period, how many signed" },
   { key: "avgDealSize", label: "Avg deal", drill: "closed", currency: true, hint: "Average value of a closed deal" },
-  { key: "commissionEarned", label: "Commission", drill: "closed", currency: true, hint: "Earned at their current rate" },
+  { key: "commissionEarned", label: "Commission", drill: "closed", currency: true, hint: "Paid to them this period, exactly as the Pay Tracker pays it (when the client pays)" },
 ];
 
 /** Admins work as closers, so route on what they DO rather than the raw role string. */

@@ -11,6 +11,10 @@ import {
   subDays,
 } from "date-fns";
 import { getSessionUser } from "@/lib/auth/session";
+import { closerSql, dealsSetBy } from "@/lib/proposals/credit";
+import { getPayoutTiming, getRepCommissionEvents } from "@/lib/kpi/rep-proposal-commission";
+import { loadSettingsRows, resolveSettings } from "@/lib/tracker/settings";
+import { nyMonth } from "@/lib/tracker/months";
 
 export const dynamic = "force-dynamic";
 
@@ -94,6 +98,9 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Deals each setter is firmly credited with (lib/proposals/credit.ts), computed once.
+  const setDeals = await dealsSetBy(start ?? null, end);
+
   // Build per-rep metrics
   const reps = await Promise.all(
     allUsers.map(async (user) => {
@@ -106,18 +113,20 @@ export async function GET(req: NextRequest) {
       const [callRow] = await db().select({ c: count() }).from(calls).where(callWhere);
       const totalCalls = Number(callRow?.c ?? 0);
 
-      // Proposals sent (sentAt within range, created by this user)
+      // Proposals sent (sentAt within range) by the deal's CLOSER. Jack, 2026-09-29: sent, closed
+      // and close rate belong to one person, the closer, even when someone else clicked send.
+      const isCloser = sql`${closerSql} = ${user.id}`;
       const propSentWhere = start
-        ? and(eq(proposals.createdBy, user.id), isNotNull(proposals.sentAt), gte(proposals.sentAt, start), lte(proposals.sentAt, end))
-        : and(eq(proposals.createdBy, user.id), isNotNull(proposals.sentAt));
+        ? and(isCloser, isNotNull(proposals.sentAt), gte(proposals.sentAt, start), lte(proposals.sentAt, end))
+        : and(isCloser, isNotNull(proposals.sentAt));
       const [propRow] = await db().select({ c: count() }).from(proposals).where(propSentWhere);
 
       // Deals closed — proposals THIS REP sent that got paid in the period.
       // Count and $ value come from the same set, so they always agree (and match
       // the commission dashboard). GHL won-opps are intentionally excluded.
       const dealsWhere = start
-        ? and(eq(proposals.createdBy, user.id), isNotNull(proposals.paidAt), gte(proposals.paidAt, start), lte(proposals.paidAt, end))
-        : and(eq(proposals.createdBy, user.id), isNotNull(proposals.paidAt));
+        ? and(isCloser, isNotNull(proposals.paidAt), gte(proposals.paidAt, start), lte(proposals.paidAt, end))
+        : and(isCloser, isNotNull(proposals.paidAt));
       const [dealRow] = await db()
         .select({ c: count(), v: sum(proposals.totalAmount) })
         .from(proposals)
@@ -206,10 +215,8 @@ export async function GET(req: NextRequest) {
       // A deal counts for whoever CLOSED it. `closedBy` is normally null, meaning "same as
       // createdBy" — it exists for the case where one rep sends the proposal on another's
       // behalf (Tofu Go: Gage sent it, Alice closed it).
-      const closedByThisRep = or(
-        eq(proposals.closedBy, user.id),
-        and(sql`${proposals.closedBy} is null`, eq(proposals.createdBy, user.id)),
-      );
+      // The same closer expression every pay and KPI surface uses (lib/proposals/credit.ts).
+      const closedByThisRep = isCloser;
       // A deal is CLOSED when it is SIGNED, not when the last instalment clears.
       //
       // This previously keyed on `paidAt`, which the system only sets once a proposal is FULLY
@@ -246,12 +253,11 @@ export async function GET(req: NextRequest) {
       // why no maturity window is needed — "has it signed yet" is already a settled answer, so a
       // recent cohort is not unfairly penalised.
       //
-      // Both sides key on createdBy (the sender), so this answers "how well does what I send
-      // convert". Closed / revenue / commission below stay PERIOD ACTIVITY on signature date,
-      // because that is what commission is actually paid on.
+      // Both sides key on the CLOSER, so this answers "how well do my deals convert", with the
+      // same person on top and bottom of the fraction.
       const cohortWhere = start
-        ? and(eq(proposals.createdBy, user.id), isNotNull(proposals.sentAt), isNotNull(proposals.signedAt), gte(proposals.sentAt, start), lte(proposals.sentAt, end))
-        : and(eq(proposals.createdBy, user.id), isNotNull(proposals.sentAt), isNotNull(proposals.signedAt));
+        ? and(isCloser, isNotNull(proposals.sentAt), isNotNull(proposals.signedAt), gte(proposals.sentAt, start), lte(proposals.sentAt, end))
+        : and(isCloser, isNotNull(proposals.sentAt), isNotNull(proposals.signedAt));
       const cohortClosed = Number((await db().select({ c: count() }).from(proposals).where(cohortWhere))[0]?.c ?? 0);
 
       return {
@@ -275,6 +281,9 @@ export async function GET(req: NextRequest) {
         // and the number becomes meaningful the moment outcomes start being marked.
         callsBooked,
         callsShowed,
+        // Signed deals they are credited as SETTER on (an admin's assignment or a proven booking).
+        dealsSet: setDeals.get(user.id)?.length ?? 0,
+        valueSet: (setDeals.get(user.id) ?? []).reduce((t, d) => t + d.totalAmount, 0),
         showRate: pct(callsShowed, callsResolved),
 
         // Closer — attributed by closedBy, so an override moves the credit with the deal.
@@ -285,13 +294,29 @@ export async function GET(req: NextRequest) {
         cohortClosed,
         avgDealSize: attributedClosed > 0 ? Math.round(attributedValue / attributedClosed) : null,
 
-        // Commission is COMPUTED from the stored rate, never stored as an amount — a rate change
-        // would otherwise silently rewrite history.
+        // Commission is what the Pay Tracker pays: the commission ENGINE (recognised when paid, per
+        // the payout-timing setting), at the rate in force in the month each payment lands.
+        // It used to be signed value × today's rate, which disagreed with people's actual pay.
         commissionPct: user.commissionPct ?? 0,
-        commissionEarned: Math.round(attributedValue * ((user.commissionPct ?? 0) / 100) * 100) / 100,
+        commissionEarned: await commissionForRange(user.id, start, end),
       };
     })
   );
 
   return NextResponse.json({ reps });
+}
+
+/** The commission a person is PAID for [start, end], exactly as the Pay Tracker computes it. */
+async function commissionForRange(userId: string, start: Date | null, end: Date): Promise<number> {
+  const payoutTiming = await getPayoutTiming();
+  const [events, rows] = await Promise.all([
+    getRepCommissionEvents({ userId, commissionPct: 100, payoutTiming }),
+    loadSettingsRows([userId]),
+  ]);
+  let cents = 0;
+  for (const e of events) {
+    if ((start && e.date < start) || e.date > end) continue;
+    cents += Math.round(e.commission * resolveSettings(rows, nyMonth(e.date)).commissionPct);
+  }
+  return cents / 100;
 }

@@ -13,6 +13,7 @@ import { can } from "@/lib/auth/permissions";
 import { getCloserMonth } from "@/lib/tracker/closer";
 import { nextMonthToClose } from "@/lib/tracker/actions";
 import { currentNyMonth } from "@/lib/tracker/months";
+import { closerSql } from "@/lib/proposals/credit";
 
 const monthName = (m: string) => {
   const [y, mo] = m.split("-").map(Number);
@@ -142,7 +143,8 @@ export async function GET(_req: NextRequest) {
         )`,
       })
       .from(proposals)
-      .where(eq(proposals.createdBy, user.id));
+      // The deal's CLOSER chases it (the admin's choice, else whoever created it).
+      .where(sql`${closerSql} = ${user.id}`);
 
     const oldest: Array<{ id: string; name: string; sentAt: Date; days: number }> = [];
     for (const r of rows) {

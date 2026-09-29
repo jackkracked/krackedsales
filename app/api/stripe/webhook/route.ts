@@ -15,6 +15,7 @@ import { fulfillNinetyDayCheckout } from "@/lib/proposals/ninety-day-fulfillment
 import { MONTHS_IN_TERM } from "@/lib/proposals/ninety-day-billing";
 import { postToSalesChannel } from "@/lib/proposals/slack-notify";
 import { PAID_TERMINAL_STATUSES } from "@/lib/proposals/status";
+import { routeToCloser } from "@/lib/proposals/credit";
 
 const DEFAULT_MANAGEMENT_TERMS = `**Service Collaboration & Cooperation**
 
@@ -110,14 +111,16 @@ async function createOnboardingTasks(proposalId: string) {
       .limit(1);
     if (!proposal) return;
 
-    // Resolve the user who sent the proposal so tasks are assigned to them
+    // Onboarding tasks go to the deal's CLOSER (the admin's choice, else the creator), falling
+    // back to the creator if the closer has left.
     let userId: string | null = null;
     let userName: string | null = null;
-    if (proposal.createdBy) {
+    const ownerId = await routeToCloser(proposal);
+    if (ownerId) {
       const [user] = await db()
         .select({ id: users.id, name: users.name })
         .from(users)
-        .where(eq(users.id, proposal.createdBy))
+        .where(eq(users.id, ownerId))
         .limit(1);
       userId = user?.id ?? null;
       userName = user?.name ?? null;

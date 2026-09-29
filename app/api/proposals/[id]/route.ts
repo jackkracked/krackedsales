@@ -6,6 +6,7 @@ import { getSessionUser } from "@/lib/auth/session";
 import { dispatchWorkflowEvent } from "@/lib/workflows/triggers";
 import { normalizeDeliverables, normalizeContent } from "@/lib/proposals/normalize";
 import { defaultContentFor } from "@/lib/proposals/content";
+import { moneyFootprint } from "@/lib/proposals/bulk";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +82,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (key === "status") {
         if (typeof value === "string" && ALLOWED_STATUS_VALUES.has(value)) set.status = value;
         else rejected.push(key);
+        // ARCHIVING NEVER TOUCHES A DEAL WITH MONEY ON IT. Voiding a paid or signed proposal drops
+        // it from revenue figures while commission keeps paying on it (proposal-roles review B4).
+        // It also remembers what it was, so Unarchive can put it back exactly.
+        if (value === "void" && existing.status !== "void") {
+          const insts = await db().select({ status: proposalInstalments.status, paidAt: proposalInstalments.paidAt, invoice: proposalInstalments.stripeInvoiceId })
+            .from(proposalInstalments).where(eq(proposalInstalments.proposalId, id));
+          const money = moneyFootprint(existing, insts.some((i) => i.status === "paid" || !!i.paidAt), insts.some((i) => !!i.invoice));
+          if (money) return NextResponse.json({ error: `Can't archive: ${money}.` }, { status: 409 });
+          set.statusBeforeArchive = existing.status;
+        }
       } else if (key === "paidAt") {
         // Only alongside a paid transition — never a standalone paid-date stamp.
         if (body.status === "paid") set.paidAt = typeof value === "string" ? new Date(value) : value;

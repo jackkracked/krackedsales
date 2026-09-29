@@ -8,6 +8,7 @@ import {
   startOfDay, endOfDay, startOfWeek, startOfMonth, subDays,
 } from "date-fns";
 import { getSessionUser } from "@/lib/auth/session";
+import { closerSql, dealsSetBy } from "@/lib/proposals/credit";
 
 export const dynamic = "force-dynamic";
 
@@ -114,12 +115,8 @@ export async function GET(req: NextRequest) {
       //     appears under whoever actually closed it.
       const isClosed = metric === "closed";
       const dateCol = isClosed ? proposals.signedAt : proposals.sentAt;
-      const repMatch = isClosed
-        ? or(
-            eq(proposals.closedBy, userId),
-            and(sql`${proposals.closedBy} is null`, eq(proposals.createdBy, userId)),
-          )
-        : eq(proposals.createdBy, userId);
+      // Both lists follow the deal's CLOSER, like the leaderboard (lib/proposals/credit.ts).
+      const repMatch = sql`${closerSql} = ${userId}`;
       const where = start
         ? and(repMatch, isNotNull(dateCol), gte(dateCol, start), lte(dateCol, end))
         : and(repMatch, isNotNull(dateCol));
@@ -133,6 +130,12 @@ export async function GET(req: NextRequest) {
         status: p.status,
         href: `/proposals/${p.id}`,
       }));
+    } else if (metric === "set") {
+      // Exactly the leaderboard's "Deals set" (lib/proposals/credit.ts dealsSetBy).
+      const deals = (await dealsSetBy(start ?? null, end)).get(userId) ?? [];
+      items = deals
+        .sort((a, b) => b.signedAt.getTime() - a.signedAt.getTime())
+        .map((p) => ({ id: p.id, title: p.contactName, sub: p.title, date: p.signedAt.toISOString(), amount: p.totalAmount, status: p.status, href: `/proposals/${p.id}` }));
     } else if (metric === "demos") {
       // Demos this rep created, newest first. Read from the activity trail — the same source
       // the leaderboard counts — so the list can never disagree with the number above it.

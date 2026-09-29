@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   bookingLinks, callDispositions, ghlAppointments, localContacts, localOpportunities, proposals,
@@ -69,17 +69,23 @@ export async function loadSetterFacts(setterId: string, now: Date = new Date()):
           isNull(callDispositions.callId),
         ))
       : Promise.resolve([]),
-    contactIds.length
-      ? database.select({
-          id: proposals.id, contactId: proposals.ghlContactId, title: proposals.title, totalAmount: proposals.totalAmount,
-          sentAt: proposals.sentAt, signedAt: proposals.signedAt, paidAt: proposals.paidAt, lostAt: proposals.lostAt,
-          contactName: proposals.contactName,
-        }).from(proposals).where(inArray(proposals.ghlContactId, contactIds))
-      : Promise.resolve([]),
+    // Proposals on a booked contact (the booking rule), PLUS every proposal an admin has given a
+    // setter or marked "no setter": an assigned deal may have no booking at all, and without it
+    // here the assigned setter's commission had nowhere to land (proposal-roles review B1).
+    database.select({
+      id: proposals.id, contactId: proposals.ghlContactId, title: proposals.title, totalAmount: proposals.totalAmount,
+      sentAt: proposals.sentAt, signedAt: proposals.signedAt, paidAt: proposals.paidAt, lostAt: proposals.lostAt,
+      contactName: proposals.contactName, setterMode: proposals.setterMode, setterUserId: proposals.setterUserId,
+    }).from(proposals).where(contactIds.length
+      ? or(inArray(proposals.ghlContactId, contactIds), isNotNull(proposals.setterMode))
+      : isNotNull(proposals.setterMode)),
     // At 100%, so `commission` is the base amount; the rate is applied per month by the rules.
-    contactIds.length
-      ? getCommissionEventsWhere({ where: inArray(proposals.ghlContactId, contactIds), commissionPct: 100, payoutTiming })
-      : Promise.resolve([]),
+    getCommissionEventsWhere({
+      where: contactIds.length
+        ? or(inArray(proposals.ghlContactId, contactIds), isNotNull(proposals.setterMode))!
+        : isNotNull(proposals.setterMode),
+      commissionPct: 100, payoutTiming,
+    }),
   ]);
 
   const peopleList: Person[] = people.map((p) => ({ id: p.id, name: p.name, role: p.role, ghlUserId: p.ghlUserId }));
@@ -121,6 +127,8 @@ export async function loadSetterFacts(setterId: string, now: Date = new Date()):
     proposals: props.map((p) => ({
       id: p.id, contactId: p.contactId, title: p.title, totalAmount: p.totalAmount,
       sentAt: p.sentAt, signedAt: p.signedAt, paidAt: p.paidAt, lostAt: p.lostAt,
+      setterMode: (p.setterMode === "assigned" || p.setterMode === "none") ? p.setterMode : null,
+      setterUserId: p.setterUserId,
     })),
     commissionEvents: events.map((e) => ({ proposalId: e.proposalId, date: e.date, baseAmount: e.commission, sublabel: e.sublabel })),
     overrides: overrides

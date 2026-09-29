@@ -8,6 +8,8 @@ import {
 import { editMonthSetting, type SettingsField } from "@/lib/tracker/settings";
 import { loadCloses } from "@/lib/tracker/ledger-store";
 import { linesToSettle, type MonthView } from "@/lib/tracker/settlement";
+import { acquireJobLock, releaseJobLock } from "@/lib/jobs/lock";
+import { PAY_LEDGER_LOCK } from "@/lib/proposals/credit";
 import { computeSetter } from "@/lib/tracker/setter";
 import { getCloserMonth } from "@/lib/tracker/closer";
 import { currentNyMonth, isMonthKey, isMonthOver, monthsBetween, nyMonth, nyMonthRange, TRACKER_GO_LIVE_MONTH } from "@/lib/tracker/months";
@@ -320,6 +322,20 @@ export async function closeMonth(actor: Actor, month: string, now: Date = new Da
   const due = await nextMonthToClose(now);
   if (!due) throw new TrackerError(409, "There is no finished month waiting to be closed");
   if (month !== due) throw new TrackerError(409, `Close ${due} first: months close in order`);
+
+  // Nobody may change who is credited on a deal while its pay is being frozen (proposal-roles
+  // review B3): a reassignment between reading two people's sheets would settle one deal twice.
+  if (!(await acquireJobLock(PAY_LEDGER_LOCK, 300))) {
+    throw new TrackerError(409, "Someone is changing deal credit right now. Try again in a minute.");
+  }
+  try {
+    return await closeMonthLocked(actor, month, now);
+  } finally {
+    await releaseJobLock(PAY_LEDGER_LOCK, { status: "ok", detail: `close ${month}` }).catch(() => {});
+  }
+}
+
+async function closeMonthLocked(actor: Actor, month: string, now: Date) {
 
   // Everyone who could be paid: every setter and every closer, active or not (someone who left
   // mid-month is still owed that month).

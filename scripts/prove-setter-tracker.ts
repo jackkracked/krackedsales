@@ -332,6 +332,44 @@ const row = (l: ReturnType<typeof buildSetterLedger>, a: Appointment) => l.rows.
   check("B9 a manual row's corrected date is used", l.rows[0]?.callAt.toISOString() === "2026-10-02T16:00:00.000Z" && l.rows[0]?.outcome === "awaiting", l.rows[0]);
 }
 
+// ── Proposal credit (0065): an admin's setter assignment on the deal ──────────────────────
+{
+  const a = appt({ contact: "pc1", start: "2026-09-10T15:00:00Z", dateAdded: d("2026-09-05T00:00:00Z") });
+  const base: ProposalFact = { id: "pp1", contactId: "pc1", title: "Deal", totalAmount: 4000, sentAt: d("2026-09-12T00:00:00Z"), signedAt: null, paidAt: d("2026-10-02T15:00:00Z"), lostAt: null };
+  const ev: BaseCommissionEvent = { proposalId: "pp1", date: base.paidAt!, baseAmount: 4000 };
+  const comm = (l: ReturnType<typeof buildSetterLedger>) => l.entries.filter((e) => e.kind === "commission" && e.status === "paid").reduce((t, e) => t + e.cents, 0);
+  const common = { appointments: [a], links: [link(a, KELSEY)], trackerOutcomes: [held(a)], commissionEvents: [ev] };
+
+  // Booking rule, untouched: Kelsey booked it, Kelsey earns.
+  const l0 = buildSetterLedger(facts({ ...common, proposals: [base] }));
+  check("PC1 unassigned deal pays the booked setter", comm(l0) === 20000, l0.entries);
+  check("PC1 per-proposal answer is 'suggested', credited to Kelsey", l0.proposalSetters.get("pp1")?.mode === "suggested" && l0.proposalSetters.get("pp1")?.setterIds[0] === KELSEY && l0.proposalSetters.get("pp1")?.state === "credited");
+
+  // Admin assigns Taylor, who never booked it: Taylor paid on a deal row, Kelsey loses it (B1).
+  const assigned = { ...base, setterMode: "assigned" as const, setterUserId: TAYLOR };
+  const lk = buildSetterLedger(facts({ ...common, proposals: [assigned] }));
+  const lt = buildSetterLedger(facts({ ...common, setterId: TAYLOR, proposals: [assigned] }));
+  check("PC2 the booked setter no longer earns an assigned-away deal", comm(lk) === 0, lk.entries);
+  check("PC2 the assigned setter earns it, with no booking of her own", comm(lt) === 20000, lt.entries);
+  check("PC2 ...on a row keyed by the deal, so it is traceable", lt.rows.some((r) => r.rowKey === "p:pp1" && r.credit.source === "assigned" && r.bonusState === "deal_only"), lt.rows.map((r) => r.rowKey));
+  check("PC2 Kelsey still keeps her $25 booking bonus (she did book the call)", lk.entries.some((e) => e.kind === "bonus" && e.status === "paid" && e.cents === 2500));
+
+  // "No setter": nobody earns setter commission.
+  const none = { ...base, setterMode: "none" as const, setterUserId: null };
+  check("PC3 'no setter' pays no setter commission", comm(buildSetterLedger(facts({ ...common, proposals: [none] }))) === 0 && comm(buildSetterLedger(facts({ ...common, setterId: TAYLOR, proposals: [none] }))) === 0);
+  check("PC3 per-proposal answer is 'none'", buildSetterLedger(facts({ ...common, proposals: [none] })).proposalSetters.get("pp1")?.mode === "none");
+
+  // Assigned deal before go-live never pays retroactively.
+  const early = { ...assigned, paidAt: d("2026-08-02T15:00:00Z") };
+  check("PC4 an assigned deal paid before go-live pays nothing now", comm(buildSetterLedger(facts({ ...common, setterId: TAYLOR, proposals: [early], commissionEvents: [{ ...ev, date: early.paidAt! }] }))) === 0);
+
+  // An owner-guess booking behind the deal: suggested, pending, and the answer says so.
+  const b2 = appt({ contact: "pc5", start: "2026-09-10T15:00:00Z", dateAdded: d("2026-09-05T00:00:00Z") });
+  const p5: ProposalFact = { ...base, id: "pp5", contactId: "pc5" };
+  const l5 = buildSetterLedger(facts({ appointments: [b2], opportunities: [owns("pc5", "g-kelsey")], trackerOutcomes: [held(b2)], proposals: [p5], commissionEvents: [{ ...ev, proposalId: "pp5" }] }));
+  check("PC5 a guessed setter's commission is pending, and the deal says 'suggested'", comm(l5) === 0 && l5.proposalSetters.get("pp5")?.state === "suggested");
+}
+
 // ── Settlement: closed months never move; late changes become adjustments ──────────────────
 {
   const months = ["2026-09", "2026-10"];
@@ -362,6 +400,23 @@ const row = (l: ReturnType<typeof buildSetterLedger>, a: Appointment) => l.rows.
   const removed = settle({ live: [], settled: toSettle, closedMonths: new Set(["2026-09"]), months });
   check("S6 a settled line that disappears is a negative adjustment", removed.get("2026-10")?.paidCents === -2500);
   check("S7 ...and it is still shown against its own row", removed.get("2026-10")?.lines[0]?.rowKey === "b:x", removed.get("2026-10")?.lines);
+}
+
+// ── Month-close replay: a deal reassigned to another closer after its month closed ───────
+{
+  const months = ["2026-09", "2026-10"];
+  const line: LiveLine = { key: "commission:pX:2026-09-15T00:00:00.000Z", rowKey: "p:pX", month: "2026-09", kind: "commission", cents: 45000, status: "paid", label: "Paid in full" };
+  // Alice was the closer when September closed: $450 settled to her.
+  const aliceSettled = linesToSettle(settle({ live: [line], settled: [], closedMonths: new Set(), months }).get("2026-09")!);
+  check("R1 Alice is settled $450 in September", aliceSettled.length === 1 && aliceSettled[0].cents === 45000);
+  // Admin reassigns the deal to Gage in October. Alice's live ledger no longer has the line;
+  // Gage's does, with nothing settled for him.
+  const alice = settle({ live: [], settled: aliceSettled, closedMonths: new Set(["2026-09"]), months });
+  const gage = settle({ live: [line], settled: [], closedMonths: new Set(["2026-09"]), months });
+  check("R2 September stays exactly as paid for Alice", alice.get("2026-09")!.paidCents === 45000);
+  check("R3 Alice's October shows -$450, on the deal's own row", alice.get("2026-10")!.paidCents === -45000 && alice.get("2026-10")!.lines[0]?.rowKey === "p:pX");
+  check("R4 Gage's October shows +$450 as an adjustment", gage.get("2026-10")!.paidCents === 45000 && gage.get("2026-10")!.lines[0]?.isAdjustment === true);
+  check("R5 across both people the reassignment nets to exactly zero", alice.get("2026-10")!.paidCents + gage.get("2026-10")!.paidCents === 0);
 }
 
 // ── Month settings: "from this month on", markers only on the month edited ─────────────────

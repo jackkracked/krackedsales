@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
 import Stripe from "stripe";
 import { WON_STATUSES } from "@/lib/proposals/status";
+import { closerIdOf } from "@/lib/proposals/credit";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,11 @@ export async function POST(
 
   if (!proposal) {
     return NextResponse.json({ error: "Proposal not found" }, { status: 404 });
+  }
+  // WHO MAY: an admin, whoever created it, or the deal's closer. This route voids Stripe
+  // invoices; it used to accept any logged-in user on any proposal (proposal-roles review B4).
+  if (user.role !== "admin" && proposal.createdBy !== user.id && closerIdOf(proposal) !== user.id) {
+    return NextResponse.json({ error: "Only an admin or the deal's closer can mark it lost" }, { status: 403 });
   }
 
   // Don't allow marking already-lost proposals

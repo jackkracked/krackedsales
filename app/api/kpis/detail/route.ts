@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { proposals, calls, softwareCosts, manualExpenses, users, projectStatuses, teamSalaries } from "@/lib/db/schema";
-import { and, eq, isNotNull, inArray, desc } from "drizzle-orm";
+import { and, eq, isNotNull, inArray, desc, sql } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
 import { stripe, hasStripe } from "@/lib/stripe/client";
 import Stripe from "stripe";
@@ -13,6 +13,7 @@ import { getRepCommissionEvents, getPayoutTiming, commissionDetailRows } from "@
 import { getConfig, getMetricValue } from "@/lib/kpi/engine";
 import { isTakenCall } from "@/lib/calls/taken";
 import { monthlyAmount } from "@/lib/stripe/cycle";
+import { closerSql } from "@/lib/proposals/credit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -236,7 +237,8 @@ async function buildSource(
       const dateField = params.dateField as "sentAt" | "lostAt" | "paidAt" | undefined;
       const baseConds = [];
       if (params.type) baseConds.push(eq(proposals.type, params.type));
-      if (params.scoped && ctx.userId) baseConds.push(eq(proposals.createdBy, ctx.userId));
+      // The deal's CLOSER, the same person the card above this drawer credits.
+      if (params.scoped && ctx.userId) baseConds.push(sql`${closerSql} = ${ctx.userId}`);
 
       if (dateField) {
         // "Sent"/"Lost"/"Paid" are defined by that date field being set (regardless

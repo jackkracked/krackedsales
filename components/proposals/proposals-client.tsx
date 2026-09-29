@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { FileText, Plus, Send, MessageSquare, Eye, Trash2, Archive, X, Check, Loader2, Ban } from "lucide-react";
+import { FileText, Plus, Send, MessageSquare, Eye, Check, Loader2, Ban } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { useUserTimezone } from "@/providers/timezone-provider";
 import { toZonedDate } from "@/lib/utils/timezone";
@@ -15,6 +15,8 @@ import { EngagementCell, type EngagementSummary } from "./engagement";
 import { OpportunityModal } from "@/components/pipeline/opportunity-modal";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 import { WON_STATUSES } from "@/lib/proposals/status";
+import { CreditChip, type ProposalCredit, type TeamMember } from "@/components/proposals/credit-chip";
+import { ProposalBulkBar } from "@/components/proposals/proposal-bulk-bar";
 
 interface Instalment {
   id: string;
@@ -53,6 +55,8 @@ interface Proposal {
   lostBy: string | null;
   createdAt: string;
   instalments: Instalment[];
+  /** Who is credited as closer and setter (lib/proposals/credit.ts). Null if it could not load. */
+  credit: ProposalCredit | null;
 }
 
 // "Active" (retainer running) and "Completed" (term finished) sit next to the states they relate
@@ -147,60 +151,6 @@ function SelectCheckbox({
   );
 }
 
-function BulkDeleteConfirmModal({
-  count,
-  onConfirm,
-  onCancel,
-  isDeleting,
-}: {
-  count: number;
-  onConfirm: () => void;
-  onCancel: () => void;
-  isDeleting: boolean;
-}) {
-  return (
-    <div className="fixed inset-0 z-[100]">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-foreground/40 backdrop-blur-sm animate-fade-in"
-        onClick={onCancel}
-      />
-      {/* Modal */}
-      <div className="absolute top-1/2 left-1/2 animate-scale-in w-full max-w-[380px] bg-card rounded-[12px] border border-border shadow-2xl p-6">
-        <h3
-          className="text-base font-bold text-foreground mb-1.5"
-          style={{ fontFamily: "var(--font-heading)" }}
-        >
-          Delete {count} proposal{count !== 1 ? "s" : ""}?
-        </h3>
-        <p className="text-sm text-muted-foreground mb-5">
-          This cannot be undone. All associated instalments will also be removed.
-        </p>
-        <div className="flex items-center justify-end gap-2.5">
-          <button
-            onClick={onCancel}
-            disabled={isDeleting}
-            className="px-4 py-2 text-sm font-medium text-foreground rounded-[8px] hover:bg-muted transition-colors disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={isDeleting}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-[8px] transition-colors disabled:opacity-70"
-          >
-            {isDeleting ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Trash2 className="w-3.5 h-3.5" />
-            )}
-            {isDeleting ? "Deleting..." : "Delete"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function MarkAsLostModal({
   proposal,
@@ -308,6 +258,7 @@ function MarkAsLostModal({
 export function ProposalsClient() {
   const tz = useUserTimezone();
   const [filter, setFilter] = useState<string>("All");
+  const [creditOnly, setCreditOnly] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [selected, setSelected] = useState<Proposal | null>(null);
   const [selectedSendStep, setSelectedSendStep] = useState<"idle" | "confirm">("idle");
@@ -319,8 +270,6 @@ export function ProposalsClient() {
 
   // Bulk selection
   const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
 
   const toggleBulkSelect = useCallback((id: string) => {
     setBulkSelected((prev) => {
@@ -344,27 +293,7 @@ export function ProposalsClient() {
 
   const clearBulkSelection = useCallback(() => setBulkSelected(new Set()), []);
 
-  async function handleBulkDelete() {
-    if (bulkSelected.size === 0) return;
-    setIsDeleting(true);
-    try {
-      const results = await Promise.allSettled(
-        Array.from(bulkSelected).map((id) =>
-          fetch(`/api/proposals/${id}`, { method: "DELETE" })
-        )
-      );
-      const succeeded = results.filter((r) => r.status === "fulfilled").length;
-      if (succeeded > 0) {
-        queryClient.invalidateQueries({ queryKey: ["proposals"] });
-      }
-      setBulkSelected(new Set());
-      setShowDeleteConfirm(false);
-    } catch {
-      // errors handled per-request via allSettled
-    } finally {
-      setIsDeleting(false);
-    }
-  }
+
 
   async function openOppModal(proposal: Proposal) {
     if (oppLoading) return;
@@ -393,7 +322,7 @@ export function ProposalsClient() {
   }
   const queryClient = useQueryClient();
 
-  const { data, isPending } = useQuery<{ proposals: Proposal[] }>({
+  const { data, isPending } = useQuery<{ proposals: Proposal[]; team?: TeamMember[]; creditError?: string | null }>({
     queryKey: ["proposals"],
     queryFn: () => fetch("/api/proposals").then((r) => r.json()),
     staleTime: 30 * 1000,
@@ -419,14 +348,22 @@ export function ProposalsClient() {
   }
 
   const allProposals = data?.proposals ?? [];
+  const team = data?.team ?? [];
 
-  const filtered = filter === "All"
+  // CREDIT TO CONFIRM: deals that can earn (sent, not archived) whose closer or setter is still
+  // only a suggestion. The admin's backlog, one click away.
+  const needsCredit = (p: Proposal) => !!p.credit && !!p.sentAt && p.status !== "void" &&
+    (p.credit.closer.suggested || p.credit.setter.mode === "suggested");
+  const creditToConfirm = allProposals.filter(needsCredit).length;
+
+  const byStatus = filter === "All"
     ? allProposals.filter((p) => p.status !== "draft" && p.status !== "void" && p.status !== "lost")
     : filter === "Archived"
     ? allProposals.filter((p) => p.status === "void")
     : filter === "Lost"
     ? allProposals.filter((p) => p.status === "lost")
     : allProposals.filter((p) => p.status.toLowerCase() === filter.toLowerCase());
+  const filtered = creditOnly ? allProposals.filter(needsCredit) : byStatus;
 
   // Stats
   const counts = {
@@ -520,12 +457,31 @@ export function ProposalsClient() {
             </button>
             );
           })}
+          {isAdmin && (creditToConfirm > 0 || creditOnly) && (
+            <button
+              type="button"
+              onClick={() => setCreditOnly((v) => !v)}
+              aria-pressed={creditOnly}
+              className={cn(
+                "ml-auto mb-1 flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+                creditOnly ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Credit to confirm
+              <span className="tabular-nums">{creditToConfirm}</span>
+            </button>
+          )}
         </div>
+        {data?.creditError && (
+          <p role="alert" className="-mt-2 text-xs text-destructive">{data.creditError}. Closer and setter show as a dash until it loads.</p>
+        )}
 
         {/* Table — shrink-0 so this flex child keeps its full height. Without it, the
             overflow-hidden here makes the item shrinkable, so flexbox squashes the table to
             fit the viewport and clips the lower rows instead of letting the page scroll. */}
-        <div data-r10n-proposal-table className="shrink-0 bg-card border border-border rounded-[10px] overflow-hidden">
+        {/* Scrolls sideways rather than clipping: Closer and Setter added a column, and a money
+            column cut off at the edge is worse than a scrollbar. */}
+        <div data-r10n-proposal-table className="shrink-0 bg-card border border-border rounded-[10px] overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr data-r10n-proposal-table-head className="border-b border-border group">
@@ -539,7 +495,8 @@ export function ProposalsClient() {
                   )}
                 </th>
                 <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Client</th>
-                <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Rep</th>
+                <th data-r10n-th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Closer</th>
+                <th data-r10n-th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Setter</th>
                 <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Type</th>
                 <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
                 <th data-r10n-th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sent</th>
@@ -615,17 +572,15 @@ export function ProposalsClient() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      {proposal.createdByName ? (
-                        <div className="flex items-center gap-1.5">
-                          <Avatar name={proposal.createdByName} size={20} variant="rep" />
-                          <span className="text-xs text-muted-foreground truncate max-w-[80px]">
-                            {proposal.createdByName.split(" ")[0]}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground/40 text-xs">—</span>
-                      )}
+                    {/* Credit, visible and editable right on the row (Jack, 2026-09-29). The chip
+                        stops the row click, so changing it never opens the proposal. */}
+                    <td className="px-2 py-3">
+                      <CreditChip proposalId={proposal.id} clientName={proposal.contactName} field="closer"
+                        credit={proposal.credit} team={team} isAdmin={isAdmin} paidAt={proposal.paidAt} compact />
+                    </td>
+                    <td className="px-2 py-3">
+                      <CreditChip proposalId={proposal.id} clientName={proposal.contactName} field="setter"
+                        credit={proposal.credit} team={team} isAdmin={isAdmin} paidAt={proposal.paidAt} compact />
                     </td>
                     <td className="px-4 py-3">
                       <TypeBadge type={proposal.type} />
@@ -753,6 +708,7 @@ export function ProposalsClient() {
           onDeleted={() => { setSelected(null); setSelectedSendStep("idle"); }}
           isAdmin={isAdmin}
           initialSendStep={selectedSendStep}
+          team={team}
         />
       )}
 
@@ -764,56 +720,12 @@ export function ProposalsClient() {
         />
       )}
 
-      {/* Floating bulk action bar */}
-      {bulkSelected.size > 0 && (
-        <div data-r10n-proposal-bulkbar className="fixed bottom-6 z-50 animate-slide-up-fade flex items-center gap-2.5 bg-card border border-border rounded-[10px] px-4 py-2.5 shadow-xl" style={{ left: "calc(50% + 6rem)", transform: "translateX(-50%)" }}>
-          <span data-r10n-proposal-bulkbar-count className="text-sm font-semibold text-foreground tabular-nums whitespace-nowrap">
-            {bulkSelected.size} selected
-          </span>
-          <div className="w-px h-5 bg-border" />
-          {isAdmin && (
-            <>
-              <button
-                onClick={async () => {
-                  const ids = [...bulkSelected];
-                  await Promise.allSettled(ids.map(id =>
-                    fetch(`/api/proposals/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "void" }) })
-                  ));
-                  clearBulkSelection();
-                  queryClient.invalidateQueries({ queryKey: ["proposals"] });
-                }}
-                className="flex items-center gap-1.5 border border-border rounded-[7px] px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
-                <Archive className="w-3.5 h-3.5" />
-                Archive
-              </button>
-              <button
-                onClick={() => setShowDeleteConfirm(true)}
-                data-r10n-proposal-bulk-delete
-                className="flex items-center gap-1.5 border border-red-200 bg-red-50 rounded-[7px] px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 transition-colors"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Delete
-              </button>
-            </>
-          )}
-          <button
-            onClick={clearBulkSelection}
-            className="p-1 rounded-[5px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            aria-label="Deselect all"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* Delete confirmation modal */}
-      {showDeleteConfirm && (
-        <BulkDeleteConfirmModal
-          count={bulkSelected.size}
-          onConfirm={handleBulkDelete}
-          onCancel={() => setShowDeleteConfirm(false)}
-          isDeleting={isDeleting}
+      {/* Multi-select actions: the pipeline's bar (components/proposals/proposal-bulk-bar.tsx). */}
+      {bulkSelected.size > 0 && isAdmin && (
+        <ProposalBulkBar
+          selected={allProposals.filter((p) => bulkSelected.has(p.id))}
+          team={team}
+          onClear={clearBulkSelection}
         />
       )}
 

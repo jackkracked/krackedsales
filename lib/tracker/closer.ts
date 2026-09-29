@@ -209,6 +209,19 @@ export async function getCloserMonth(
   }
 
   const inMonth = (d: Date | null) => !!d && d >= start && d < end;
+  // A deal reassigned AWAY after its month closed is no longer "mine", but its clawback line
+  // lands on this sheet. Show that deal too, or the total drops with no row explaining why
+  // (proposal-roles review S1).
+  const touchedIds = new Set(touched.map((p) => p.id));
+  const orphanIds = [...commissionByRow.keys()].map((k) => k.slice(2)).filter((id) => !touchedIds.has(id));
+  if (orphanIds.length) {
+    const extra = await db().select({
+      id: proposals.id, client: proposals.contactName, title: proposals.title, amount: proposals.totalAmount,
+      currency: proposals.currency, sentAt: proposals.sentAt, signedAt: proposals.signedAt,
+      paidAt: proposals.paidAt, lostAt: proposals.lostAt,
+    }).from(proposals).where(inArray(proposals.id, orphanIds));
+    touched.push(...extra);
+  }
   const shown = touched.filter((p) =>
     inMonth(p.sentAt) || inMonth(p.paidAt) || inMonth(p.signedAt) || inMonth(p.lostAt) || commissionByRow.has(`p:${p.id}`));
   shown.sort((a, b) => (a.sentAt?.getTime() ?? 0) - (b.sentAt?.getTime() ?? 0));

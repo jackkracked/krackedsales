@@ -13,6 +13,7 @@ import { eq } from "drizzle-orm";
 import { getTemplate } from "@/lib/reminders/store";
 import { resolveVars } from "@/lib/reminders/variables";
 import { renderEmail } from "@/lib/reminders/render";
+import { routeToCloser } from "@/lib/proposals/credit";
 
 type ProposalRow = typeof proposals.$inferSelect;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://kracked-sales.vercel.app";
@@ -26,9 +27,11 @@ export async function renderTransactional(
     if (!template || !template.enabled) return null;
     if (!template.subject.trim() && !template.bodyTemplate.trim()) return null;
 
+    // The deal's CLOSER names itself to the client (Jack, 2026-09-29), creator if they have left.
     let repName: string | null = null;
-    if (proposal.createdBy) {
-      const [u] = await db().select({ name: users.name }).from(users).where(eq(users.id, proposal.createdBy)).limit(1);
+    const repId = await routeToCloser(proposal);
+    if (repId) {
+      const [u] = await db().select({ name: users.name }).from(users).where(eq(users.id, repId)).limit(1);
       repName = u?.name ?? null;
     }
 

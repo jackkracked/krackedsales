@@ -8,6 +8,7 @@ import { logActivity } from "@/lib/activity/logger";
 import { addPeriod } from "@/lib/proposals/billing";
 import { getTemplateSections } from "@/lib/proposals/templates";
 import { normalizeDeliverables } from "@/lib/proposals/normalize";
+import { getProposalCredits } from "@/lib/proposals/credit";
 
 export const dynamic = "force-dynamic";
 
@@ -78,7 +79,25 @@ export async function GET() {
       })
     );
 
-    return NextResponse.json({ proposals: withInstalments });
+    // WHO IS CREDITED, from the same ledger that pays people (lib/proposals/credit.ts). If it
+    // cannot be computed the list still loads, and says so, rather than showing a guess.
+    let credits: Awaited<ReturnType<typeof getProposalCredits>> | null = null;
+    let creditError: string | null = null;
+    try {
+      credits = await getProposalCredits(rows.map((r) => r.id));
+    } catch (err) {
+      console.error("[GET /api/proposals] credit", err);
+      creditError = "Could not work out who is credited right now";
+    }
+    const team = await db()
+      .select({ id: users.id, name: users.name, role: users.role, isActive: users.isActive })
+      .from(users);
+
+    return NextResponse.json({
+      proposals: withInstalments.map((p) => ({ ...p, credit: credits?.get(p.id) ?? null })),
+      team,
+      creditError,
+    });
   } catch (err) {
     console.error("[GET /api/proposals]", err);
     return NextResponse.json({ error: "Failed to fetch proposals" }, { status: 500 });

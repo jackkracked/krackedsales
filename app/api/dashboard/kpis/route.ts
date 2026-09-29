@@ -5,7 +5,7 @@ import {
   calls, softwareCosts, proposals, proposalInstalments,
   repTargets, users, commissionSettings,
 } from "@/lib/db/schema";
-import { and, eq, gte, lt, count, isNotNull } from "drizzle-orm";
+import { and, eq, gte, lt, count, isNotNull, sql } from "drizzle-orm";
 import { ghl, locationId } from "@/lib/ghl/client";
 import type { GHLOpportunity } from "@/lib/ghl/types";
 import {
@@ -22,6 +22,7 @@ import { loadMetaAdSpend, type MetaAdSpend } from "@/lib/kpi/meta-series";
 import { readSnapshotSeries } from "@/lib/kpi/snapshots";
 import { readLastGood, writeLastGood } from "@/lib/kpi/last-good";
 import { isTakenCall } from "@/lib/calls/taken";
+import { closerSql } from "@/lib/proposals/credit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -169,7 +170,7 @@ export async function GET(req: NextRequest) {
       ? db().select({ sentAt: proposals.sentAt }).from(proposals).where(and(eq(proposals.status, "sent"), isNotNull(proposals.sentAt), gte(proposals.sentAt, prevStart), lt(proposals.sentAt, end)))
       : Promise.resolve([] as { sentAt: Date | null }[]),
     needsProposalsRep && userId
-      ? db().select({ sentAt: proposals.sentAt }).from(proposals).where(and(eq(proposals.status, "sent"), eq(proposals.createdBy, userId), isNotNull(proposals.sentAt), gte(proposals.sentAt, prevStart), lt(proposals.sentAt, end)))
+      ? db().select({ sentAt: proposals.sentAt }).from(proposals).where(and(eq(proposals.status, "sent"), sql`${closerSql} = ${userId}`, isNotNull(proposals.sentAt), gte(proposals.sentAt, prevStart), lt(proposals.sentAt, end)))
       : Promise.resolve([] as { sentAt: Date | null }[]),
     needsRepTargets && userId
       ? db().select().from(repTargets).where(eq(repTargets.userId, userId)).limit(1)
@@ -184,7 +185,7 @@ export async function GET(req: NextRequest) {
     needsRepPaidProposals && userId
       ? db().select({ totalAmount: proposals.totalAmount, paidAt: proposals.paidAt })
           .from(proposals)
-          .where(and(eq(proposals.createdBy, userId), isNotNull(proposals.paidAt), gte(proposals.paidAt, prevStart), lt(proposals.paidAt, end)))
+          .where(and(sql`${closerSql} = ${userId}`, isNotNull(proposals.paidAt), gte(proposals.paidAt, prevStart), lt(proposals.paidAt, end)))
       : Promise.resolve([] as { totalAmount: number; paidAt: Date | null }[]),
   ]);
 

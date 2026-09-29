@@ -58,6 +58,9 @@ export interface ProposalFact {
   signedAt: Date | null;
   paidAt: Date | null;
   lostAt: Date | null;
+  /** Set on the proposal by an admin (0065). NULL = let the booking rule decide, as always. */
+  setterMode?: "assigned" | "none" | null;
+  setterUserId?: string | null;
 }
 
 /** A commission event at 100%, i.e. `commission` is the base amount the rate applies to. */
@@ -90,13 +93,14 @@ export interface SetterFacts {
 
 // ── Output ────────────────────────────────────────────────────────────────────────────────────
 
-export type Outcome = "upcoming" | "awaiting" | "held" | "no_show" | "cancelled" | "moved";
+export type Outcome = "upcoming" | "awaiting" | "held" | "no_show" | "cancelled" | "moved" | "not_applicable";
 
 export type CreditState = "credited" | "suggested" | "clash";
-export type CreditSource = "link" | "in_app" | "ghl_manual" | "owner" | "manual";
+export type CreditSource = "link" | "in_app" | "ghl_manual" | "owner" | "manual" | "assigned";
 
 /** What happened to this row's $25, in words the screen can print. */
 export type BonusState =
+  | "deal_only"        // a deal an admin assigned to this setter: commission, no booking bonus
   | "paid"             // held, credited
   | "pending"          // upcoming / awaiting outcome / credit not confirmed / clash
   | "cancelled"        // −bonus
@@ -156,7 +160,19 @@ export interface SetterRow {
   notes: string | null;
 }
 
-export interface SetterLedger { rows: SetterRow[]; entries: MoneyEntry[] }
+/** Who the booking rule (or an admin) credits as setter on each proposal. The proposals screen
+ *  reads THIS, so the chip on a deal and the setter's pay are the same computation (review S5). */
+export interface ProposalSetter {
+  mode: "assigned" | "none" | "suggested";
+  /** Assigned: the one setter. Suggested: every setter the booking credits (2+ = a clash). */
+  setterIds: string[];
+  /** Suggested only: is that booking's credit settled (credited) or still awaiting a person? */
+  state: "credited" | "suggested" | "clash" | null;
+  /** Suggested only: when the booking behind it was made. */
+  bookedAt: Date | null;
+}
+
+export interface SetterLedger { rows: SetterRow[]; entries: MoneyEntry[]; proposalSetters: Map<string, ProposalSetter> }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────────────────────
 
@@ -507,6 +523,9 @@ export function buildSetterLedger(f: SetterFacts): SetterLedger {
   const proposalBooking = new Map<string, Booking>();
   for (const p of f.proposals) {
     if (!p.sentAt) continue;
+    // An admin's assignment (or "no setter") replaces the booking rule for this deal entirely,
+    // so the booked setter's line moves cleanly rather than both being paid.
+    if (p.setterMode === "assigned" || p.setterMode === "none") continue;
     const candidates = bookings.filter((b) =>
       b.contactId === p.contactId &&
       (b.active.size > 0 || b.suggested) &&
@@ -519,7 +538,27 @@ export function buildSetterLedger(f: SetterFacts): SetterLedger {
   // that month carries the typed amount and the rest carry zero. Applied per event, two
   // proposals (or two instalments) on one row in one month would each pay the typed figure.
   const overriddenRowMonth = new Set<string>();
+  const proposalsById = new Map(f.proposals.map((p) => [p.id, p]));
   for (const e of [...f.commissionEvents].sort((a, b) => a.date.getTime() - b.date.getTime() || a.proposalId.localeCompare(b.proposalId))) {
+    // ASSIGNED BY AN ADMIN: paid on a row keyed by the PROPOSAL, not a booking. Without it an
+    // assigned setter who did not book the call had nowhere for the money to land (review B1).
+    const prop = proposalsById.get(e.proposalId);
+    if (prop?.setterMode === "none") continue;
+    if (prop?.setterMode === "assigned") {
+      if (prop.setterUserId !== f.setterId) continue;
+      const month = nyMonth(e.date);
+      if (month < TRACKER_GO_LIVE_MONTH) continue;
+      const rowKey = `p:${prop.id}`;
+      const o = ov(rowKey, `commission@${month}`);
+      let cents = Math.round(e.baseAmount * f.commissionPctFor(month));
+      if (o && typeof o.value === "number") {
+        const rm = `${rowKey}|${month}`;
+        cents = overriddenRowMonth.has(rm) ? 0 : Math.round(o.value);
+        overriddenRowMonth.add(rm);
+      }
+      entries.push({ key: `commission:${e.proposalId}:${e.date.toISOString()}`, rowKey, month, kind: "commission", cents, status: "paid", label: e.sublabel ?? "Commission" });
+      continue;
+    }
     const b = proposalBooking.get(e.proposalId);
     if (!b) continue;
     const mine = b.active.has(f.setterId) || b.suggested === f.setterId;
@@ -602,5 +641,41 @@ export function buildSetterLedger(f: SetterFacts): SetterLedger {
     });
   }
 
-  return { rows, entries: entries.filter((e) => rows.some((r) => r.rowKey === e.rowKey)) };
+  // Deals an admin assigned to this setter: one row per deal, so the commission is traceable.
+  for (const p of f.proposals) {
+    if (p.setterMode !== "assigned" || p.setterUserId !== f.setterId) continue;
+    const rowKey = `p:${p.id}`;
+    const hasMoney = entries.some((e) => e.rowKey === rowKey);
+    const anchor = p.paidAt ?? p.sentAt;
+    if (!hasMoney && !anchor) continue;
+    const contact = contactsById.get(p.contactId);
+    const notesOv = ov(rowKey, "notes");
+    rows.push({
+      rowKey, appointmentId: null, manualRowId: null, contactId: p.contactId,
+      company: contact?.company ?? p.title, contactName: contact?.name ?? null, calendarName: null,
+      bookedAt: null, callAt: anchor ?? f.now, month: nyMonth(anchor ?? f.now),
+      credit: { state: "credited", source: "assigned", clashWith: [], clashWithIds: [], bookedByName: null },
+      outcome: "not_applicable", evidence: null, bonusState: "deal_only", bonusAtStake: 0,
+      restoredIn: null, rebookOf: null, closerName: null,
+      proposal: { id: p.id, title: p.title, amount: p.totalAmount, sentAt: p.sentAt, paidAt: p.paidAt, state: proposalState(p, f.now) },
+      overridden: {}, notes: typeof notesOv?.value === "string" ? notesOv.value : null,
+    });
+  }
+
+  // The per-proposal answer, for every proposal, whoever this sheet belongs to.
+  const proposalSetters = new Map<string, ProposalSetter>();
+  for (const p of f.proposals) {
+    if (p.setterMode === "assigned") { proposalSetters.set(p.id, { mode: "assigned", setterIds: p.setterUserId ? [p.setterUserId] : [], state: null, bookedAt: null }); continue; }
+    if (p.setterMode === "none") { proposalSetters.set(p.id, { mode: "none", setterIds: [], state: null, bookedAt: null }); continue; }
+    const b = proposalBooking.get(p.id);
+    if (!b) { proposalSetters.set(p.id, { mode: "suggested", setterIds: [], state: null, bookedAt: null }); continue; }
+    const ids = [...new Set([...b.active, ...(b.suggested ? [b.suggested] : [])])];
+    proposalSetters.set(p.id, {
+      mode: "suggested", setterIds: ids,
+      state: b.active.size > 1 ? "clash" : b.suggested && b.active.size === 0 ? "suggested" : "credited",
+      bookedAt: b.bookedAt ?? b.callAt,
+    });
+  }
+
+  return { rows, entries: entries.filter((e) => rows.some((r) => r.rowKey === e.rowKey)), proposalSetters };
 }

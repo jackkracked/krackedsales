@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import {
   users, weeklySummaries, calls, proposals, repTargets,
 } from "@/lib/db/schema";
-import { and, eq, gte, lte, count, isNotNull, isNull, sum } from "drizzle-orm";
+import { and, eq, gte, lte, count, isNotNull, isNull, sum, sql } from "drizzle-orm";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import {
   startOfWeek, format, subDays,
@@ -11,6 +11,7 @@ import {
 import { locationId } from "@/lib/ghl/client";
 import { fetchAllOpportunities } from "@/lib/ghl/paginate";
 import type { GHLOpportunity } from "@/lib/ghl/types";
+import { closerSql } from "@/lib/proposals/credit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -100,7 +101,8 @@ export async function POST(req: NextRequest) {
 
   // Proposals sent but not yet paid — awaiting a response (chase these).
   const awaitingProposals = await db()
-    .select({ id: proposals.id, contactName: proposals.contactName, totalAmount: proposals.totalAmount, createdBy: proposals.createdBy, sentAt: proposals.sentAt })
+    // `createdBy` here carries the deal's CLOSER, so "awaiting reply" lands with whoever owns it.
+    .select({ id: proposals.id, contactName: proposals.contactName, totalAmount: proposals.totalAmount, createdBy: closerSql.mapWith(String), sentAt: proposals.sentAt })
     .from(proposals)
     .where(and(isNotNull(proposals.sentAt), isNull(proposals.paidAt)));
 
@@ -124,12 +126,12 @@ export async function POST(req: NextRequest) {
       const [userProps] = await db()
         .select({ c: count() })
         .from(proposals)
-        .where(and(eq(proposals.createdBy, user.id), isNotNull(proposals.sentAt), gte(proposals.sentAt, weekStart), lte(proposals.sentAt, weekEnd)));
+        .where(and(sql`${closerSql} = ${user.id}`, isNotNull(proposals.sentAt), gte(proposals.sentAt, weekStart), lte(proposals.sentAt, weekEnd)));
 
       const [userDeals] = await db()
         .select({ c: count(), s: sum(proposals.totalAmount) })
         .from(proposals)
-        .where(and(eq(proposals.createdBy, user.id), isNotNull(proposals.paidAt), gte(proposals.paidAt, weekStart), lte(proposals.paidAt, weekEnd)));
+        .where(and(sql`${closerSql} = ${user.id}`, isNotNull(proposals.paidAt), gte(proposals.paidAt, weekStart), lte(proposals.paidAt, weekEnd)));
 
       // ── This person's actionable items (the priority list) ──────────────────
       const myOpenOpps = user.ghlUserId
