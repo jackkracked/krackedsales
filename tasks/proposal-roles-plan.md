@@ -1,6 +1,6 @@
 # Closer and setter on every proposal
 
-Created 2026-09-29. Owner: Jack. Status: REQUIREMENTS CONFIRMED, shape next. No code yet.
+Created 2026-09-29. Owner: Jack. Status: BUILT on feat/proposal-credit (093195d, 700539d), reviewed x4, migration 0065 applied, NOT deployed.
 
 Jack, 2026-09-29: "within each proposal, assign a setter and a closer ... so we can count up the
 commissions and all of the metrics to do with the proposals far more accurately ... admin should
