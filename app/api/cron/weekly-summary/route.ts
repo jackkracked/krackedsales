@@ -101,8 +101,15 @@ export async function POST(req: NextRequest) {
 
   // Proposals sent but not yet paid — awaiting a response (chase these).
   const awaitingProposals = await db()
-    // `createdBy` here carries the deal's CLOSER, so "awaiting reply" lands with whoever owns it.
-    .select({ id: proposals.id, contactName: proposals.contactName, totalAmount: proposals.totalAmount, createdBy: closerSql.mapWith(String), sentAt: proposals.sentAt })
+    // `createdBy` here carries who should CHASE it: the deal's closer, or its creator if the
+    // closer has left (so a departed closer's deals still land with someone).
+    .select({
+      id: proposals.id, contactName: proposals.contactName, totalAmount: proposals.totalAmount,
+      createdBy: sql<string>`case when ${proposals.closedBy} is not null and ${proposals.closedBy} <> ${proposals.createdBy}
+        and exists (select 1 from users u where u.id = ${proposals.closedBy} and not u.is_active)
+        then ${proposals.createdBy} else ${closerSql} end`.mapWith(String),
+      sentAt: proposals.sentAt,
+    })
     .from(proposals)
     .where(and(isNotNull(proposals.sentAt), isNull(proposals.paidAt)));
 

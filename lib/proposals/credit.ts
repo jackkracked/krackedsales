@@ -1,6 +1,6 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { proposalCreditChanges, proposals, users } from "@/lib/db/schema";
+import { proposalCreditChanges, proposals, trackerOverrides, users } from "@/lib/db/schema";
 import { acquireJobLock, releaseJobLock } from "@/lib/jobs/lock";
 import { loadSetterFacts } from "@/lib/tracker/facts";
 import { buildSetterLedger, type ProposalSetter } from "@/lib/tracker/setter-rules";
@@ -42,6 +42,8 @@ export interface CreditView {
     /** Suggested only. "credited" = the booking is proven; "suggested" = still a guess; "clash". */
     state: "credited" | "suggested" | "clash" | null;
     bookedAt: Date | null;
+    /** Suggested only: the booking row the setter's commission sits on today. */
+    bookingRowKey: string | null;
     confirmedBy: string | null;
     confirmedAt: Date | null;
   };
@@ -49,6 +51,8 @@ export interface CreditView {
 
 /** Credit for many proposals at once. The setter answer comes from the SAME ledger that pays. */
 export async function getProposalCredits(ids?: string[]): Promise<Map<string, CreditView>> {
+  // An empty list means "none", never "everything" (security review L4).
+  if (ids && ids.length === 0) return new Map();
   const rows = await db()
     .select({
       id: proposals.id, createdBy: proposals.createdBy, closedBy: proposals.closedBy,
@@ -80,6 +84,7 @@ export async function getProposalCredits(ids?: string[]): Promise<Map<string, Cr
         userIds: mode === "assigned" ? (r.setterUserId ? [r.setterUserId] : []) : mode === "none" ? [] : ps?.setterIds ?? [],
         state: mode === "suggested" ? ps?.state ?? null : null,
         bookedAt: mode === "suggested" ? ps?.bookedAt ?? null : null,
+        bookingRowKey: mode === "suggested" ? ps?.bookingRowKey ?? null : null,
         confirmedBy: r.setterConfirmedBy, confirmedAt: r.setterConfirmedAt,
       },
     });
@@ -127,8 +132,11 @@ export async function setCredit(
   change: CreditChange,
 ): Promise<CreditResult[]> {
   if (actor.role !== "admin") throw new CreditError(403, "Only an admin can change who is credited");
+  if (items.length > 500) throw new CreditError(400, "Up to 500 proposals at a time");
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (change.action === "assign" && !UUID_RE.test(change.userId)) throw new CreditError(400, "Unknown person");
   const expectedFor = new Map(items.map((i) => [i.proposalId, i]));
-  const ids = [...new Set(items.map((i) => i.proposalId))].filter((id) => /^[0-9a-f-]{36}$/i.test(id));
+  const ids = [...new Set(items.map((i) => i.proposalId))].filter((id) => UUID_RE.test(id));
   if (ids.length === 0) throw new CreditError(400, "Pick at least one proposal");
   if (ids.length > 500) throw new CreditError(400, "Up to 500 proposals at a time");
 
@@ -145,10 +153,25 @@ export async function setCredit(
   }
 
   if (!(await acquireJobLock(PAY_LEDGER_LOCK, 120))) {
-    throw new CreditError(409, "Pay for a month is being closed right now. Try again in a minute.");
+    throw new CreditError(409, "Pay is being updated right now (a month close or another credit change). Try again in a moment.");
   }
   try {
     const current = await getProposalCredits(ids);
+    const roleOf = new Map((await db().select({ id: users.id, role: users.role }).from(users)).map((u) => [u.id, u.role]));
+
+    // HAND-TYPED COMMISSION CORRECTIONS (correctness review B2). They are keyed on a person and a
+    // row. Moving credit to another person, or moving a setter's pay from the booking row to the
+    // deal row, would otherwise drop them silently and change someone's pay. So: the same person
+    // keeps them (copied to the deal row); a different person means the admin must clear them first.
+    const ovRows = await db().select().from(trackerOverrides).where(sql`${trackerOverrides.field} like 'commission@%'`);
+    const latestOv = new Map<string, (typeof ovRows)[number]>();
+    for (const o of ovRows) {
+      const k = `${o.subjectUserId}|${o.rowKey}|${o.field}`;
+      const prev = latestOv.get(k);
+      if (!prev || o.editedAt > prev.editedAt) latestOv.set(k, o);
+    }
+    const activeCorrections = (subject: string | null, rowKey: string | null) =>
+      !subject || !rowKey ? [] : [...latestOv.values()].filter((o) => o.subjectUserId === subject && o.rowKey === rowKey && o.value !== null);
     const now = new Date();
     const results: CreditResult[] = [];
     const statements = [];
@@ -167,6 +190,19 @@ export async function setCredit(
         const to = change.action === "assign" ? change.userId : c.closer.userId;
         if (!to) { results.push({ proposalId: id, ok: false, reason: "No closer to confirm" }); continue; }
         if (change.action === "confirm" && !c.closer.suggested) { results.push({ proposalId: id, ok: true }); continue; }
+        if (to !== c.closer.userId && activeCorrections(c.closer.userId, `p:${id}`).length) {
+          results.push({ proposalId: id, ok: false, reason: "The current closer has a hand-typed commission correction on this deal: clear it on their Pay Tracker first" });
+          continue;
+        }
+        // Confirming locks the creator in as closer, so they must hold a closer role too, or the
+        // deal is paid on a sheet month close never computes for them (review L1, B2).
+        if (change.action === "confirm") {
+          const role = roleOf.get(to);
+          if (!role || !(CLOSER_ROLES as readonly string[]).includes(role)) {
+            results.push({ proposalId: id, ok: false, reason: "Its creator is not a closer: pick the closer" });
+            continue;
+          }
+        }
         statements.push(
           database.update(proposals).set({ closedBy: to, closerConfirmedBy: actor.id, closerConfirmedAt: now }).where(eq(proposals.id, id)),
           database.insert(proposalCreditChanges).values({
@@ -197,6 +233,21 @@ export async function setCredit(
         }
         toMode = c.setter.userIds.length ? "assigned" : "none";
         toUser = c.setter.userIds[0] ?? null;
+      }
+      const fromSetter = c.setter.userIds.length === 1 ? c.setter.userIds[0] : null;
+      const fromRow = c.setter.mode === "assigned" ? `p:${id}` : c.setter.bookingRowKey;
+      const corrections = activeCorrections(fromSetter, fromRow);
+      if (corrections.length && toUser !== fromSetter) {
+        results.push({ proposalId: id, ok: false, reason: "The current setter has a hand-typed commission correction on this deal: clear it on their Pay Tracker first" });
+        continue;
+      }
+      // Same setter, pay moving from the booking row to the deal row: carry the corrections over.
+      if (corrections.length && toUser === fromSetter && fromRow !== `p:${id}`) {
+        for (const o of corrections) {
+          statements.push(database.insert(trackerOverrides).values({
+            subjectUserId: o.subjectUserId, rowKey: `p:${id}`, field: o.field, value: o.value as never, editedBy: actor.id, editedAt: now,
+          }));
+        }
       }
       statements.push(
         database.update(proposals).set({

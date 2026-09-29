@@ -48,6 +48,9 @@ export async function POST(
   }
   // WHO MAY: an admin, whoever created it, or the deal's closer. This route voids Stripe
   // invoices; it used to accept any logged-in user on any proposal (proposal-roles review B4).
+  if (!user.isActive) {
+    return NextResponse.json({ error: "Account is deactivated" }, { status: 403 });
+  }
   if (user.role !== "admin" && proposal.createdBy !== user.id && closerIdOf(proposal) !== user.id) {
     return NextResponse.json({ error: "Only an admin or the deal's closer can mark it lost" }, { status: 403 });
   }

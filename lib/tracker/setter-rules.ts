@@ -170,6 +170,8 @@ export interface ProposalSetter {
   state: "credited" | "suggested" | "clash" | null;
   /** Suggested only: when the booking behind it was made. */
   bookedAt: Date | null;
+  /** Suggested only: the booking row the commission sits on today (overrides are keyed on it). */
+  bookingRowKey?: string | null;
 }
 
 export interface SetterLedger { rows: SetterRow[]; entries: MoneyEntry[]; proposalSetters: Map<string, ProposalSetter> }
@@ -674,6 +676,7 @@ export function buildSetterLedger(f: SetterFacts): SetterLedger {
       mode: "suggested", setterIds: ids,
       state: b.active.size > 1 ? "clash" : b.suggested && b.active.size === 0 ? "suggested" : "credited",
       bookedAt: b.bookedAt ?? b.callAt,
+      bookingRowKey: b.rowKey,
     });
   }
 

@@ -3,7 +3,7 @@ import { loadSetterFacts } from "@/lib/tracker/facts";
 import { loadCloses, loadSettled } from "@/lib/tracker/ledger-store";
 import { resolveSettings } from "@/lib/tracker/settings";
 import { settle, type LiveLine, type MonthLine } from "@/lib/tracker/settlement";
-import { currentNyMonth, monthsBetween, TRACKER_GO_LIVE_MONTH } from "@/lib/tracker/months";
+import { currentNyMonth, monthsBetween, nyMonth, TRACKER_GO_LIVE_MONTH } from "@/lib/tracker/months";
 
 /**
  * One setter's month, shaped for the screen. Every figure on it is a sum of lines the screen also
@@ -137,6 +137,29 @@ export async function getSetterMonth(setterId: string, month: string, now: Date 
       isRestoration: lines.some((l) => l.key.startsWith("restore:") && !l.isAdjustment),
     };
   });
+  // A deal reassigned AWAY after its month closed has no row on this sheet any more, but its
+  // clawback line lands here. Show the deal, or the total drops with no row explaining why
+  // (correctness review S2, the setter-side twin of the closer sheet fix).
+  const shownKeys = new Set(rows.map((r) => r.rowKey));
+  for (const [rowKey, lines] of linesByRow) {
+    if (shownKeys.has(rowKey) || !rowKey.startsWith("p:")) continue;
+    const p = facts.proposals.find((x) => x.id === rowKey.slice(2));
+    if (!p) continue;
+    const sum = (kind: string, field: "payableCents" | "pendingCents") => lines.filter((l) => l.kind === kind).reduce((t, l) => t + l[field], 0);
+    rows.push({
+      rowKey, appointmentId: null, manualRowId: null, contactId: p.contactId,
+      company: p.title, contactName: null, calendarName: null,
+      bookedAt: null, callAt: (p.paidAt ?? p.sentAt ?? new Date()).toISOString(), month: nyMonth(p.paidAt ?? p.sentAt ?? new Date()),
+      credit: { state: "credited", source: "assigned", clashWith: [], clashWithIds: [], bookedByName: null },
+      outcome: "not_applicable", evidence: null, bonusState: "deal_only", bonusAtStake: 0,
+      restoredIn: null, rebookOf: null, closerName: null,
+      proposal: { id: p.id, title: p.title, amount: p.totalAmount, sentAt: p.sentAt?.toISOString() ?? null, paidAt: p.paidAt?.toISOString() ?? null, state: "Reassigned" },
+      overridden: {}, notes: "Credit moved to another setter after this month closed",
+      bonusPayableCents: 0, bonusPendingCents: 0,
+      commissionPayableCents: sum("commission", "payableCents"), commissionPendingCents: sum("commission", "pendingCents"),
+      isAdjustment: true, isRestoration: false,
+    });
+  }
   rows.sort((a, b) => a.callAt.localeCompare(b.callAt));
 
   // The working. Every count is over rows whose CALL is in this month; restorations are the

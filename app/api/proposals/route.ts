@@ -89,9 +89,13 @@ export async function GET() {
       console.error("[GET /api/proposals] credit", err);
       creditError = "Could not work out who is credited right now";
     }
-    const team = await db()
+    // Names for the credit chips go to everyone; roles and who is active only to admins, who
+    // need them for the pickers (security review L4).
+    const viewer = await getSessionUser().catch(() => null);
+    const people = await db()
       .select({ id: users.id, name: users.name, role: users.role, isActive: users.isActive })
       .from(users);
+    const team = viewer?.role === "admin" ? people : people.map((u) => ({ id: u.id, name: u.name, role: "", isActive: true }));
 
     return NextResponse.json({
       proposals: withInstalments.map((p) => ({ ...p, credit: credits?.get(p.id) ?? null })),

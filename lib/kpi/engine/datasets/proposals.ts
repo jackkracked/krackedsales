@@ -147,7 +147,15 @@ export const proposalsDataset: DatasetDef = {
       const scoped = rows.filter((r) => (repId ? r.closerId === repId : true));
 
       // The setter comes from the Pay Tracker's ledger, so a KPI and a payslip cannot disagree.
-      const credits = await getProposalCredits(scoped.map((r) => r.id));
+      // Same definition as the leaderboard's "Set" (lib/proposals/credit.ts dealsSetBy): an admin's
+      // assignment or a proven booking; never an unconfirmed guess (correctness review S3). If it
+      // cannot be computed, Setter is blank rather than the whole dataset failing.
+      let credits: Awaited<ReturnType<typeof getProposalCredits>> = new Map();
+      try {
+        credits = await getProposalCredits(scoped.map((r) => r.id));
+      } catch (e) {
+        console.error("[kpi/datasets/proposals] setter credit failed:", e);
+      }
 
       return scoped
         .map((r) => ({
@@ -159,7 +167,11 @@ export const proposalsDataset: DatasetDef = {
           totalAmount: r.totalAmount, // already dollars
           createdBy: r.createdBy ?? "",
           closerId: r.closerId ?? "",
-          setterId: (() => { const c = credits.get(r.id)?.setter; return c && c.userIds.length === 1 ? c.userIds[0] : ""; })(),
+          setterId: (() => {
+            const c = credits.get(r.id)?.setter;
+            if (!c || c.userIds.length !== 1) return "";
+            return c.mode === "assigned" || (c.mode === "suggested" && c.state === "credited") ? c.userIds[0] : "";
+          })(),
           autoRenew: r.autoRenew,
           sentAt: toMs(r.sentAt),
           paidAt: toMs(r.paidAt),

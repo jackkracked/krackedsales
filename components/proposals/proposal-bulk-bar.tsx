@@ -57,11 +57,13 @@ function summarise(verb: string, results: Array<{ ok: boolean; reason?: string; 
 }
 
 export function ProposalBulkBar({
-  selected, team, onClear,
+  selected, team, onClear, isAdmin = true,
 }: {
   selected: BulkProposal[];
   team: TeamMember[];
   onClear: () => void;
+  /** Reps get the count, Export and Clear; every action that changes anything is admin-only. */
+  isAdmin?: boolean;
 }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
@@ -100,9 +102,16 @@ export function ProposalBulkBar({
   }
 
   async function confirmAll() {
+    // Bulk confirm only signs off what is PROVEN: suggested closers, and setters whose booking is
+    // credited. A deal with no booking is never turned into a permanent "no setter", and an owner
+    // guess never becomes pay, without a person looking at that one deal (correctness review S1).
     const needCloser = selected.filter((p) => p.credit?.closer.suggested);
-    const needSetter = selected.filter((p) => p.credit?.setter.mode === "suggested");
-    if (needCloser.length === 0 && needSetter.length === 0) { toast("Everything selected is already confirmed"); return; }
+    const needSetter = selected.filter((p) => p.credit?.setter.mode === "suggested" && p.credit.setter.state === "credited");
+    const leftForReview = selected.filter((p) => p.credit?.setter.mode === "suggested" && p.credit.setter.state !== "credited").length;
+    if (needCloser.length === 0 && needSetter.length === 0) {
+      toast(leftForReview ? `Nothing to confirm in bulk. ${leftForReview} setter ${leftForReview === 1 ? "needs" : "need"} a decision one at a time.` : "Everything selected is already confirmed");
+      return;
+    }
     setBusy("confirm");
     try {
       const results: Array<{ ok: boolean; reason?: string; name?: string }> = [];
@@ -120,6 +129,7 @@ export function ProposalBulkBar({
         for (const r of json.results ?? []) results.push({ ...r, name: byId.get(r.proposalId)?.contactName });
       }
       summarise("confirmed", results);
+      if (leftForReview) toast(`${leftForReview} setter ${leftForReview === 1 ? "was" : "were"} left for you: no proven booking. Open the chip to decide.`, { duration: 9000 });
       await refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not save");
@@ -225,6 +235,7 @@ export function ProposalBulkBar({
       >
         <span data-r10n-selectionbar-count className="whitespace-nowrap text-sm font-medium tabular-nums text-foreground">{selected.length} selected</span>
         {divider}
+        {isAdmin && <>
         {personMenu("closer", <UserCheck className="size-3.5" aria-hidden />, "Set closer")}
         {personMenu("setter", <UserPlus className="size-3.5" aria-hidden />, "Set setter")}
         <button type="button" className={action} disabled={!!busy} onClick={confirmAll}>{spin("confirm", <BadgeCheck className="size-3.5" aria-hidden />)} Confirm credit</button>
@@ -233,8 +244,9 @@ export function ProposalBulkBar({
         {anyArchived
           ? <button type="button" className={action} disabled={!!busy} onClick={() => bulk("unarchive", "restored")}>{spin("unarchive", <ArchiveRestore className="size-3.5" aria-hidden />)} Unarchive</button>
           : <button type="button" className={action} disabled={!!busy} onClick={() => bulk("archive", "archived")}>{spin("archive", <Archive className="size-3.5" aria-hidden />)} Archive</button>}
+        </>}
         <button type="button" className={action} disabled={!!busy} onClick={exportCsv}><Download className="size-3.5" aria-hidden /> Export CSV</button>
-        <button type="button" className={cn(action, "text-destructive hover:text-destructive/80")} disabled={!!busy} onClick={() => setDeleteOpen(true)}>{spin("delete", <Trash2 className="size-3.5" aria-hidden />)} Delete</button>
+        {isAdmin && <button type="button" className={cn(action, "text-destructive hover:text-destructive/80")} disabled={!!busy} onClick={() => setDeleteOpen(true)}>{spin("delete", <Trash2 className="size-3.5" aria-hidden />)} Delete</button>}
         {divider}
         <button type="button" onClick={onClear} aria-label="Clear selection" className="flex items-center gap-1 whitespace-nowrap text-xs text-muted-foreground transition-colors hover:text-foreground">
           <X className="size-3.5" aria-hidden /> Clear

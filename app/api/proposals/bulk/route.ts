@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   if (!ACTIONS.includes(body.action as BulkAction)) return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   if (!Array.isArray(body.ids)) return NextResponse.json({ error: "ids must be a list" }, { status: 400 });
   try {
-    const results = await runBulk({ id: user.id, name: user.name, role: user.role }, body.action as BulkAction,
+    const results = await runBulk({ id: user.id, name: user.name, email: user.email, role: user.role }, body.action as BulkAction,
       body.ids.filter((x): x is string => typeof x === "string"), typeof body.reason === "string" ? body.reason : undefined);
     return NextResponse.json({ results });
   } catch (err) {

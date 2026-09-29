@@ -431,12 +431,12 @@ export function ProposalsClient() {
             return (
             <button
               key={f}
-              onClick={() => setFilter(f)}
+              onClick={() => { setFilter(f); setCreditOnly(false); }}
               data-r10n-proposal-tab
-              data-active={filter === f}
+              data-active={filter === f && !creditOnly}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors -mb-px border-b-2",
-                filter === f
+                filter === f && !creditOnly
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               )}
@@ -721,11 +721,12 @@ export function ProposalsClient() {
       )}
 
       {/* Multi-select actions: the pipeline's bar (components/proposals/proposal-bulk-bar.tsx). */}
-      {bulkSelected.size > 0 && isAdmin && (
+      {bulkSelected.size > 0 && (
         <ProposalBulkBar
           selected={allProposals.filter((p) => bulkSelected.has(p.id))}
           team={team}
           onClear={clearBulkSelection}
+          isAdmin={isAdmin}
         />
       )}
 

@@ -8,7 +8,7 @@ import {
 import { editMonthSetting, type SettingsField } from "@/lib/tracker/settings";
 import { loadCloses } from "@/lib/tracker/ledger-store";
 import { linesToSettle, type MonthView } from "@/lib/tracker/settlement";
-import { acquireJobLock, releaseJobLock } from "@/lib/jobs/lock";
+import { acquireJobLock, readJobState, releaseJobLock } from "@/lib/jobs/lock";
 import { PAY_LEDGER_LOCK } from "@/lib/proposals/credit";
 import { computeSetter } from "@/lib/tracker/setter";
 import { getCloserMonth } from "@/lib/tracker/closer";
@@ -49,9 +49,22 @@ async function mustBeOpenMonth(month: string) {
   if (closes.has(month)) throw new TrackerError(409, `${month} is closed. Corrections go in the current month.`);
 }
 
+/**
+ * Refuse a pay-changing write while pay is being frozen or credit is moving (security review M4).
+ * The pay-ledger lock is held for seconds, by month close and by proposal credit changes; a claim
+ * or outcome landing between two people's sheets being read could otherwise settle one call twice.
+ */
+async function assertPayNotLocked() {
+  const state = await readJobState(PAY_LEDGER_LOCK);
+  if (state?.lockedUntil && new Date(state.lockedUntil).getTime() > Date.now()) {
+    throw new TrackerError(409, "Pay is being updated right now. Try again in a moment.");
+  }
+}
+
 // ── Did the call happen ───────────────────────────────────────────────────────────────────────
 
 export async function recordOutcome(actor: Actor, input: { rowRef: string; outcome: "held" | "no_show" }) {
+  await assertPayNotLocked();
   if (input.outcome !== "held" && input.outcome !== "no_show") throw new TrackerError(400, "outcome must be held or no_show");
   await assertWriteBudget(actor.id);
 
@@ -117,6 +130,7 @@ async function assertWriteBudget(actorId: string) {
 // ── Whose booking is it ───────────────────────────────────────────────────────────────────────
 
 export async function decideCredit(actor: Actor, input: { appointmentId?: string; manualRowId?: string; setterUserId: string; decision: "claim" | "reject" }) {
+  await assertPayNotLocked();
   if (input.decision !== "claim" && input.decision !== "reject") throw new TrackerError(400, "decision must be claim or reject");
   if (!input.appointmentId === !input.manualRowId) throw new TrackerError(400, "Give exactly one of appointmentId or manualRowId");
   if (input.manualRowId) mustBeUuid(input.manualRowId);
@@ -172,6 +186,7 @@ export async function addManualBooking(actor: Actor, input: {
   callAt: string;
   appointmentId?: string | null;
 }) {
+  await assertPayNotLocked();
   mustActFor(actor, input.setterUserId);
   const [setter] = await db().select({ role: users.role }).from(users).where(eq(users.id, input.setterUserId)).limit(1);
   if (!setter || setter.role !== "setter") throw new TrackerError(409, "Only setters earn a booking bonus");
@@ -220,8 +235,12 @@ async function mustBeSubjectsRow(subjectUserId: string, rowKey: string) {
   if (!subject) throw new TrackerError(404, "No such person");
   if (rowKey.startsWith("p:")) {
     const id = mustBeUuid(rowKey.slice(2));
-    const [p] = await db().select({ id: proposals.id }).from(proposals)
-      .where(and(eq(proposals.id, id), sql`coalesce(${proposals.closedBy}, ${proposals.createdBy}) = ${subjectUserId}`)).limit(1);
+    // A deal row belongs to its CLOSER's sheet, or, for a setter, to the setter an admin assigned
+    // it to (correctness review B1: assigned-deal rows on a setter sheet could not be corrected).
+    const onSheet = subject.role === "setter"
+      ? and(eq(proposals.id, id), eq(proposals.setterMode, "assigned"), eq(proposals.setterUserId, subjectUserId))
+      : and(eq(proposals.id, id), sql`coalesce(${proposals.closedBy}, ${proposals.createdBy}) = ${subjectUserId}`);
+    const [p] = await db().select({ id: proposals.id }).from(proposals).where(onSheet).limit(1);
     if (!p) throw new TrackerError(403, "That deal is not on this tracker");
     return;
   }
@@ -250,6 +269,7 @@ async function rowMonth(rowKey: string): Promise<string | null> {
 }
 
 export async function setOverride(actor: Actor, input: { subjectUserId: string; rowKey: string; field: string; value: unknown }) {
+  await assertPayNotLocked();
   mustActFor(actor, input.subjectUserId);
   const { rowKey, field } = input;
   if (!/^(b|m|p):[\w-]{1,80}$/.test(rowKey)) throw new TrackerError(400, "Unknown row");
@@ -293,6 +313,7 @@ export async function setOverride(actor: Actor, input: { subjectUserId: string; 
 // ── The three numbers at the top of a month ──────────────────────────────────────────────────
 
 export async function setMonthSetting(actor: Actor, input: { userId: string; month: string; field: SettingsField; value: number | null }) {
+  await assertPayNotLocked();
   mustActFor(actor, input.userId);
   await mustBeOpenMonth(input.month);
   const { field, value } = input;

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { proposals, proposalInstalments } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth/session";
 import { dispatchWorkflowEvent } from "@/lib/workflows/triggers";
 import { normalizeDeliverables, normalizeContent } from "@/lib/proposals/normalize";
@@ -73,6 +73,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     const isDraft = existing.status === "draft";
+    // Set when archiving: the write must re-check "no money" in its WHERE (security review M1).
+    let archiveGuard = false;
     const ptype = existing.type === "project" ? "project" : "management";
 
     // Build the update from the allow-list only.
@@ -91,6 +93,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           const money = moneyFootprint(existing, insts.some((i) => i.status === "paid" || !!i.paidAt), insts.some((i) => !!i.invoice));
           if (money) return NextResponse.json({ error: `Can't archive: ${money}.` }, { status: 409 });
           set.statusBeforeArchive = existing.status;
+          archiveGuard = true;
         }
       } else if (key === "paidAt") {
         // Only alongside a paid transition — never a standalone paid-date stamp.
@@ -182,8 +185,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const [updated] = await db()
       .update(proposals)
       .set(set)
-      .where(eq(proposals.id, id))
+      .where(archiveGuard
+        ? and(eq(proposals.id, id), eq(proposals.status, existing.status), isNull(proposals.signedAt), isNull(proposals.paidAt),
+            isNull(proposals.stripeInvoiceId), isNull(proposals.stripeSubscriptionId))
+        : eq(proposals.id, id))
       .returning();
+    if (!updated) return NextResponse.json({ error: "It changed while saving (it may have just been signed or paid). Refresh and try again." }, { status: 409 });
 
     // Fire workflow trigger when manually marked as paid
     if (body.status === "paid") {
